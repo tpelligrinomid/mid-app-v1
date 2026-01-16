@@ -229,16 +229,36 @@ MiD operates multiple agencies, each with their own:
 
 ### Constraint: No Service Role Key
 
-**Lovable manages Supabase and does not expose the service role key.** All database operations must go through the authenticated user's client, which respects RLS policies.
+**Lovable manages Supabase and does not expose the service role key.** This requires a hybrid approach:
 
-This means:
-- Every database operation requires a valid user session
-- RLS policies must be configured to allow all required operations
-- Admin/team_member roles need sufficient permissions via RLS
+1. **RLS Policies** - For user-scoped operations (reading profiles, contracts, etc.)
+2. **Edge Functions** - For privileged operations (sync, OAuth tokens, cross-agency queries)
 
-### Decision: All Operations via Authenticated Client
+### Architecture: Hybrid RLS + Edge Functions
 
-**Choice:** Pass user's JWT to Supabase client, use that for ALL queries
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Render Backend                                  │
+└─────────────────────────────────────────────────────────────────────┘
+                    │                           │
+                    ▼                           ▼
+    ┌───────────────────────────┐   ┌───────────────────────────────┐
+    │   User's Supabase Client  │   │   Supabase Edge Functions     │
+    │   (RLS enforced)          │   │   (service role internally)   │
+    └───────────────────────────┘   └───────────────────────────────┘
+                    │                           │
+                    ▼                           ▼
+    ┌───────────────────────────┐   ┌───────────────────────────────┐
+    │  User-scoped reads:       │   │  Privileged operations:       │
+    │  • Own profile            │   │  • Store OAuth tokens         │
+    │  • Contracts (filtered)   │   │  • Sync data writes           │
+    │  • Notes, deliverables    │   │  • Cross-agency queries       │
+    └───────────────────────────┘   └───────────────────────────────┘
+```
+
+### Decision: RLS for User Operations
+
+**Choice:** Pass user's JWT to Supabase client for user-scoped queries
 
 **Implementation:**
 ```typescript
@@ -247,37 +267,86 @@ req.supabase = createClient(url, anonKey, {
   global: { headers: { Authorization: `Bearer ${token}` } }
 });
 
-// In route handlers - ALL operations use this client
+// In route handlers - RLS filters based on user's role
 const { data } = await req.supabase.from('contracts').select('*');
-// ^ RLS automatically filters based on user's role
+```
+
+### Decision: Edge Functions for Privileged Operations
+
+**Choice:** Call Supabase Edge Functions for operations requiring service role
+
+Edge Functions run inside Supabase and have access to the service role key internally. The Render backend calls them via HTTP.
+
+**Use Cases:**
+- Storing/retrieving OAuth tokens (QuickBooks, etc.)
+- Writing sync data (ClickUp tasks, QuickBooks invoices)
+- Cross-agency queries for admin dashboards
+- Any operation that needs to bypass RLS
+
+**Implementation:**
+```typescript
+// Backend calls Edge Function
+const response = await fetch(
+  `${SUPABASE_URL}/functions/v1/store-oauth-tokens`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ agencyId, tokens }),
+  }
+);
 ```
 
 ### Required RLS Policies
 
-For the backend to function, these RLS policies must exist:
+For user-scoped operations:
 
 | Table | Policy | Who |
 |-------|--------|-----|
 | `users` | SELECT own profile | `auth.uid() = auth_id` |
 | `contracts` | SELECT | admin/team_member: all; client: via user_contract_access |
-| `agencies` | SELECT, UPDATE | admin/team_member |
-| `pulse_sync_tokens` | SELECT, INSERT, UPDATE | admin/team_member |
+| `agencies` | SELECT | admin/team_member |
 | `user_contract_access` | SELECT | all authenticated users |
 
-### OAuth Callback Authentication
+**Note:** Tables like `pulse_sync_tokens` don't need user RLS policies - they're accessed only via Edge Functions.
 
-Since OAuth callbacks don't include auth headers (they're redirects from the provider), we handle authentication by encoding the user's JWT in the OAuth `state` parameter:
+### Edge Functions Required
+
+| Function | Purpose | Called By |
+|----------|---------|-----------|
+| `store-oauth-tokens` | Store QuickBooks/OAuth tokens | OAuth callback |
+| `get-oauth-tokens` | Retrieve tokens for sync | Sync operations |
+| `sync-clickup-data` | Write ClickUp tasks/time | ClickUp sync |
+| `sync-quickbooks-data` | Write invoices/payments | QuickBooks sync |
+| `sync-hubspot-data` | Write company data | HubSpot sync |
+
+### OAuth Callback Flow (Updated)
+
+OAuth callbacks use Edge Functions to store tokens:
 
 ```typescript
-// On OAuth start - encode user token in state
-const state = base64({ agencyId, userToken });
+// 1. OAuth callback receives tokens from provider
+const tokens = await oauthClient.createToken(callbackUrl);
 
-// On callback - decode and recreate client
-const { agencyId, userToken } = parseState(state);
-const supabase = createUserClient(userToken);
+// 2. Call Edge Function to store (has service role access)
+await fetch(`${SUPABASE_URL}/functions/v1/store-oauth-tokens`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    service: 'quickbooks',
+    agencyId,
+    tokens,
+  }),
+});
+
+// 3. Redirect to frontend
+res.redirect(`${FRONTEND_URL}/settings/integrations?success=true`);
 ```
-
-This ensures the callback can write to the database with the user's permissions.
 
 ---
 

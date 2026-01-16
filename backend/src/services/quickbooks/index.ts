@@ -1,5 +1,9 @@
 import OAuthClient from 'intuit-oauth';
-import { SupabaseClient } from '@supabase/supabase-js';
+import {
+  storeOAuthTokens,
+  getOAuthTokens,
+  OAuthTokens,
+} from '../../utils/edge-functions.js';
 
 // QuickBooks OAuth configuration (one app for all agencies)
 const oauthClient = new OAuthClient({
@@ -9,32 +13,17 @@ const oauthClient = new OAuthClient({
   redirectUri: process.env.QUICKBOOKS_REDIRECT_URI!,
 });
 
-export interface QuickBooksTokens {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-  x_refresh_token_expires_in: number;
+export interface QuickBooksTokens extends OAuthTokens {
   realm_id: string;
-  created_at: string;
-}
-
-/**
- * Generate token storage key for an agency
- * Each agency gets its own token entry: "quickbooks:agency_<id>"
- */
-function getTokenKey(agencyId: string): string {
-  return `quickbooks:agency_${agencyId}`;
 }
 
 /**
  * Generate the QuickBooks OAuth authorization URL
  * @param agencyId - The agency initiating the OAuth flow (passed in state)
- * @param userToken - The user's JWT token (included in state for callback auth)
  */
-export function getAuthorizationUrl(agencyId: string, userToken: string): string {
-  // Encode both agency ID and user token in state so callback can authenticate
-  const state = Buffer.from(JSON.stringify({ agencyId, userToken })).toString('base64');
+export function getAuthorizationUrl(agencyId: string): string {
+  // Encode agency ID in state for callback
+  const state = Buffer.from(JSON.stringify({ agencyId })).toString('base64');
 
   return oauthClient.authorizeUri({
     scope: [OAuthClient.scopes.Accounting],
@@ -44,12 +33,12 @@ export function getAuthorizationUrl(agencyId: string, userToken: string): string
 
 /**
  * Parse state parameter from OAuth callback
- * Returns agency ID and user token for re-authentication
+ * Returns agency ID
  */
-export function parseState(state: string): { agencyId: string; userToken: string } | null {
+export function parseState(state: string): { agencyId: string } | null {
   try {
     const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
-    if (decoded.agencyId && decoded.userToken) {
+    if (decoded.agencyId) {
       return decoded;
     }
     return null;
@@ -59,15 +48,13 @@ export function parseState(state: string): { agencyId: string; userToken: string
 }
 
 /**
- * Exchange authorization code for tokens and store them for a specific agency
+ * Exchange authorization code for tokens and store them via Edge Function
  * @param url - The callback URL with authorization code
  * @param agencyId - The agency to store tokens for
- * @param supabase - Authenticated Supabase client (must have write access to pulse_sync_tokens)
  */
 export async function handleCallback(
   url: string,
-  agencyId: string,
-  supabase: SupabaseClient
+  agencyId: string
 ): Promise<QuickBooksTokens> {
   const authResponse = await oauthClient.createToken(url);
   const tokens = authResponse.getJson();
@@ -82,85 +69,21 @@ export async function handleCallback(
     created_at: new Date().toISOString(),
   };
 
-  const tokenKey = getTokenKey(agencyId);
-
-  // Upsert tokens in pulse_sync_tokens table (keyed by agency)
-  // RLS must allow admin/team_member to write to this table
-  const { error } = await supabase
-    .from('pulse_sync_tokens')
-    .upsert(
-      {
-        service: tokenKey,
-        tokens: tokenData,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'service' }
-    );
-
-  if (error) {
-    console.error('Failed to store QuickBooks tokens:', error);
-    throw new Error('Failed to store tokens');
-  }
-
-  // Also update the agency record with the realm_id for reference
-  const { error: agencyError } = await supabase
-    .from('agencies')
-    .update({ quickbooks_realm_id: tokens.realmId })
-    .eq('id', agencyId);
-
-  if (agencyError) {
-    console.error('Failed to update agency with realm_id:', agencyError);
-    // Non-fatal - tokens are stored, just the agency reference failed
-  }
+  // Store tokens via Edge Function (uses service role internally)
+  await storeOAuthTokens('quickbooks', agencyId, tokenData);
 
   return tokenData;
 }
 
 /**
- * Get stored tokens from database for a specific agency
+ * Get stored tokens from database via Edge Function
  * @param agencyId - The agency to get tokens for
- * @param supabase - Authenticated Supabase client
  */
 export async function getStoredTokens(
-  agencyId: string,
-  supabase: SupabaseClient
+  agencyId: string
 ): Promise<QuickBooksTokens | null> {
-  const tokenKey = getTokenKey(agencyId);
-
-  const { data, error } = await supabase
-    .from('pulse_sync_tokens')
-    .select('tokens')
-    .eq('service', tokenKey)
-    .single();
-
-  if (error || !data) {
-    return null;
-  }
-
-  return data.tokens as QuickBooksTokens;
-}
-
-/**
- * Get all agencies with QuickBooks connections
- * @param supabase - Authenticated Supabase client
- */
-export async function getAllConnectedAgencies(
-  supabase: SupabaseClient
-): Promise<Array<{ id: string; name: string; realm_id: string }>> {
-  const { data, error } = await supabase
-    .from('agencies')
-    .select('id, name, quickbooks_realm_id')
-    .not('quickbooks_realm_id', 'is', null);
-
-  if (error || !data) {
-    return [];
-  }
-
-  return data.map(a => ({
-    id: a.id,
-    name: a.name,
-    realm_id: a.quickbooks_realm_id,
-  }));
+  const { tokens } = await getOAuthTokens('quickbooks', agencyId);
+  return tokens as QuickBooksTokens | null;
 }
 
 /**
@@ -173,15 +96,13 @@ function isTokenExpired(tokens: QuickBooksTokens): boolean {
 }
 
 /**
- * Refresh the access token if expired for a specific agency
+ * Refresh the access token if expired
  * @param agencyId - The agency to refresh tokens for
- * @param supabase - Authenticated Supabase client
  */
 export async function refreshTokenIfNeeded(
-  agencyId: string,
-  supabase: SupabaseClient
+  agencyId: string
 ): Promise<QuickBooksTokens | null> {
-  const tokens = await getStoredTokens(agencyId, supabase);
+  const tokens = await getStoredTokens(agencyId);
 
   if (!tokens) {
     console.error(`No QuickBooks tokens found for agency ${agencyId}`);
@@ -199,16 +120,15 @@ export async function refreshTokenIfNeeded(
     oauthClient.setToken({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
-      token_type: tokens.token_type,
+      token_type: tokens.token_type || 'Bearer',
       expires_in: tokens.expires_in,
-      x_refresh_token_expires_in: tokens.x_refresh_token_expires_in,
+      x_refresh_token_expires_in: tokens.x_refresh_token_expires_in || 0,
       realmId: tokens.realm_id,
     });
 
     const refreshResponse = await oauthClient.refresh();
     const newTokens = refreshResponse.getJson();
 
-    const tokenKey = getTokenKey(agencyId);
     const tokenData: QuickBooksTokens = {
       access_token: newTokens.access_token,
       refresh_token: newTokens.refresh_token,
@@ -219,21 +139,8 @@ export async function refreshTokenIfNeeded(
       created_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
-      .from('pulse_sync_tokens')
-      .upsert(
-        {
-          service: tokenKey,
-          tokens: tokenData,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'service' }
-      );
-
-    if (error) {
-      console.error('Failed to store refreshed tokens:', error);
-      throw new Error('Failed to store refreshed tokens');
-    }
+    // Store refreshed tokens via Edge Function
+    await storeOAuthTokens('quickbooks', agencyId, tokenData);
 
     console.log(`QuickBooks token refreshed successfully for agency ${agencyId}`);
     return tokenData;
@@ -244,16 +151,14 @@ export async function refreshTokenIfNeeded(
 }
 
 /**
- * Get a valid OAuth client ready for API calls for a specific agency
+ * Get a valid OAuth client ready for API calls
  * @param agencyId - The agency to get authenticated client for
- * @param supabase - Authenticated Supabase client
  * @returns Object with client and realmId, or null if not connected
  */
 export async function getAuthenticatedClient(
-  agencyId: string,
-  supabase: SupabaseClient
+  agencyId: string
 ): Promise<{ client: OAuthClient; realmId: string } | null> {
-  const tokens = await refreshTokenIfNeeded(agencyId, supabase);
+  const tokens = await refreshTokenIfNeeded(agencyId);
 
   if (!tokens) {
     return null;
@@ -262,9 +167,9 @@ export async function getAuthenticatedClient(
   oauthClient.setToken({
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
-    token_type: tokens.token_type,
+    token_type: tokens.token_type || 'Bearer',
     expires_in: tokens.expires_in,
-    x_refresh_token_expires_in: tokens.x_refresh_token_expires_in,
+    x_refresh_token_expires_in: tokens.x_refresh_token_expires_in || 0,
     realmId: tokens.realm_id,
   });
 
@@ -274,12 +179,17 @@ export async function getAuthenticatedClient(
 /**
  * Get the company (realm) ID for a specific agency
  * @param agencyId - The agency to get realm ID for
- * @param supabase - Authenticated Supabase client
  */
-export async function getRealmId(
-  agencyId: string,
-  supabase: SupabaseClient
-): Promise<string | null> {
-  const tokens = await getStoredTokens(agencyId, supabase);
+export async function getRealmId(agencyId: string): Promise<string | null> {
+  const tokens = await getStoredTokens(agencyId);
   return tokens?.realm_id || null;
+}
+
+/**
+ * Check if QuickBooks is connected for an agency
+ * @param agencyId - The agency to check
+ */
+export async function isConnected(agencyId: string): Promise<boolean> {
+  const tokens = await getStoredTokens(agencyId);
+  return tokens !== null;
 }

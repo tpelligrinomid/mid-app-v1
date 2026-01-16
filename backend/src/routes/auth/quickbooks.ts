@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware, requireRole } from '../../middleware/auth.js';
-import { createUserClient } from '../../utils/supabase.js';
 import * as quickBooksService from '../../services/quickbooks/index.js';
 
 const router = Router();
@@ -10,9 +9,6 @@ const router = Router();
  * Start QuickBooks OAuth flow for a specific agency
  * Query params: agencyId (required)
  * Only admin/team_member can initiate OAuth
- *
- * The user's JWT is encoded in the OAuth state so we can authenticate
- * the callback request (since OAuth callbacks don't have auth headers).
  */
 router.get(
   '/',
@@ -27,10 +23,7 @@ router.get(
         return;
       }
 
-      // Get the user's token from the auth header to include in state
-      const userToken = req.headers.authorization?.substring(7) || '';
-
-      const authUrl = quickBooksService.getAuthorizationUrl(agencyId, userToken);
+      const authUrl = quickBooksService.getAuthorizationUrl(agencyId);
       res.redirect(authUrl);
     } catch (error) {
       console.error('QuickBooks auth error:', error);
@@ -44,8 +37,7 @@ router.get(
  * QuickBooks OAuth callback
  * This endpoint is called by QuickBooks after user authorizes.
  *
- * Authentication is handled via the state parameter which contains
- * the user's JWT from when they initiated the flow.
+ * Token storage is handled via Edge Functions (no user auth needed here).
  */
 router.get('/callback', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -58,7 +50,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Extract agency ID and user token from state
+    // Extract agency ID from state
     const stateData = quickBooksService.parseState(state);
 
     if (!stateData) {
@@ -67,24 +59,13 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { agencyId, userToken } = stateData;
-
-    // Recreate authenticated Supabase client from the stored token
-    const supabase = createUserClient(userToken);
-
-    // Verify the token is still valid
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      console.error('QuickBooks callback - user token invalid or expired');
-      res.redirect(`${redirectUrl}/settings/integrations?quickbooks=error&reason=auth_expired`);
-      return;
-    }
+    const { agencyId } = stateData;
 
     // The full URL is needed for the OAuth library to parse
     const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
-    const tokens = await quickBooksService.handleCallback(fullUrl, agencyId, supabase);
+    // Handle callback - tokens stored via Edge Function (service role internally)
+    const tokens = await quickBooksService.handleCallback(fullUrl, agencyId);
 
     // Redirect to frontend with success message
     res.redirect(
@@ -115,14 +96,9 @@ router.get(
         return;
       }
 
-      if (!req.supabase) {
-        res.status(401).json({ error: 'Not authenticated' });
-        return;
-      }
+      const connected = await quickBooksService.isConnected(agencyId);
 
-      const tokens = await quickBooksService.getStoredTokens(agencyId, req.supabase);
-
-      if (!tokens) {
+      if (!connected) {
         res.json({
           connected: false,
           agencyId,
@@ -132,7 +108,7 @@ router.get(
       }
 
       // Check if we can refresh the token (validates it's still usable)
-      const validTokens = await quickBooksService.refreshTokenIfNeeded(agencyId, req.supabase);
+      const validTokens = await quickBooksService.refreshTokenIfNeeded(agencyId);
 
       res.json({
         connected: !!validTokens,
@@ -145,35 +121,6 @@ router.get(
     } catch (error) {
       console.error('QuickBooks status check error:', error);
       res.status(500).json({ error: 'Failed to check QuickBooks status' });
-    }
-  }
-);
-
-/**
- * GET /api/auth/quickbooks/connections
- * List all agencies with QuickBooks connections
- * Admin/team_member only
- */
-router.get(
-  '/connections',
-  authMiddleware,
-  requireRole('admin', 'team_member'),
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      if (!req.supabase) {
-        res.status(401).json({ error: 'Not authenticated' });
-        return;
-      }
-
-      const agencies = await quickBooksService.getAllConnectedAgencies(req.supabase);
-
-      res.json({
-        connections: agencies,
-        count: agencies.length,
-      });
-    } catch (error) {
-      console.error('QuickBooks connections error:', error);
-      res.status(500).json({ error: 'Failed to fetch QuickBooks connections' });
     }
   }
 );

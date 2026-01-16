@@ -224,7 +224,11 @@ Lovable auto-creates the Supabase project when you start the frontend. After tha
 1. **Run schema.sql** in the Supabase SQL Editor to create all tables
 2. **Enable Google OAuth** in Authentication → Providers
 3. **Configure redirect URLs** for your Lovable app domain
-4. **Set up RLS policies** - Critical for backend to function:
+4. **Deploy Edge Functions** - See `edge-functions.md` for full code:
+   - `store-oauth-tokens` - Stores QuickBooks/OAuth tokens
+   - `get-oauth-tokens` - Retrieves OAuth tokens
+   - `sync-write` - Writes sync data (tasks, invoices)
+5. **Set up RLS policies** - For user-scoped operations:
 
 ```sql
 -- Users can read their own profile
@@ -272,14 +276,15 @@ CREATE POLICY "Internal users can manage agencies" ON agencies
 2. ⬜ **Get Supabase credentials** from Lovable dashboard or Supabase dashboard
 3. ⬜ **Run schema.sql** in Supabase SQL Editor
 4. ⬜ **Set up RLS policies** in Supabase (see section 3)
-5. ✅ Backend already built in /backend folder
-6. ⬜ **Deploy backend to Render** with Supabase credentials + Lovable URL
-7. ⬜ **Add VITE_API_URL** to Lovable env vars pointing to Render backend
-8. ⬜ Test authentication flow end-to-end
-9. ⬜ Build Pulse module features
-10. ⬜ Build Compass module features
-11. ⬜ Connect QuickBooks for each agency
-12. ⬜ Data migration from Pulse v1
+5. ⬜ **Deploy Edge Functions** in Supabase (see `edge-functions.md`)
+6. ✅ Backend already built in /backend folder
+7. ⬜ **Deploy backend to Render** with Supabase credentials + Lovable URL
+8. ⬜ **Add VITE_API_URL** to Lovable env vars pointing to Render backend
+9. ⬜ Test authentication flow end-to-end
+10. ⬜ Build Pulse module features
+11. ⬜ Build Compass module features
+12. ⬜ Connect QuickBooks for each agency
+13. ⬜ Data migration from Pulse v1
 
 ---
 

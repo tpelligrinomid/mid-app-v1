@@ -217,9 +217,9 @@ See `technical-decisions.md` for full details.
 
 ---
 
-## 3. Supabase Setup
+## 3. Supabase Setup (After Lovable Creates Project)
 
-Lovable creates and manages the Supabase project. You'll need to:
+Lovable auto-creates the Supabase project when you start the frontend. After that, you'll need to:
 
 1. **Run schema.sql** in the Supabase SQL Editor to create all tables
 2. **Enable Google OAuth** in Authentication → Providers
@@ -266,13 +266,15 @@ CREATE POLICY "Internal users can manage agencies" ON agencies
 
 ## Build Order
 
-1. ✅ Create Supabase project (via Lovable)
-2. ⬜ Run schema.sql in Supabase
-3. ⬜ Set up RLS policies in Supabase
-4. ⬜ Create Lovable frontend (use prompt #1)
+**Important:** Lovable auto-creates the Supabase project via its integration. You won't have Supabase credentials until after step 1.
+
+1. ⬜ **Create Lovable frontend** (use prompt #1) → This creates Supabase project
+2. ⬜ **Get Supabase credentials** from Lovable dashboard or Supabase dashboard
+3. ⬜ **Run schema.sql** in Supabase SQL Editor
+4. ⬜ **Set up RLS policies** in Supabase (see section 3)
 5. ✅ Backend already built in /backend folder
-6. ⬜ Deploy backend to Render
-7. ⬜ Add FRONTEND_URL to Render env vars (your Lovable URL)
+6. ⬜ **Deploy backend to Render** with Supabase credentials + Lovable URL
+7. ⬜ **Add VITE_API_URL** to Lovable env vars pointing to Render backend
 8. ⬜ Test authentication flow end-to-end
 9. ⬜ Build Pulse module features
 10. ⬜ Build Compass module features

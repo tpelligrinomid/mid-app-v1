@@ -4,10 +4,14 @@
  * Edge Functions handle privileged operations that require service role access.
  * The Render backend calls these functions via HTTP - they run inside Supabase
  * and have internal access to the service role key.
+ *
+ * Authentication: Uses a shared secret (EDGE_FUNCTION_SECRET) to verify
+ * requests are coming from our Render backend.
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
+const EDGE_FUNCTION_SECRET = process.env.EDGE_FUNCTION_SECRET!;
 
 export interface EdgeFunctionError {
   error: string;
@@ -26,6 +30,7 @@ export async function callEdgeFunction<T>(
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'x-edge-secret': EDGE_FUNCTION_SECRET,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),

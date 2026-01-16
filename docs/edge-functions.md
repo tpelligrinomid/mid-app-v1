@@ -6,6 +6,27 @@ Edge Functions handle privileged database operations that require service role a
 
 Lovable manages the Supabase project and doesn't expose the service role key. Edge Functions run inside Supabase and have internal access to the service role, allowing them to bypass RLS for admin operations.
 
+## Security: Shared Secret
+
+Edge Functions validate requests using a shared secret (`EDGE_FUNCTION_SECRET`) to ensure only our Render backend can call them.
+
+### Setup
+
+1. **Generate a secret:**
+   ```bash
+   openssl rand -base64 32
+   ```
+   Example output: `K7gNj2xF4mP9qR3sT6vW8yB1cD5eH0jL`
+
+2. **Store in Render** (Environment Variables):
+   | Variable | Value |
+   |----------|-------|
+   | `EDGE_FUNCTION_SECRET` | `K7gNj2xF4mP9qR3sT6vW8yB1cD5eH0jL` |
+
+3. **Store in Supabase** (Edge Function Secrets):
+   - Go to Supabase Dashboard → Edge Functions → Secrets
+   - Add: `EDGE_FUNCTION_SECRET` = `K7gNj2xF4mP9qR3sT6vW8yB1cD5eH0jL`
+
 ## Function List
 
 | Function | Purpose | Endpoint |
@@ -31,7 +52,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-edge-secret',
 }
 
 serve(async (req) => {
@@ -41,6 +62,15 @@ serve(async (req) => {
   }
 
   try {
+    // Validate shared secret
+    const secret = req.headers.get('x-edge-secret')
+    if (secret !== Deno.env.get('EDGE_FUNCTION_SECRET')) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const { service, agencyId, tokens } = await req.json()
 
     if (!service || !agencyId || !tokens) {
@@ -100,29 +130,6 @@ serve(async (req) => {
 })
 ```
 
-### Backend Usage
-
-```typescript
-await fetch(`${SUPABASE_URL}/functions/v1/store-oauth-tokens`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    service: 'quickbooks',
-    agencyId: 'agency-uuid',
-    tokens: {
-      access_token: '...',
-      refresh_token: '...',
-      realm_id: '123456',
-      expires_in: 3600,
-      created_at: new Date().toISOString(),
-    },
-  }),
-});
-```
-
 ---
 
 ## 2. get-oauth-tokens
@@ -138,7 +145,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-edge-secret',
 }
 
 serve(async (req) => {
@@ -147,6 +154,15 @@ serve(async (req) => {
   }
 
   try {
+    // Validate shared secret
+    const secret = req.headers.get('x-edge-secret')
+    if (secret !== Deno.env.get('EDGE_FUNCTION_SECRET')) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const { service, agencyId } = await req.json()
 
     if (!service || !agencyId) {
@@ -190,24 +206,6 @@ serve(async (req) => {
 })
 ```
 
-### Backend Usage
-
-```typescript
-const response = await fetch(`${SUPABASE_URL}/functions/v1/get-oauth-tokens`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    service: 'quickbooks',
-    agencyId: 'agency-uuid',
-  }),
-});
-
-const { tokens } = await response.json();
-```
-
 ---
 
 ## 3. sync-write
@@ -223,7 +221,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-edge-secret',
 }
 
 serve(async (req) => {
@@ -232,6 +230,15 @@ serve(async (req) => {
   }
 
   try {
+    // Validate shared secret
+    const secret = req.headers.get('x-edge-secret')
+    if (secret !== Deno.env.get('EDGE_FUNCTION_SECRET')) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const { table, data, onConflict } = await req.json()
 
     if (!table || !data) {
@@ -289,27 +296,6 @@ serve(async (req) => {
 })
 ```
 
-### Backend Usage
-
-```typescript
-// Write ClickUp tasks
-await fetch(`${SUPABASE_URL}/functions/v1/sync-write`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    table: 'pulse_tasks',
-    data: [
-      { id: 'task-1', name: 'Task 1', contract_id: '...', ... },
-      { id: 'task-2', name: 'Task 2', contract_id: '...', ... },
-    ],
-    onConflict: 'id', // Upsert based on ID
-  }),
-});
-```
-
 ---
 
 ## Deploying Edge Functions
@@ -321,6 +307,7 @@ await fetch(`${SUPABASE_URL}/functions/v1/sync-write`, {
 3. Name it (e.g., `store-oauth-tokens`)
 4. Paste the code
 5. Deploy
+6. **Add the secret:** Go to Edge Functions → Secrets → Add `EDGE_FUNCTION_SECRET`
 
 ### Via Supabase CLI (if available)
 
@@ -332,69 +319,31 @@ supabase functions deploy sync-write
 
 ---
 
-## Security Notes
+## Security Summary
 
-1. **Edge Functions use the anon key for authorization** - This verifies the request comes from an authorized source
-2. **Service role is only used internally** - The Edge Function creates its own service role client
-3. **Table allowlist** - The `sync-write` function only allows writing to specific tables
-4. **No user context needed** - These are system operations, not user-scoped
+| Layer | Protection |
+|-------|------------|
+| **Shared Secret** | `x-edge-secret` header validates request is from Render backend |
+| **Table Allowlist** | `sync-write` only allows specific tables |
+| **Service Role** | Only used internally by Edge Functions, never exposed |
+| **CORS** | Configured for cross-origin requests |
 
 ---
 
-## Backend Utility
+## Environment Variables Summary
 
-Add this utility to the backend for calling Edge Functions:
+### Render Backend
 
-```typescript
-// src/utils/edge-functions.ts
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
+| Variable | Description |
+|----------|-------------|
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `EDGE_FUNCTION_SECRET` | Shared secret for Edge Function auth |
 
-export async function callEdgeFunction<T>(
-  functionName: string,
-  payload: Record<string, unknown>
-): Promise<T> {
-  const response = await fetch(
-    `${SUPABASE_URL}/functions/v1/${functionName}`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    }
-  );
+### Supabase Edge Functions (Secrets)
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || `Edge function ${functionName} failed`);
-  }
+| Secret | Description |
+|--------|-------------|
+| `EDGE_FUNCTION_SECRET` | Same shared secret as Render |
 
-  return response.json();
-}
-
-// Typed helpers
-export async function storeOAuthTokens(
-  service: string,
-  agencyId: string,
-  tokens: Record<string, unknown>
-): Promise<{ success: boolean }> {
-  return callEdgeFunction('store-oauth-tokens', { service, agencyId, tokens });
-}
-
-export async function getOAuthTokens(
-  service: string,
-  agencyId: string
-): Promise<{ tokens: Record<string, unknown> | null }> {
-  return callEdgeFunction('get-oauth-tokens', { service, agencyId });
-}
-
-export async function syncWrite(
-  table: string,
-  data: Record<string, unknown> | Record<string, unknown>[],
-  onConflict?: string
-): Promise<{ success: boolean; count: number }> {
-  return callEdgeFunction('sync-write', { table, data, onConflict });
-}
-```
+Note: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are automatically available to Edge Functions.

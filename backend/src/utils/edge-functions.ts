@@ -1,53 +1,211 @@
 /**
- * Utility for calling Supabase Edge Functions
+ * Utility for calling Supabase Edge Functions via the backend-proxy
  *
- * Edge Functions handle privileged operations that require service role access.
- * The Render backend calls these functions via HTTP - they run inside Supabase
- * and have internal access to the service role key.
+ * The backend-proxy is a generic Edge Function that handles all database
+ * operations using the service role. It validates requests using a shared
+ * secret (EDGE_FUNCTION_SECRET) sent via the x-backend-key header.
  *
- * Authentication: Uses a shared secret (EDGE_FUNCTION_SECRET) to verify
- * requests are coming from our Render backend.
+ * Operations supported: select, insert, update, upsert, delete, rpc
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
 const EDGE_FUNCTION_SECRET = process.env.EDGE_FUNCTION_SECRET!;
 
-export interface EdgeFunctionError {
-  error: string;
+const PROXY_ENDPOINT = `${SUPABASE_URL}/functions/v1/backend-proxy`;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface FilterValue {
+  eq?: unknown;
+  neq?: unknown;
+  gt?: unknown;
+  gte?: unknown;
+  lt?: unknown;
+  lte?: unknown;
+  like?: string;
+  ilike?: string;
+  in?: unknown[];
+  is?: null | boolean;
 }
 
-/**
- * Call a Supabase Edge Function
- */
-export async function callEdgeFunction<T>(
-  functionName: string,
-  payload: Record<string, unknown>
-): Promise<T> {
-  const response = await fetch(
-    `${SUPABASE_URL}/functions/v1/${functionName}`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'x-edge-secret': EDGE_FUNCTION_SECRET,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    }
-  );
+type Filters = Record<string, unknown | FilterValue>;
 
-  const data = await response.json();
+interface QueryOptions {
+  count?: 'exact' | 'planned' | 'estimated';
+  onConflict?: string;
+  returning?: 'minimal' | 'representation';
+  single?: boolean;
+  limit?: number;
+  offset?: number;
+  order?: Array<{ column: string; ascending?: boolean }>;
+}
 
-  if (!response.ok) {
-    throw new Error(data.error || `Edge function ${functionName} failed`);
-  }
+interface ProxyRequest {
+  operation: 'select' | 'insert' | 'update' | 'upsert' | 'delete' | 'rpc';
+  table?: string;
+  data?: Record<string, unknown> | Record<string, unknown>[];
+  filters?: Filters;
+  select?: string;
+  rpc_name?: string;
+  rpc_params?: Record<string, unknown>;
+  options?: QueryOptions;
+}
 
-  return data as T;
+interface ProxyResponse<T = unknown> {
+  data: T;
+  count?: number | null;
+  error?: { message: string; code?: string };
 }
 
 // ============================================================================
-// OAuth Token Functions
+// Core Proxy Function
+// ============================================================================
+
+/**
+ * Call the backend-proxy Edge Function
+ */
+async function callProxy<T>(request: ProxyRequest): Promise<ProxyResponse<T>> {
+  const response = await fetch(PROXY_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-backend-key': EDGE_FUNCTION_SECRET,
+    },
+    body: JSON.stringify(request),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || result.error) {
+    throw new Error(result.error?.message || result.error || 'Proxy request failed');
+  }
+
+  return result as ProxyResponse<T>;
+}
+
+// ============================================================================
+// Query Helpers
+// ============================================================================
+
+/**
+ * SELECT query
+ */
+export async function select<T = unknown>(
+  table: string,
+  options?: {
+    select?: string;
+    filters?: Filters;
+    order?: Array<{ column: string; ascending?: boolean }>;
+    limit?: number;
+    offset?: number;
+    single?: boolean;
+  }
+): Promise<T> {
+  const { data } = await callProxy<T>({
+    operation: 'select',
+    table,
+    select: options?.select,
+    filters: options?.filters,
+    options: {
+      order: options?.order,
+      limit: options?.limit,
+      offset: options?.offset,
+      single: options?.single,
+    },
+  });
+  return data;
+}
+
+/**
+ * INSERT query
+ */
+export async function insert<T = unknown>(
+  table: string,
+  data: Record<string, unknown> | Record<string, unknown>[],
+  options?: { select?: string }
+): Promise<T> {
+  const result = await callProxy<T>({
+    operation: 'insert',
+    table,
+    data,
+    select: options?.select,
+  });
+  return result.data;
+}
+
+/**
+ * UPDATE query
+ */
+export async function update<T = unknown>(
+  table: string,
+  data: Record<string, unknown>,
+  filters: Filters,
+  options?: { select?: string }
+): Promise<T> {
+  const result = await callProxy<T>({
+    operation: 'update',
+    table,
+    data,
+    filters,
+    select: options?.select,
+  });
+  return result.data;
+}
+
+/**
+ * UPSERT query (insert or update on conflict)
+ */
+export async function upsert<T = unknown>(
+  table: string,
+  data: Record<string, unknown> | Record<string, unknown>[],
+  options?: { onConflict?: string; select?: string }
+): Promise<T> {
+  const result = await callProxy<T>({
+    operation: 'upsert',
+    table,
+    data,
+    select: options?.select,
+    options: { onConflict: options?.onConflict },
+  });
+  return result.data;
+}
+
+/**
+ * DELETE query
+ */
+export async function del<T = unknown>(
+  table: string,
+  filters: Filters,
+  options?: { select?: string }
+): Promise<T> {
+  const result = await callProxy<T>({
+    operation: 'delete',
+    table,
+    filters,
+    select: options?.select,
+  });
+  return result.data;
+}
+
+/**
+ * RPC (stored procedure) call
+ */
+export async function rpc<T = unknown>(
+  functionName: string,
+  params?: Record<string, unknown>
+): Promise<T> {
+  const result = await callProxy<T>({
+    operation: 'rpc',
+    rpc_name: functionName,
+    rpc_params: params,
+  });
+  return result.data;
+}
+
+// ============================================================================
+// OAuth Token Helpers
 // ============================================================================
 
 export interface OAuthTokens {
@@ -67,8 +225,27 @@ export async function storeOAuthTokens(
   service: string,
   agencyId: string,
   tokens: OAuthTokens
-): Promise<{ success: boolean }> {
-  return callEdgeFunction('store-oauth-tokens', { service, agencyId, tokens });
+): Promise<void> {
+  const tokenKey = `${service}:agency_${agencyId}`;
+
+  await upsert(
+    'pulse_sync_tokens',
+    {
+      service: tokenKey,
+      tokens: tokens,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'service' }
+  );
+
+  // If QuickBooks, also update agency with realm_id
+  if (service === 'quickbooks' && tokens.realm_id) {
+    await update(
+      'agencies',
+      { quickbooks_realm_id: tokens.realm_id },
+      { id: agencyId }
+    );
+  }
 }
 
 /**
@@ -77,65 +254,66 @@ export async function storeOAuthTokens(
 export async function getOAuthTokens(
   service: string,
   agencyId: string
-): Promise<{ tokens: OAuthTokens | null; updated_at?: string }> {
+): Promise<OAuthTokens | null> {
+  const tokenKey = `${service}:agency_${agencyId}`;
+
   try {
-    return await callEdgeFunction('get-oauth-tokens', { service, agencyId });
-  } catch (error) {
-    // Token not found is not an error, just return null
-    return { tokens: null };
+    const result = await select<{ tokens: OAuthTokens }>(
+      'pulse_sync_tokens',
+      {
+        select: 'tokens',
+        filters: { service: tokenKey },
+        single: true,
+      }
+    );
+    return result?.tokens || null;
+  } catch {
+    return null;
   }
 }
 
 // ============================================================================
-// Sync Write Functions
+// Sync Helpers
 // ============================================================================
 
 /**
- * Write sync data to the database (tasks, invoices, time entries, etc.)
- * Uses service role internally to bypass RLS.
- */
-export async function syncWrite(
-  table: string,
-  data: Record<string, unknown> | Record<string, unknown>[],
-  onConflict?: string
-): Promise<{ success: boolean; count: number }> {
-  return callEdgeFunction('sync-write', { table, data, onConflict });
-}
-
-/**
- * Write ClickUp tasks
+ * Sync ClickUp tasks (upsert by clickup_task_id)
  */
 export async function syncClickUpTasks(
   tasks: Record<string, unknown>[]
-): Promise<{ success: boolean; count: number }> {
-  return syncWrite('pulse_tasks', tasks, 'clickup_id');
+): Promise<{ count: number }> {
+  await upsert('pulse_tasks', tasks, { onConflict: 'clickup_task_id' });
+  return { count: tasks.length };
 }
 
 /**
- * Write ClickUp time entries
+ * Sync ClickUp time entries
  */
 export async function syncClickUpTimeEntries(
   entries: Record<string, unknown>[]
-): Promise<{ success: boolean; count: number }> {
-  return syncWrite('pulse_time_entries', entries, 'clickup_id');
+): Promise<{ count: number }> {
+  await upsert('pulse_time_entries', entries, { onConflict: 'clickup_id' });
+  return { count: entries.length };
 }
 
 /**
- * Write QuickBooks invoices
+ * Sync QuickBooks invoices
  */
 export async function syncQuickBooksInvoices(
   invoices: Record<string, unknown>[]
-): Promise<{ success: boolean; count: number }> {
-  return syncWrite('pulse_invoices', invoices, 'quickbooks_id');
+): Promise<{ count: number }> {
+  await upsert('pulse_invoices', invoices, { onConflict: 'quickbooks_id' });
+  return { count: invoices.length };
 }
 
 /**
- * Write QuickBooks payments
+ * Sync QuickBooks payments
  */
 export async function syncQuickBooksPayments(
   payments: Record<string, unknown>[]
-): Promise<{ success: boolean; count: number }> {
-  return syncWrite('pulse_payments', payments, 'quickbooks_id');
+): Promise<{ count: number }> {
+  await upsert('pulse_payments', payments, { onConflict: 'quickbooks_id' });
+  return { count: payments.length };
 }
 
 /**
@@ -146,8 +324,8 @@ export async function logSync(
   agencyId: string,
   status: 'success' | 'error',
   details: Record<string, unknown>
-): Promise<{ success: boolean; count: number }> {
-  return syncWrite('pulse_sync_logs', {
+): Promise<void> {
+  await insert('pulse_sync_logs', {
     service,
     agency_id: agencyId,
     status,

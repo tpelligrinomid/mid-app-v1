@@ -76,13 +76,13 @@ async function callProxy<T>(request: ProxyRequest): Promise<ProxyResponse<T>> {
     body: JSON.stringify(request),
   });
 
-  const result = await response.json();
+  const result = await response.json() as ProxyResponse<T>;
 
   if (!response.ok || result.error) {
-    throw new Error(result.error?.message || result.error || 'Proxy request failed');
+    throw new Error(result.error?.message || String(result.error) || 'Proxy request failed');
   }
 
-  return result as ProxyResponse<T>;
+  return result;
 }
 
 // ============================================================================

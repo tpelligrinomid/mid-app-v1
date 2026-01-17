@@ -82,7 +82,7 @@ export async function handleCallback(
 export async function getStoredTokens(
   agencyId: string
 ): Promise<QuickBooksTokens | null> {
-  const { tokens } = await getOAuthTokens('quickbooks', agencyId);
+  const tokens = await getOAuthTokens('quickbooks', agencyId);
   return tokens as QuickBooksTokens | null;
 }
 

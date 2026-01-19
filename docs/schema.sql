@@ -25,6 +25,17 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";       -- For gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS "vector";         -- For AI embeddings (if using pgvector)
 
 -- ============================================================================
+-- ENUM TYPES
+-- ============================================================================
+
+CREATE TYPE contract_status_enum AS ENUM ('pending', 'active', 'canceled', 'inactive');
+CREATE TYPE contract_type_enum AS ENUM ('recurring', 'project');
+CREATE TYPE payment_type_enum AS ENUM ('invoice', 'credit_card');
+CREATE TYPE engagement_type_enum AS ENUM ('strategic', 'tactical');
+CREATE TYPE customer_display_type_enum AS ENUM ('points', 'hours', 'none');
+CREATE TYPE priority_tier AS ENUM ('Tier 1', 'Tier 2', 'Tier 3', 'Tier 4');
+
+-- ============================================================================
 -- CORE TABLES (Shared by Pulse and Compass)
 -- ============================================================================
 
@@ -80,17 +91,24 @@ CREATE TABLE contracts (
     account_id uuid REFERENCES accounts(account_id),
     external_id text UNIQUE, -- For external references (e.g., "MID-2025-001")
     contract_name text NOT NULL,
-    contract_status text NOT NULL, -- 'pending', 'active', 'canceled', 'inactive'
-    contract_type text NOT NULL, -- 'recurring', 'project'
-    engagement_type text, -- 'strategic', 'tactical'
+    contract_status contract_status_enum NOT NULL,
+    contract_type contract_type_enum NOT NULL,
+    engagement_type engagement_type_enum,
     -- Financial fields
     amount numeric, -- Monthly recurring revenue
-    payment_type text, -- 'invoice', 'credit_card'
+    payment_type payment_type_enum,
     monthly_points_allotment integer, -- For points burden calculation
+    dollar_per_hour numeric, -- Hourly billing rate
     -- Date fields
     contract_start_date date NOT NULL,
     contract_end_date date,
     contract_renewal_date date,
+    next_invoice_date date, -- Next scheduled invoice date
+    -- Term fields
+    initial_term_length integer, -- Initial term length in months
+    subsequent_term_length integer, -- Renewal term length in months
+    notice_period integer, -- Cancellation notice period in days
+    autorenewal boolean DEFAULT false, -- Whether contract auto-renews
     -- Assignment fields (references ClickUp users)
     account_manager text REFERENCES pulse_clickup_users(id),
     team_manager text REFERENCES pulse_clickup_users(id),
@@ -98,10 +116,15 @@ CREATE TABLE contracts (
     clickup_folder_id text,
     quickbooks_customer_id text,
     quickbooks_business_unit_id text,
+    deal_id text, -- HubSpot deal reference
+    slack_channel_internal text, -- Internal team Slack channel ID
+    slack_channel_external text, -- External/client Slack channel ID
     -- Display settings
-    customer_display_type text, -- 'points', 'hours', 'none'
+    customer_display_type customer_display_type_enum,
     hosting boolean DEFAULT false, -- Hosting-only contracts (excluded from some views)
-    priority text, -- 'Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'
+    priority priority_tier,
+    -- Description
+    contract_description text, -- Description of the contract
     -- Timestamps
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
@@ -696,7 +719,22 @@ SELECT
     c.team_manager,
     c.contract_status,
     c.amount as mrr,
+    c.dollar_per_hour,
     c.monthly_points_allotment,
+    c.payment_type,
+    c.contract_start_date,
+    c.contract_end_date,
+    c.contract_renewal_date,
+    c.next_invoice_date,
+    c.initial_term_length,
+    c.subsequent_term_length,
+    c.notice_period,
+    c.autorenewal,
+    c.deal_id,
+    c.slack_channel_internal,
+    c.slack_channel_external,
+    c.customer_display_type,
+    c.contract_description,
     cps.points_purchased,
     cps.points_credited,
     cps.points_delivered,

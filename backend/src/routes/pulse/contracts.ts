@@ -1,4 +1,11 @@
 import { Router, Request, Response } from 'express';
+import {
+  validateContractEnums,
+  CreateContractDTO,
+  UpdateContractDTO,
+  ContractListItem,
+  ContractWithAccount
+} from '../../types/contracts';
 
 const router = Router();
 
@@ -18,13 +25,16 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     let query = req.supabase
       .from('contracts')
       .select(`
-        id,
-        name,
-        status,
-        start_date,
-        end_date,
-        monthly_retainer,
-        account:accounts(id, name),
+        contract_id,
+        contract_name,
+        contract_status,
+        contract_type,
+        engagement_type,
+        priority,
+        amount,
+        contract_start_date,
+        contract_end_date,
+        account:accounts(account_id, name),
         created_at,
         updated_at
       `)
@@ -44,7 +54,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
         return;
       }
 
-      query = query.in('id', contractIds);
+      query = query.in('contract_id', contractIds);
     }
 
     const { data: contracts, error } = await query;
@@ -59,6 +69,144 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error('Error fetching contracts:', error);
     res.status(500).json({ error: 'Failed to fetch contracts' });
+  }
+});
+
+/**
+ * POST /api/contracts/import
+ * Bulk import contracts with upsert logic
+ * - admin/team_member only
+ * - Matches existing contracts by external_id or contract_name
+ * - Updates if found, inserts if not
+ */
+router.post('/import', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // Only admin and team_member can import contracts
+    if (req.user.role === 'client') {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+      return;
+    }
+
+    const { contracts } = req.body as { contracts: CreateContractDTO[] };
+
+    if (!contracts || !Array.isArray(contracts) || contracts.length === 0) {
+      res.status(400).json({ error: 'contracts array is required and must not be empty' });
+      return;
+    }
+
+    const result = {
+      inserted: 0,
+      updated: 0,
+      errors: [] as string[]
+    };
+
+    for (const contract of contracts) {
+      // Validate required fields
+      if (!contract.contract_name) {
+        result.errors.push(`Missing contract_name for contract`);
+        continue;
+      }
+
+      if (!contract.contract_status) {
+        result.errors.push(`Missing contract_status for ${contract.contract_name}`);
+        continue;
+      }
+
+      if (!contract.contract_type) {
+        result.errors.push(`Missing contract_type for ${contract.contract_name}`);
+        continue;
+      }
+
+      if (!contract.contract_start_date) {
+        result.errors.push(`Missing contract_start_date for ${contract.contract_name}`);
+        continue;
+      }
+
+      // Validate enum values
+      const validationErrors = validateContractEnums(contract);
+      if (validationErrors.length > 0) {
+        result.errors.push(`Invalid enum values for ${contract.contract_name}: ${validationErrors.join(', ')}`);
+        continue;
+      }
+
+      try {
+        // Check if contract exists by external_id or contract_name
+        let existingQuery = req.supabase
+          .from('contracts')
+          .select('contract_id')
+          .limit(1);
+
+        if (contract.external_id) {
+          existingQuery = existingQuery.or(`external_id.eq.${contract.external_id},contract_name.eq.${contract.contract_name}`);
+        } else {
+          existingQuery = existingQuery.eq('contract_name', contract.contract_name);
+        }
+
+        const { data: existing } = await existingQuery.maybeSingle();
+
+        // Prepare contract data (exclude undefined values)
+        const contractData: Record<string, unknown> = {};
+        const fields = [
+          'contract_name', 'contract_status', 'contract_type', 'contract_start_date',
+          'contract_end_date', 'contract_renewal_date', 'contract_description', 'amount',
+          'quickbooks_customer_id', 'quickbooks_business_unit_id', 'external_id', 'deal_id',
+          'engagement_type', 'payment_type', 'monthly_points_allotment', 'priority',
+          'customer_display_type', 'hosting', 'account_manager', 'team_manager',
+          'clickup_folder_id', 'slack_channel_internal', 'slack_channel_external',
+          'dollar_per_hour', 'autorenewal', 'initial_term_length', 'subsequent_term_length',
+          'notice_period', 'next_invoice_date', 'account_id'
+        ];
+
+        for (const field of fields) {
+          const contractRecord = contract as unknown as Record<string, unknown>;
+          if (contractRecord[field] !== undefined) {
+            contractData[field] = contractRecord[field];
+          }
+        }
+
+        if (existing) {
+          // Update existing contract
+          contractData.updated_at = new Date().toISOString();
+          const { error } = await req.supabase
+            .from('contracts')
+            .update(contractData)
+            .eq('contract_id', existing.contract_id);
+
+          if (error) {
+            result.errors.push(`Failed to update ${contract.contract_name}: ${error.message}`);
+          } else {
+            result.updated++;
+          }
+        } else {
+          // Insert new contract
+          const { error } = await req.supabase
+            .from('contracts')
+            .insert(contractData);
+
+          if (error) {
+            result.errors.push(`Failed to insert ${contract.contract_name}: ${error.message}`);
+          } else {
+            result.inserted++;
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        result.errors.push(`Error processing ${contract.contract_name}: ${message}`);
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error importing contracts:', error);
+    res.status(500).json({ error: 'Failed to import contracts' });
   }
 });
 
@@ -98,27 +246,45 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     const { data: contract, error } = await req.supabase
       .from('contracts')
       .select(`
-        id,
-        name,
-        status,
-        start_date,
-        end_date,
-        monthly_retainer,
+        contract_id,
+        external_id,
+        contract_name,
+        contract_status,
+        contract_type,
+        engagement_type,
+        amount,
+        payment_type,
+        monthly_points_allotment,
+        dollar_per_hour,
+        contract_start_date,
+        contract_end_date,
+        contract_renewal_date,
+        next_invoice_date,
+        initial_term_length,
+        subsequent_term_length,
+        notice_period,
+        autorenewal,
+        account_manager,
+        team_manager,
         clickup_folder_id,
-        clickup_list_id,
         quickbooks_customer_id,
-        hubspot_company_id,
-        compass_enabled,
-        enabled_apps,
+        quickbooks_business_unit_id,
+        deal_id,
+        slack_channel_internal,
+        slack_channel_external,
+        customer_display_type,
+        hosting,
+        priority,
+        contract_description,
         account:accounts(
-          id,
+          account_id,
           name,
-          hubspot_id
+          hubspot_account_id
         ),
         created_at,
         updated_at
       `)
-      .eq('id', id)
+      .eq('contract_id', id)
       .single();
 
     if (error) {
@@ -135,6 +301,178 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error('Error fetching contract:', error);
     res.status(500).json({ error: 'Failed to fetch contract' });
+  }
+});
+
+/**
+ * POST /api/contracts
+ * Create a new contract
+ * - admin/team_member only
+ */
+router.post('/', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // Only admin and team_member can create contracts
+    if (req.user.role === 'client') {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+      return;
+    }
+
+    const contractData: CreateContractDTO = req.body;
+
+    // Validate required fields
+    if (!contractData.contract_name) {
+      res.status(400).json({ error: 'contract_name is required' });
+      return;
+    }
+
+    if (!contractData.contract_status) {
+      res.status(400).json({ error: 'contract_status is required' });
+      return;
+    }
+
+    if (!contractData.contract_type) {
+      res.status(400).json({ error: 'contract_type is required' });
+      return;
+    }
+
+    if (!contractData.contract_start_date) {
+      res.status(400).json({ error: 'contract_start_date is required' });
+      return;
+    }
+
+    // Validate enum values
+    const validationErrors = validateContractEnums(contractData);
+    if (validationErrors.length > 0) {
+      res.status(400).json({
+        error: 'Invalid enum values',
+        details: validationErrors
+      });
+      return;
+    }
+
+    const { data: contract, error } = await req.supabase
+      .from('contracts')
+      .insert(contractData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating contract:', error);
+      res.status(500).json({ error: 'Failed to create contract' });
+      return;
+    }
+
+    res.status(201).json({ contract });
+  } catch (error) {
+    console.error('Error creating contract:', error);
+    res.status(500).json({ error: 'Failed to create contract' });
+  }
+});
+
+/**
+ * PUT /api/contracts/:id
+ * Update a contract
+ * - admin/team_member only
+ */
+router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // Only admin and team_member can update contracts
+    if (req.user.role === 'client') {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+      return;
+    }
+
+    const { id } = req.params;
+    const updateData: Partial<CreateContractDTO> = req.body;
+
+    // Validate enum values if provided
+    const validationErrors = validateContractEnums(updateData);
+    if (validationErrors.length > 0) {
+      res.status(400).json({
+        error: 'Invalid enum values',
+        details: validationErrors
+      });
+      return;
+    }
+
+    const { data: contract, error } = await req.supabase
+      .from('contracts')
+      .update(updateData)
+      .eq('contract_id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        res.status(404).json({ error: 'Contract not found' });
+        return;
+      }
+      console.error('Error updating contract:', error);
+      res.status(500).json({ error: 'Failed to update contract' });
+      return;
+    }
+
+    res.json({ contract });
+  } catch (error) {
+    console.error('Error updating contract:', error);
+    res.status(500).json({ error: 'Failed to update contract' });
+  }
+});
+
+/**
+ * DELETE /api/contracts/:id
+ * Delete a contract
+ * - admin only
+ */
+router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // Only admin can delete contracts
+    if (req.user.role !== 'admin') {
+      res.status(403).json({
+        error: 'Access denied',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const { error } = await req.supabase
+      .from('contracts')
+      .delete()
+      .eq('contract_id', id);
+
+    if (error) {
+      console.error('Error deleting contract:', error);
+      res.status(500).json({ error: 'Failed to delete contract' });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting contract:', error);
+    res.status(500).json({ error: 'Failed to delete contract' });
   }
 });
 

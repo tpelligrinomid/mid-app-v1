@@ -16,9 +16,41 @@ validateSupabaseConfig();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// CORS configuration - supports multiple origins
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+// Add production frontend URL(s) from environment
+if (process.env.FRONTEND_URL) {
+  // Support comma-separated list of origins
+  const urls = process.env.FRONTEND_URL.split(',').map(url => {
+    url = url.trim();
+    // Ensure URL has protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    return url;
+  });
+  allowedOrigins.push(...urls);
+}
+
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, origin);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json());

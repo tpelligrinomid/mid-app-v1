@@ -80,14 +80,18 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
  * - Updates if found, inserts if not
  */
 router.post('/import', async (req: Request, res: Response): Promise<void> => {
+  console.log('[Import] Starting contract import...');
+
   try {
     if (!req.supabase || !req.user) {
+      console.log('[Import] Not authenticated');
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
 
     // Only admin and team_member can import contracts
     if (req.user.role === 'client') {
+      console.log('[Import] Access denied for client role');
       res.status(403).json({
         error: 'Access denied',
         code: 'INSUFFICIENT_PERMISSIONS'
@@ -98,9 +102,12 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
     const { contracts } = req.body as { contracts: CreateContractDTO[] };
 
     if (!contracts || !Array.isArray(contracts) || contracts.length === 0) {
+      console.log('[Import] No contracts in request body');
       res.status(400).json({ error: 'contracts array is required and must not be empty' });
       return;
     }
+
+    console.log(`[Import] Processing ${contracts.length} contracts...`);
 
     const result = {
       inserted: 0,
@@ -108,7 +115,9 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
       errors: [] as string[]
     };
 
-    for (const contract of contracts) {
+    for (let i = 0; i < contracts.length; i++) {
+      const contract = contracts[i];
+
       // Validate required fields
       if (!contract.contract_name) {
         result.errors.push(`Missing contract_name for contract`);
@@ -138,19 +147,27 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
       }
 
       try {
-        // Check if contract exists by external_id or contract_name
-        let existingQuery = req.supabase
-          .from('contracts')
-          .select('contract_id')
-          .limit(1);
+        // Check if contract exists by external_id first, then by contract_name
+        let existing = null;
 
         if (contract.external_id) {
-          existingQuery = existingQuery.or(`external_id.eq.${contract.external_id},contract_name.eq.${contract.contract_name}`);
-        } else {
-          existingQuery = existingQuery.eq('contract_name', contract.contract_name);
+          const { data } = await req.supabase
+            .from('contracts')
+            .select('contract_id')
+            .eq('external_id', contract.external_id)
+            .maybeSingle();
+          existing = data;
         }
 
-        const { data: existing } = await existingQuery.maybeSingle();
+        // If not found by external_id, try by contract_name
+        if (!existing) {
+          const { data } = await req.supabase
+            .from('contracts')
+            .select('contract_id')
+            .eq('contract_name', contract.contract_name)
+            .maybeSingle();
+          existing = data;
+        }
 
         // Prepare contract data (exclude undefined values)
         const contractData: Record<string, unknown> = {};
@@ -181,6 +198,7 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
             .eq('contract_id', existing.contract_id);
 
           if (error) {
+            console.log(`[Import] Failed to update ${contract.contract_name}: ${error.message}`);
             result.errors.push(`Failed to update ${contract.contract_name}: ${error.message}`);
           } else {
             result.updated++;
@@ -192,6 +210,7 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
             .insert(contractData);
 
           if (error) {
+            console.log(`[Import] Failed to insert ${contract.contract_name}: ${error.message}`);
             result.errors.push(`Failed to insert ${contract.contract_name}: ${error.message}`);
           } else {
             result.inserted++;
@@ -199,13 +218,20 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
+        console.log(`[Import] Error processing ${contract.contract_name}: ${message}`);
         result.errors.push(`Error processing ${contract.contract_name}: ${message}`);
+      }
+
+      // Log progress every 10 contracts
+      if ((i + 1) % 10 === 0) {
+        console.log(`[Import] Progress: ${i + 1}/${contracts.length} contracts processed`);
       }
     }
 
+    console.log(`[Import] Complete. Inserted: ${result.inserted}, Updated: ${result.updated}, Errors: ${result.errors.length}`);
     res.json(result);
   } catch (error) {
-    console.error('Error importing contracts:', error);
+    console.error('[Import] Fatal error:', error);
     res.status(500).json({ error: 'Failed to import contracts' });
   }
 });

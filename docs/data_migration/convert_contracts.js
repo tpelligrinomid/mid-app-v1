@@ -122,8 +122,8 @@ const rows = oldData.map(contract => {
     priority: contract.priority || '',
     customer_display_type: contract.customer_display_type || '',
     hosting: contract.hosting === true ? 'true' : contract.hosting === false ? 'false' : '',
-    account_manager: contract.account_manager || '',
-    team_manager: contract.team_manager || '',
+    account_manager: '',  // Skip - requires pulse_clickup_users to be synced first
+    team_manager: '',     // Skip - requires pulse_clickup_users to be synced first
     clickup_folder_id: contract.clickup_folder_id || '',
     slack_channel_internal: contract.link_to_slack_channel || '',  // Map old field
     slack_channel_external: '',  // Not in old data

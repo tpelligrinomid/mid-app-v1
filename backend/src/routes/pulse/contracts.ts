@@ -147,20 +147,22 @@ router.post('/import', async (req: Request, res: Response): Promise<void> => {
       }
 
       try {
-        // Check if contract exists by external_id first, then by contract_name
+        // Check if contract exists:
+        // - If external_id is provided, ONLY match by external_id (no fallback)
+        // - If no external_id, match by contract_name
         let existing = null;
 
         if (contract.external_id) {
+          // Only match by external_id - don't fall back to name
+          // This ensures contracts with same name but different external_ids stay separate
           const { data } = await req.supabase
             .from('contracts')
             .select('contract_id')
             .eq('external_id', contract.external_id)
             .maybeSingle();
           existing = data;
-        }
-
-        // If not found by external_id, try by contract_name
-        if (!existing) {
+        } else {
+          // No external_id provided, match by contract_name
           const { data } = await req.supabase
             .from('contracts')
             .select('contract_id')

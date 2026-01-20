@@ -131,6 +131,18 @@ export class ClickUpCronSyncService {
     };
 
     try {
+      // Check if a sync is already running
+      const existingSync = await this.checkForRunningSync();
+      if (existingSync.isRunning) {
+        console.log(`[ClickUp Cron Sync] Skipping - sync already in progress (started ${existingSync.startedAt})`);
+        results.status = 'completed';
+        results.errors.push({
+          context: 'startup',
+          error: `Sync skipped - another sync already in progress since ${existingSync.startedAt}`
+        });
+        return results;
+      }
+
       await this.logSyncStart(syncId, mode);
 
       // 1. Sync users first
@@ -250,6 +262,38 @@ export class ClickUpCronSyncService {
     }
 
     return results;
+  }
+
+  /**
+   * Check if a sync is already running
+   * Returns true if running and started less than 1 hour ago (to handle crashed syncs)
+   */
+  private async checkForRunningSync(): Promise<{ isRunning: boolean; startedAt?: string }> {
+    const { data, error } = await dbProxy.select<Array<{ status: string; updated_at: string }>>('pulse_sync_state', {
+      columns: 'status, updated_at',
+      filters: { service: 'clickup', entity_type: 'tasks' },
+      single: true
+    });
+
+    if (error || !data || data.length === 0) {
+      return { isRunning: false };
+    }
+
+    const state = data[0];
+    if (state.status !== 'running') {
+      return { isRunning: false };
+    }
+
+    // Check if the sync has been running for more than 1 hour (likely crashed)
+    const updatedAt = new Date(state.updated_at);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    if (updatedAt < oneHourAgo) {
+      console.log('[ClickUp Cron Sync] Previous sync appears stale (>1 hour), allowing new sync');
+      return { isRunning: false };
+    }
+
+    return { isRunning: true, startedAt: state.updated_at };
   }
 
   /**

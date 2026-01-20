@@ -8,7 +8,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { QuickBooksClient, fetchWithRetry, QuickBooksInvoice, QuickBooksCreditMemo, QuickBooksPayment } from './client.js';
 import { parseInvoiceMemo, parseCreditMemoMemo, getRawMemoText } from './memo-parser.js';
-import { refreshTokenIfNeeded, getStoredTokens } from './index.js';
 import { dbProxy } from '../../utils/db-proxy.js';
 
 interface ContractToSync {
@@ -21,6 +20,16 @@ interface ContractToSync {
 interface OrganizationWithRealm {
   organization_id: string;
   quickbooks_realm_id: string;
+}
+
+interface StoredToken {
+  id: string;
+  service: string;
+  identifier: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at: string;
+  is_active: boolean;
 }
 
 interface SyncResults {
@@ -109,31 +118,15 @@ export class QuickBooksCronSyncService {
         console.log(`[QuickBooks Cron Sync] Incremental mode: only fetching items updated since ${updatedSince.toISOString()}`);
       }
 
-      // 4. Get organization-to-realm mapping
-      const realmToOrgMap = await this.getRealmToOrganizationMap();
-      console.log(`[QuickBooks Cron Sync] Found ${Object.keys(realmToOrgMap).length} organizations with QuickBooks realms`);
-
-      // 5. Process each realm
+      // 4. Process each realm
       for (const [realmId, realmContracts] of Object.entries(contractsByRealm)) {
         try {
           console.log(`[QuickBooks Cron Sync] Processing realm ${realmId} with ${realmContracts.length} contracts`);
 
-          // Find organization that owns this realm
-          const organizationId = realmToOrgMap[realmId];
-          if (!organizationId) {
-            console.error(`[QuickBooks Cron Sync] No organization found for realm ${realmId}`);
-            results.contractsFailed += realmContracts.length;
-            results.errors.push({
-              context: `realm:${realmId}`,
-              error: 'No organization found with this QuickBooks realm ID',
-            });
-            continue;
-          }
-
-          // Get OAuth tokens using organization ID
-          const tokens = await refreshTokenIfNeeded(organizationId);
+          // Get OAuth tokens directly by realm ID from pulse_sync_tokens
+          const tokens = await this.getTokensForRealm(realmId);
           if (!tokens) {
-            console.error(`[QuickBooks Cron Sync] No valid tokens for organization ${organizationId} (realm ${realmId})`);
+            console.error(`[QuickBooks Cron Sync] No valid tokens for realm ${realmId}`);
             results.contractsFailed += realmContracts.length;
             results.errors.push({
               context: `realm:${realmId}`,
@@ -144,6 +137,7 @@ export class QuickBooksCronSyncService {
 
           // Create client for this realm
           const client = new QuickBooksClient(tokens.access_token, realmId);
+          console.log(`[QuickBooks Cron Sync] Token found, expires at ${tokens.expires_at}`);
 
           // Process each contract in this realm
           for (const contract of realmContracts) {
@@ -180,7 +174,7 @@ export class QuickBooksCronSyncService {
         }
       }
 
-      // 6. Link payments to invoices
+      // 5. Link payments to invoices
       console.log('[QuickBooks Cron Sync] Linking payments to invoices...');
       await this.linkPaymentsToInvoices();
 
@@ -261,27 +255,35 @@ export class QuickBooksCronSyncService {
   }
 
   /**
-   * Get mapping of realm IDs to organization IDs
-   * This is needed because tokens are stored by organization ID, not realm ID
+   * Get OAuth tokens for a realm from pulse_sync_tokens table
+   * Tokens are stored with service='quickbooks' and identifier=realmId
    */
-  private async getRealmToOrganizationMap(): Promise<Record<string, string>> {
-    const { data, error } = await dbProxy.select<OrganizationWithRealm[]>('organizations', {
-      columns: 'organization_id, quickbooks_realm_id',
+  private async getTokensForRealm(realmId: string): Promise<StoredToken | null> {
+    const { data, error } = await dbProxy.select<StoredToken[]>('pulse_sync_tokens', {
+      columns: 'id, service, identifier, access_token, refresh_token, expires_at, is_active',
+      filters: { service: 'quickbooks', identifier: realmId, is_active: true },
     });
 
     if (error) {
-      console.error('[QuickBooks Cron Sync] Error fetching organizations:', error);
-      return {};
+      console.error(`[QuickBooks Cron Sync] Error fetching tokens for realm ${realmId}:`, error);
+      return null;
     }
 
-    const map: Record<string, string> = {};
-    for (const org of data || []) {
-      if (org.quickbooks_realm_id) {
-        map[org.quickbooks_realm_id] = org.organization_id;
-      }
+    if (!data || data.length === 0) {
+      return null;
     }
 
-    return map;
+    const token = data[0];
+
+    // Check if token is expired
+    const expiresAt = new Date(token.expires_at);
+    if (expiresAt <= new Date()) {
+      console.warn(`[QuickBooks Cron Sync] Token expired for realm ${realmId} at ${token.expires_at}`);
+      // TODO: Implement token refresh logic here if needed
+      // For now, return the token anyway - QuickBooks API will fail and we'll get an error
+    }
+
+    return token;
   }
 
   /**

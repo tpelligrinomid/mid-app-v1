@@ -6,9 +6,18 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import OAuthClient from 'intuit-oauth';
 import { QuickBooksClient, fetchWithRetry, QuickBooksInvoice, QuickBooksCreditMemo, QuickBooksPayment } from './client.js';
 import { parseInvoiceMemo, parseCreditMemoMemo, getRawMemoText } from './memo-parser.js';
 import { dbProxy } from '../../utils/db-proxy.js';
+
+// QuickBooks OAuth client for token refresh
+const oauthClient = new OAuthClient({
+  clientId: process.env.QUICKBOOKS_CLIENT_ID!,
+  clientSecret: process.env.QUICKBOOKS_CLIENT_SECRET!,
+  environment: (process.env.QUICKBOOKS_ENVIRONMENT as 'sandbox' | 'production') || 'production',
+  redirectUri: process.env.QUICKBOOKS_REDIRECT_URI!,
+});
 
 interface ContractToSync {
   contract_id: string;
@@ -257,6 +266,7 @@ export class QuickBooksCronSyncService {
   /**
    * Get OAuth tokens for a realm from pulse_sync_tokens table
    * Tokens are stored with service='quickbooks' and identifier=realmId
+   * Will refresh the token if expired
    */
   private async getTokensForRealm(realmId: string): Promise<StoredToken | null> {
     const { data, error } = await dbProxy.select<StoredToken[]>('pulse_sync_tokens', {
@@ -273,17 +283,74 @@ export class QuickBooksCronSyncService {
       return null;
     }
 
-    const token = data[0];
+    let token = data[0];
 
-    // Check if token is expired
+    // Check if token is expired (with 5 minute buffer)
     const expiresAt = new Date(token.expires_at);
-    if (expiresAt <= new Date()) {
-      console.warn(`[QuickBooks Cron Sync] Token expired for realm ${realmId} at ${token.expires_at}`);
-      // TODO: Implement token refresh logic here if needed
-      // For now, return the token anyway - QuickBooks API will fail and we'll get an error
+    const bufferTime = 5 * 60 * 1000; // 5 minutes
+    if (expiresAt.getTime() - bufferTime <= Date.now()) {
+      console.log(`[QuickBooks Cron Sync] Token expired for realm ${realmId}, refreshing...`);
+
+      const refreshedToken = await this.refreshToken(token, realmId);
+      if (refreshedToken) {
+        token = refreshedToken;
+      } else {
+        console.error(`[QuickBooks Cron Sync] Failed to refresh token for realm ${realmId}`);
+        return null;
+      }
     }
 
     return token;
+  }
+
+  /**
+   * Refresh an expired OAuth token
+   */
+  private async refreshToken(token: StoredToken, realmId: string): Promise<StoredToken | null> {
+    try {
+      // Set the current token on the OAuth client
+      oauthClient.setToken({
+        access_token: token.access_token,
+        refresh_token: token.refresh_token,
+        token_type: 'Bearer',
+        expires_in: 3600, // Not used for refresh, but required
+        x_refresh_token_expires_in: 0,
+        realmId: realmId,
+      });
+
+      // Refresh the token
+      const refreshResponse = await oauthClient.refresh();
+      const newTokens = refreshResponse.getJson();
+
+      // Calculate new expiry time (typically 1 hour from now)
+      const expiresAt = new Date(Date.now() + (newTokens.expires_in * 1000));
+
+      // Update token in database
+      const { error } = await dbProxy.update('pulse_sync_tokens', {
+        access_token: newTokens.access_token,
+        refresh_token: newTokens.refresh_token,
+        expires_at: expiresAt.toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { id: token.id });
+
+      if (error) {
+        console.error(`[QuickBooks Cron Sync] Error updating refreshed token:`, error);
+        return null;
+      }
+
+      console.log(`[QuickBooks Cron Sync] Token refreshed successfully for realm ${realmId}`);
+
+      // Return updated token
+      return {
+        ...token,
+        access_token: newTokens.access_token,
+        refresh_token: newTokens.refresh_token,
+        expires_at: expiresAt.toISOString(),
+      };
+    } catch (error) {
+      console.error(`[QuickBooks Cron Sync] Token refresh failed for realm ${realmId}:`, error);
+      return null;
+    }
   }
 
   /**

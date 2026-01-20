@@ -1,0 +1,70 @@
+Here's the schema validation for the QuickBooks tables:
+
+| Table | Column | Type | Nullable |
+|-------|--------|------|----------|
+| **pulse_credit_memos** | credit_memo_id | uuid | NO |
+| | contract_id | uuid | YES |
+| | quickbooks_id | text | NO |
+| | quickbooks_realm_id | text | NO |
+| | doc_number | text | YES |
+| | amount | numeric | YES |
+| | remaining_credit | numeric | YES |
+| | credit_date | date | YES |
+| | points | numeric | YES |
+| | memo | text | YES |
+| | raw_data | jsonb | YES |
+| | last_synced_at | timestamptz | YES |
+| | created_at | timestamptz | YES |
+| | quickbooks_customer_id | text | YES |
+| | customer_name | text | YES |
+| | transaction_date | date | YES |
+| | total_amount | numeric | YES |
+| | balance | numeric | YES |
+| | contract_external_id | text | YES |
+| | memo_raw | text | YES |
+| | is_deleted | boolean | YES |
+| | updated_at | timestamptz | YES |
+| **pulse_invoices** | invoice_id | uuid | NO |
+| | contract_id | uuid | YES |
+| | quickbooks_id | text | NO |
+| | quickbooks_realm_id | text | NO |
+| | doc_number | text | YES |
+| | amount | numeric | NO |
+| | balance | numeric | YES |
+| | status | text | YES |
+| | invoice_date | date | YES |
+| | due_date | date | YES |
+| | points | numeric | YES |
+| | hours | numeric | YES |
+| | invoice_link | text | YES |
+| | memo | text | YES |
+| | raw_data | jsonb | YES |
+| | last_synced_at | timestamptz | YES |
+| | created_at | timestamptz | YES |
+| | updated_at | timestamptz | YES |
+| | quickbooks_customer_id | text | YES |
+| | customer_name | text | YES |
+| | transaction_date | date | YES |
+| | total_amount | numeric | YES |
+| | contract_external_id | text | YES |
+| | memo_raw | text | YES |
+| | is_deleted | boolean | YES |
+| **pulse_payments** | payment_id | uuid | NO |
+| | contract_id | uuid | YES |
+| | quickbooks_id | text | NO |
+| | quickbooks_realm_id | text | NO |
+| | amount | numeric | NO |
+| | payment_date | date | YES |
+| | payment_method | text | YES |
+| | linked_invoices | jsonb | YES |
+| | raw_data | jsonb | YES |
+| | last_synced_at | timestamptz | YES |
+| | created_at | timestamptz | YES |
+| | quickbooks_customer_id | text | YES |
+| | customer_name | text | YES |
+| | total_amount | numeric | YES |
+| | reference_number | text | YES |
+| | is_deleted | boolean | YES |
+| | updated_at | timestamptz | YES |
+
+All columns from the backend migration are present and correctly typed.

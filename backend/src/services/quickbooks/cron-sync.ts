@@ -1,0 +1,591 @@
+/**
+ * QuickBooks Cron Sync Service
+ *
+ * Syncs invoices, credit memos, and payments from QuickBooks for active contracts.
+ * Uses the backend-proxy Edge Function for database operations.
+ */
+
+import { v4 as uuidv4 } from 'uuid';
+import { QuickBooksClient, fetchWithRetry, QuickBooksInvoice, QuickBooksCreditMemo, QuickBooksPayment } from './client.js';
+import { parseInvoiceMemo, parseCreditMemoMemo, getRawMemoText } from './memo-parser.js';
+import { refreshTokenIfNeeded, getStoredTokens } from './index.js';
+import { dbProxy } from '../../utils/db-proxy.js';
+
+interface ContractToSync {
+  contract_id: string;
+  external_id: string;
+  quickbooks_business_unit_id: string;
+  quickbooks_customer_id: string;
+}
+
+interface SyncResults {
+  syncId: string;
+  mode: 'incremental' | 'full';
+  status: 'started' | 'running' | 'completed' | 'failed';
+  contractsProcessed: number;
+  contractsSkipped: number;
+  contractsFailed: number;
+  invoicesProcessed: number;
+  creditMemosProcessed: number;
+  paymentsProcessed: number;
+  realmsProcessed: number;
+  errors: Array<{ context: string; error: string }>;
+  startedAt: Date;
+  completedAt?: Date;
+  durationMs?: number;
+}
+
+/**
+ * QuickBooks Cron Sync Service
+ */
+export class QuickBooksCronSyncService {
+  /**
+   * Run the QuickBooks sync process
+   */
+  async runSync(options: {
+    mode?: 'incremental' | 'full';
+    syncInvoices?: boolean;
+    syncCreditMemos?: boolean;
+    syncPayments?: boolean;
+  } = {}): Promise<SyncResults> {
+    const {
+      mode = 'incremental',
+      syncInvoices = true,
+      syncCreditMemos = true,
+      syncPayments = true,
+    } = options;
+
+    const syncId = uuidv4();
+    const startedAt = new Date();
+
+    const results: SyncResults = {
+      syncId,
+      mode,
+      status: 'running',
+      contractsProcessed: 0,
+      contractsSkipped: 0,
+      contractsFailed: 0,
+      invoicesProcessed: 0,
+      creditMemosProcessed: 0,
+      paymentsProcessed: 0,
+      realmsProcessed: 0,
+      errors: [],
+      startedAt,
+    };
+
+    try {
+      // Check if a sync is already running
+      const existingSync = await this.checkForRunningSync();
+      if (existingSync.isRunning) {
+        console.log(`[QuickBooks Cron Sync] Skipping - sync already in progress (started ${existingSync.startedAt})`);
+        results.status = 'completed';
+        results.errors.push({
+          context: 'startup',
+          error: `Sync skipped - another sync already in progress since ${existingSync.startedAt}`,
+        });
+        return results;
+      }
+
+      await this.logSyncStart(syncId, mode);
+
+      // 1. Get all active contracts with QuickBooks info
+      console.log('[QuickBooks Cron Sync] Getting contracts to sync...');
+      const contracts = await this.getContractsToSync();
+      console.log(`[QuickBooks Cron Sync] Found ${contracts.length} contracts with QuickBooks info`);
+
+      // 2. Group contracts by realm (business unit)
+      const contractsByRealm = this.groupContractsByRealm(contracts);
+      console.log(`[QuickBooks Cron Sync] Contracts span ${Object.keys(contractsByRealm).length} QuickBooks realms`);
+
+      // 3. For incremental mode, calculate cutoff date (30 minutes ago)
+      let updatedSince: Date | undefined;
+      if (mode === 'incremental') {
+        updatedSince = new Date(Date.now() - 30 * 60 * 1000);
+        console.log(`[QuickBooks Cron Sync] Incremental mode: only fetching items updated since ${updatedSince.toISOString()}`);
+      }
+
+      // 4. Process each realm
+      for (const [realmId, realmContracts] of Object.entries(contractsByRealm)) {
+        try {
+          console.log(`[QuickBooks Cron Sync] Processing realm ${realmId} with ${realmContracts.length} contracts`);
+
+          // Get OAuth tokens for this realm
+          const tokens = await refreshTokenIfNeeded(realmId);
+          if (!tokens) {
+            console.error(`[QuickBooks Cron Sync] No valid tokens for realm ${realmId}`);
+            results.contractsFailed += realmContracts.length;
+            results.errors.push({
+              context: `realm:${realmId}`,
+              error: 'No valid OAuth tokens - reauthorization required',
+            });
+            continue;
+          }
+
+          // Create client for this realm
+          const client = new QuickBooksClient(tokens.access_token, realmId);
+
+          // Process each contract in this realm
+          for (const contract of realmContracts) {
+            try {
+              const contractResults = await this.syncContractData(
+                client,
+                contract,
+                realmId,
+                { syncInvoices, syncCreditMemos, syncPayments, updatedSince }
+              );
+
+              results.invoicesProcessed += contractResults.invoices;
+              results.creditMemosProcessed += contractResults.creditMemos;
+              results.paymentsProcessed += contractResults.payments;
+              results.contractsProcessed++;
+
+            } catch (error) {
+              results.contractsFailed++;
+              const message = error instanceof Error ? error.message : 'Unknown error';
+              results.errors.push({
+                context: `contract:${contract.external_id}`,
+                error: message,
+              });
+              console.error(`[QuickBooks Cron Sync] Failed to sync contract ${contract.external_id}:`, message);
+            }
+          }
+
+          results.realmsProcessed++;
+
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          results.errors.push({ context: `realm:${realmId}`, error: message });
+          console.error(`[QuickBooks Cron Sync] Failed to process realm ${realmId}:`, message);
+        }
+      }
+
+      // 5. Link payments to invoices
+      console.log('[QuickBooks Cron Sync] Linking payments to invoices...');
+      await this.linkPaymentsToInvoices();
+
+      results.status = 'completed';
+      results.completedAt = new Date();
+      results.durationMs = results.completedAt.getTime() - startedAt.getTime();
+
+      await this.logSyncComplete(syncId, 'success', results);
+
+      // Refresh contract views
+      console.log('[QuickBooks Cron Sync] Refreshing contract views...');
+      try {
+        await dbProxy.rpc('refresh_contract_views');
+        console.log('[QuickBooks Cron Sync] Contract views refreshed');
+      } catch (error) {
+        console.error('[QuickBooks Cron Sync] Failed to refresh contract views:', error);
+      }
+
+      console.log(`[QuickBooks Cron Sync] Completed in ${results.durationMs}ms`);
+
+    } catch (error) {
+      results.status = 'failed';
+      results.completedAt = new Date();
+      results.durationMs = results.completedAt.getTime() - startedAt.getTime();
+
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      results.errors.push({ context: 'sync', error: message });
+
+      await this.logSyncComplete(syncId, 'failed', results, message);
+
+      console.error('[QuickBooks Cron Sync] Fatal error:', message);
+    }
+
+    return results;
+  }
+
+  /**
+   * Get active contracts that have QuickBooks customer IDs
+   */
+  private async getContractsToSync(): Promise<ContractToSync[]> {
+    const { data, error } = await dbProxy.select<ContractToSync[]>('contracts', {
+      columns: 'contract_id, external_id, quickbooks_business_unit_id, quickbooks_customer_id',
+      filters: { contract_status: 'active' },
+    });
+
+    if (error) {
+      console.error('[QuickBooks Cron Sync] Error fetching contracts:', error);
+      throw new Error(error.message);
+    }
+
+    // Filter out contracts without QuickBooks info
+    const validContracts = (data || []).filter(contract => {
+      if (!contract.quickbooks_business_unit_id || !contract.quickbooks_customer_id) {
+        console.warn(`[QuickBooks Cron Sync] Skipping contract ${contract.external_id} - missing QuickBooks info`);
+        return false;
+      }
+      return true;
+    });
+
+    return validContracts;
+  }
+
+  /**
+   * Group contracts by QuickBooks realm ID
+   */
+  private groupContractsByRealm(contracts: ContractToSync[]): Record<string, ContractToSync[]> {
+    const grouped: Record<string, ContractToSync[]> = {};
+
+    for (const contract of contracts) {
+      const realmId = contract.quickbooks_business_unit_id;
+      if (!grouped[realmId]) {
+        grouped[realmId] = [];
+      }
+      grouped[realmId].push(contract);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Sync data for a single contract
+   */
+  private async syncContractData(
+    client: QuickBooksClient,
+    contract: ContractToSync,
+    realmId: string,
+    options: {
+      syncInvoices: boolean;
+      syncCreditMemos: boolean;
+      syncPayments: boolean;
+      updatedSince?: Date;
+    }
+  ): Promise<{ invoices: number; creditMemos: number; payments: number }> {
+    const results = { invoices: 0, creditMemos: 0, payments: 0 };
+    const customerId = contract.quickbooks_customer_id;
+
+    // Sync invoices
+    if (options.syncInvoices) {
+      const invoices = await fetchWithRetry(() =>
+        client.getAllInvoicesForCustomer(customerId, { updatedSince: options.updatedSince })
+      );
+
+      if (invoices.length > 0) {
+        console.log(`[QuickBooks Cron Sync] Processing ${invoices.length} invoices for ${contract.external_id}`);
+        await this.storeInvoices(invoices, contract, realmId);
+        results.invoices = invoices.length;
+      }
+    }
+
+    // Sync credit memos
+    if (options.syncCreditMemos) {
+      const creditMemos = await fetchWithRetry(() =>
+        client.getAllCreditMemosForCustomer(customerId, { updatedSince: options.updatedSince })
+      );
+
+      if (creditMemos.length > 0) {
+        console.log(`[QuickBooks Cron Sync] Processing ${creditMemos.length} credit memos for ${contract.external_id}`);
+        await this.storeCreditMemos(creditMemos, contract, realmId);
+        results.creditMemos = creditMemos.length;
+      }
+    }
+
+    // Sync payments
+    if (options.syncPayments) {
+      const payments = await fetchWithRetry(() =>
+        client.getAllPaymentsForCustomer(customerId, { updatedSince: options.updatedSince })
+      );
+
+      if (payments.length > 0) {
+        console.log(`[QuickBooks Cron Sync] Processing ${payments.length} payments for ${contract.external_id}`);
+        await this.storePayments(payments, contract, realmId);
+        results.payments = payments.length;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Store invoices in database
+   */
+  private async storeInvoices(
+    invoices: QuickBooksInvoice[],
+    contract: ContractToSync,
+    realmId: string
+  ): Promise<void> {
+    const batch = invoices.map(invoice => {
+      const parsed = parseInvoiceMemo(invoice);
+
+      return {
+        quickbooks_id: invoice.Id,
+        quickbooks_realm_id: realmId,
+        quickbooks_customer_id: invoice.CustomerRef?.value,
+        contract_id: contract.contract_id,
+        doc_number: invoice.DocNumber || null,
+        customer_name: invoice.CustomerRef?.name || null,
+        transaction_date: invoice.TxnDate,
+        due_date: invoice.DueDate || null,
+        total_amount: invoice.TotalAmt,
+        balance: invoice.Balance,
+        contract_external_id: parsed.contractNumber || contract.external_id,
+        points: parsed.points,
+        memo_raw: getRawMemoText(invoice),
+        status: invoice.Balance === 0 ? 'paid' : 'open',
+        raw_data: JSON.stringify(invoice),
+        last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    // Batch upsert
+    const batchSize = 50;
+    for (let i = 0; i < batch.length; i += batchSize) {
+      const batchSlice = batch.slice(i, i + batchSize);
+      const { error } = await dbProxy.upsert('pulse_invoices', batchSlice, {
+        onConflict: 'quickbooks_id,quickbooks_realm_id',
+      });
+
+      if (error) {
+        console.error('[QuickBooks Cron Sync] Error storing invoices:', error);
+      }
+    }
+  }
+
+  /**
+   * Store credit memos in database
+   */
+  private async storeCreditMemos(
+    creditMemos: QuickBooksCreditMemo[],
+    contract: ContractToSync,
+    realmId: string
+  ): Promise<void> {
+    const batch = creditMemos.map(creditMemo => {
+      const parsed = parseCreditMemoMemo(creditMemo);
+
+      return {
+        quickbooks_id: creditMemo.Id,
+        quickbooks_realm_id: realmId,
+        quickbooks_customer_id: creditMemo.CustomerRef?.value,
+        contract_id: contract.contract_id,
+        doc_number: creditMemo.DocNumber || null,
+        customer_name: creditMemo.CustomerRef?.name || null,
+        transaction_date: creditMemo.TxnDate,
+        total_amount: creditMemo.TotalAmt,
+        balance: creditMemo.Balance || 0,
+        contract_external_id: parsed.contractNumber || contract.external_id,
+        points: parsed.points,
+        memo_raw: getRawMemoText(creditMemo),
+        raw_data: JSON.stringify(creditMemo),
+        last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    // Batch upsert
+    const batchSize = 50;
+    for (let i = 0; i < batch.length; i += batchSize) {
+      const batchSlice = batch.slice(i, i + batchSize);
+      const { error } = await dbProxy.upsert('pulse_credit_memos', batchSlice, {
+        onConflict: 'quickbooks_id,quickbooks_realm_id',
+      });
+
+      if (error) {
+        console.error('[QuickBooks Cron Sync] Error storing credit memos:', error);
+      }
+    }
+  }
+
+  /**
+   * Store payments in database
+   */
+  private async storePayments(
+    payments: QuickBooksPayment[],
+    contract: ContractToSync,
+    realmId: string
+  ): Promise<void> {
+    const batch = payments.map(payment => {
+      const linkedInvoices = this.extractLinkedInvoices(payment);
+
+      return {
+        quickbooks_id: payment.Id,
+        quickbooks_realm_id: realmId,
+        quickbooks_customer_id: payment.CustomerRef?.value,
+        contract_id: contract.contract_id,
+        customer_name: payment.CustomerRef?.name || null,
+        payment_date: payment.TxnDate,
+        payment_method: payment.PaymentMethodRef?.name || null,
+        total_amount: payment.TotalAmt,
+        reference_number: payment.PaymentRefNum || null,
+        linked_invoices: JSON.stringify(linkedInvoices),
+        raw_data: JSON.stringify(payment),
+        last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    // Batch upsert
+    const batchSize = 50;
+    for (let i = 0; i < batch.length; i += batchSize) {
+      const batchSlice = batch.slice(i, i + batchSize);
+      const { error } = await dbProxy.upsert('pulse_payments', batchSlice, {
+        onConflict: 'quickbooks_id,quickbooks_realm_id',
+      });
+
+      if (error) {
+        console.error('[QuickBooks Cron Sync] Error storing payments:', error);
+      }
+    }
+  }
+
+  /**
+   * Extract linked invoice IDs from a payment
+   */
+  private extractLinkedInvoices(payment: QuickBooksPayment): Array<{ id: string; amount: number }> {
+    const linkedInvoices: Array<{ id: string; amount: number }> = [];
+    const processedIds = new Set<string>();
+
+    // Check top-level LinkedTxn
+    if (payment.LinkedTxn && Array.isArray(payment.LinkedTxn)) {
+      for (const txn of payment.LinkedTxn) {
+        if (txn.TxnType === 'Invoice' && txn.TxnId && !processedIds.has(txn.TxnId)) {
+          linkedInvoices.push({
+            id: txn.TxnId,
+            amount: txn.Amount || payment.TotalAmt,
+          });
+          processedIds.add(txn.TxnId);
+        }
+      }
+    }
+
+    // Check Line items
+    if (payment.Line && Array.isArray(payment.Line)) {
+      for (const line of payment.Line) {
+        // Check LinkedTxn in line items
+        if (line.LinkedTxn && Array.isArray(line.LinkedTxn)) {
+          for (const txn of line.LinkedTxn) {
+            if (txn.TxnType === 'Invoice' && txn.TxnId && !processedIds.has(txn.TxnId)) {
+              linkedInvoices.push({
+                id: txn.TxnId,
+                amount: line.Amount || txn.Amount || 0,
+              });
+              processedIds.add(txn.TxnId);
+            }
+          }
+        }
+
+        // Check LineEx.any array for txnId
+        if (line.LineEx?.any && Array.isArray(line.LineEx.any)) {
+          const txnIdObj = line.LineEx.any.find(
+            item => item.value?.Name === 'txnId' && item.value?.Value
+          );
+
+          if (txnIdObj && !processedIds.has(txnIdObj.value!.Value)) {
+            linkedInvoices.push({
+              id: txnIdObj.value!.Value,
+              amount: line.Amount || 0,
+            });
+            processedIds.add(txnIdObj.value!.Value);
+          }
+        }
+      }
+    }
+
+    return linkedInvoices;
+  }
+
+  /**
+   * Link payments to invoices in the database (update invoice payment status)
+   * This is a simplified version - could be enhanced to track partial payments
+   */
+  private async linkPaymentsToInvoices(): Promise<void> {
+    // Note: The invoice balance field from QuickBooks already reflects payments
+    // This method could be used for additional payment tracking if needed
+    console.log('[QuickBooks Cron Sync] Payment-invoice linking handled by QB balance field');
+  }
+
+  /**
+   * Check if a sync is already running
+   */
+  private async checkForRunningSync(): Promise<{ isRunning: boolean; startedAt?: string }> {
+    const { data, error } = await dbProxy.select<Array<{ status: string; updated_at: string }>>('pulse_sync_state', {
+      columns: 'status, updated_at',
+      filters: { service: 'quickbooks', entity_type: 'invoices' },
+      single: true,
+    });
+
+    if (error || !data || data.length === 0) {
+      return { isRunning: false };
+    }
+
+    const state = data[0];
+    if (state.status !== 'running') {
+      return { isRunning: false };
+    }
+
+    // Check if the sync has been running for more than 1 hour (likely crashed)
+    const updatedAt = new Date(state.updated_at);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    if (updatedAt < oneHourAgo) {
+      console.log('[QuickBooks Cron Sync] Previous sync appears stale (>1 hour), allowing new sync');
+      return { isRunning: false };
+    }
+
+    return { isRunning: true, startedAt: state.updated_at };
+  }
+
+  /**
+   * Log sync start
+   */
+  private async logSyncStart(syncId: string, mode: string): Promise<void> {
+    await dbProxy.insert('pulse_sync_logs', {
+      id: syncId,
+      service: 'quickbooks',
+      entity_type: 'invoices',
+      sync_mode: mode,
+      status: 'started',
+      started_at: new Date().toISOString(),
+    });
+
+    await dbProxy.upsert('pulse_sync_state', {
+      service: 'quickbooks',
+      entity_type: 'invoices',
+      status: 'running',
+      sync_mode: mode,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'service,entity_type' });
+  }
+
+  /**
+   * Log sync complete
+   */
+  private async logSyncComplete(
+    syncId: string,
+    status: 'success' | 'failed',
+    results: SyncResults,
+    errorMessage?: string
+  ): Promise<void> {
+    const recordsProcessed = results.invoicesProcessed + results.creditMemosProcessed + results.paymentsProcessed;
+
+    await dbProxy.update('pulse_sync_logs', {
+      status,
+      records_processed: recordsProcessed,
+      error_message: errorMessage || null,
+      completed_at: new Date().toISOString(),
+    }, { id: syncId });
+
+    const stateUpdate: Record<string, unknown> = {
+      service: 'quickbooks',
+      entity_type: 'invoices',
+      status: status === 'success' ? 'completed' : 'failed',
+      last_sync_at: new Date().toISOString(),
+      records_processed: recordsProcessed,
+      error_message: errorMessage || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (status === 'success') {
+      stateUpdate.last_successful_sync_at = new Date().toISOString();
+      if (results.mode === 'full') {
+        stateUpdate.last_full_sync_at = new Date().toISOString();
+      }
+    }
+
+    await dbProxy.upsert('pulse_sync_state', stateUpdate, { onConflict: 'service,entity_type' });
+  }
+}
+
+export default QuickBooksCronSyncService;

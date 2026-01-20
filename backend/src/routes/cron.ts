@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ClickUpCronSyncService } from '../services/clickup/cron-sync.js';
+import { QuickBooksCronSyncService } from '../services/quickbooks/cron-sync.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -189,6 +190,131 @@ router.post('/clickup-full-sync', verifyCronSecret, async (req: Request, res: Re
   }
 });
 
+// POST /api/cron/quickbooks-sync
+// Triggered by Render Cron Job for incremental QuickBooks sync
+//
+// Render Cron Job Configuration:
+// - Name: quickbooks-incremental-sync
+// - Schedule: */15 * * * 1-5 (every 15 min on weekdays)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/quickbooks-sync?secret=$CRON_SECRET"
+router.post('/quickbooks-sync', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting QuickBooks incremental sync...');
+
+  try {
+    // Check if BACKEND_API_KEY is configured (needed for db-proxy)
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    // Parse mode from query string or body (default to incremental)
+    const mode = (req.query.mode as string) || (req.body?.mode as string) || 'incremental';
+    const validModes = ['incremental', 'full'];
+    if (!validModes.includes(mode)) {
+      res.status(400).json({ error: 'Invalid mode. Must be "incremental" or "full"' });
+      return;
+    }
+
+    // Run sync using the QuickBooks cron-specific service
+    const syncService = new QuickBooksCronSyncService();
+    const results = await syncService.runSync({ mode: mode as 'incremental' | 'full' });
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] QuickBooks sync completed in ${duration}ms`);
+    console.log(`[Cron] Results: ${results.invoicesProcessed} invoices, ${results.creditMemosProcessed} credit memos, ${results.paymentsProcessed} payments`);
+
+    res.json({
+      success: true,
+      mode,
+      syncId: results.syncId,
+      status: results.status,
+      duration: `${duration}ms`,
+      stats: {
+        contractsProcessed: results.contractsProcessed,
+        contractsSkipped: results.contractsSkipped,
+        invoicesProcessed: results.invoicesProcessed,
+        creditMemosProcessed: results.creditMemosProcessed,
+        paymentsProcessed: results.paymentsProcessed,
+        realmsProcessed: results.realmsProcessed
+      },
+      errors: results.errors.length > 0 ? results.errors : undefined
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] QuickBooks sync failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/quickbooks-full-sync
+// Triggered weekly for a full QuickBooks sync
+//
+// Render Cron Job Configuration:
+// - Name: quickbooks-full-sync
+// - Schedule: 0 22 * * 0 (Sunday 10 PM UTC - after ClickUp full sync)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/quickbooks-full-sync?secret=$CRON_SECRET"
+router.post('/quickbooks-full-sync', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting QuickBooks FULL sync...');
+
+  try {
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const syncService = new QuickBooksCronSyncService();
+    const results = await syncService.runSync({ mode: 'full' });
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] QuickBooks FULL sync completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      mode: 'full',
+      syncId: results.syncId,
+      status: results.status,
+      duration: `${duration}ms`,
+      stats: {
+        contractsProcessed: results.contractsProcessed,
+        contractsSkipped: results.contractsSkipped,
+        invoicesProcessed: results.invoicesProcessed,
+        creditMemosProcessed: results.creditMemosProcessed,
+        paymentsProcessed: results.paymentsProcessed,
+        realmsProcessed: results.realmsProcessed
+      },
+      errors: results.errors.length > 0 ? results.errors : undefined
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] QuickBooks FULL sync failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
 /**
  * GET /api/cron/health
  * Health check endpoint for cron monitoring
@@ -201,6 +327,10 @@ router.get('/health', (req: Request, res: Response) => {
       clickup: {
         configured: !!syncConfig.clickup.apiToken,
         teamId: syncConfig.clickup.teamId
+      },
+      quickbooks: {
+        configured: true, // QuickBooks uses OAuth tokens from database, not env vars
+        note: 'OAuth tokens are fetched per-realm from database'
       },
       backendProxy: {
         configured: !!process.env.BACKEND_API_KEY

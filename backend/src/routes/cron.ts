@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { ClickUpSyncService } from '../services/clickup/sync.js';
+import { ClickUpCronSyncService } from '../services/clickup/cron-sync.js';
 import { syncConfig } from '../config/sync-config.js';
-import { createUserClient } from '../utils/supabase.js';
 
 const router = Router();
 
@@ -10,13 +9,6 @@ const router = Router();
  * Set CRON_SECRET environment variable on Render
  */
 const CRON_SECRET = process.env.CRON_SECRET;
-
-/**
- * System user token for cron jobs
- * This should be a valid JWT for an admin user in your system
- * Set SYSTEM_USER_TOKEN environment variable on Render
- */
-const SYSTEM_USER_TOKEN = process.env.SYSTEM_USER_TOKEN;
 
 /**
  * Middleware to verify cron request authenticity
@@ -38,18 +30,6 @@ function verifyCronSecret(req: Request, res: Response, next: () => void) {
   }
 
   next();
-}
-
-/**
- * Create a Supabase client for cron jobs using system user token
- * This uses the same auth pattern as the rest of the app (no service role key needed)
- */
-function createCronClient() {
-  if (!SYSTEM_USER_TOKEN) {
-    throw new Error('SYSTEM_USER_TOKEN is required for cron jobs. Create an admin user and set their JWT as this env var.');
-  }
-
-  return createUserClient(SYSTEM_USER_TOKEN);
 }
 
 // POST /api/cron/clickup-sync
@@ -78,6 +58,16 @@ router.post('/clickup-sync', verifyCronSecret, async (req: Request, res: Respons
       return;
     }
 
+    // Check if BACKEND_API_KEY is configured (needed for db-proxy)
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
     // Parse mode from query string or body
     const mode = (req.query.mode as string) || (req.body?.mode as string) || 'incremental';
     const validModes = ['incremental', 'full'];
@@ -86,11 +76,8 @@ router.post('/clickup-sync', verifyCronSecret, async (req: Request, res: Respons
       return;
     }
 
-    // Create Supabase client with service role
-    const supabase = createCronClient();
-
-    // Run sync
-    const syncService = new ClickUpSyncService(supabase);
+    // Run sync using the cron-specific service (uses backend-proxy Edge Function)
+    const syncService = new ClickUpCronSyncService();
     const results = await syncService.runSync({ mode: mode as 'incremental' | 'full' });
 
     const duration = Date.now() - startTime;
@@ -128,21 +115,14 @@ router.post('/clickup-sync', verifyCronSecret, async (req: Request, res: Respons
   }
 });
 
-/**
- * POST /api/cron/clickup-full-sync
- * Triggered weekly for a full sync
- *
- * Render Cron Job Configuration:
- * - Name: clickup-full-sync
- * - Schedule: 0 20 * * 0 (Sunday 8 PM UTC)
- * - Command: curl -X POST https://your-app.onrender.com/api/cron/clickup-full-sync -H "Authorization: Bearer $CRON_SECRET"
- */
+// POST /api/cron/clickup-full-sync
+// Triggered weekly for a full sync
+//
+// Render Cron Job Configuration:
+// - Name: clickup-full-sync
+// - Schedule: 0 20 * * 0 (Sunday 8 PM UTC)
+// - Command: curl -X POST https://your-app.onrender.com/api/cron/clickup-full-sync -H "Authorization: Bearer $CRON_SECRET"
 router.post('/clickup-full-sync', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
-  // Just forward to the main endpoint with mode=full
-  req.body = { ...req.body, mode: 'full' };
-  req.query = { ...req.query, mode: 'full' };
-
-  // Call the main sync endpoint handler
   const startTime = Date.now();
   console.log('[Cron] Starting ClickUp FULL sync...');
 
@@ -156,8 +136,16 @@ router.post('/clickup-full-sync', verifyCronSecret, async (req: Request, res: Re
       return;
     }
 
-    const supabase = createCronClient();
-    const syncService = new ClickUpSyncService(supabase);
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const syncService = new ClickUpCronSyncService();
     const results = await syncService.runSync({ mode: 'full' });
 
     const duration = Date.now() - startTime;
@@ -206,6 +194,9 @@ router.get('/health', (req: Request, res: Response) => {
       clickup: {
         configured: !!syncConfig.clickup.apiToken,
         teamId: syncConfig.clickup.teamId
+      },
+      backendProxy: {
+        configured: !!process.env.BACKEND_API_KEY
       },
       hubspot: {
         configured: !!syncConfig.hubspot.apiKey

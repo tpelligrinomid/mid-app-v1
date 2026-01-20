@@ -146,9 +146,24 @@ export class ClickUpCronSyncService {
         const folders = await this.getFoldersToSync();
         console.log(`[ClickUp Cron Sync] Found ${folders.length} folders to sync`);
 
+        // For incremental mode, only fetch tasks updated in the last 30 minutes
+        // (buffer of 2x the 15-min cron interval to avoid missing updates)
+        let dateUpdatedGt: number | undefined;
+        if (mode === 'incremental') {
+          const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
+          dateUpdatedGt = thirtyMinutesAgo;
+          console.log(`[ClickUp Cron Sync] Incremental mode: only fetching tasks updated since ${new Date(thirtyMinutesAgo).toISOString()}`);
+        }
+
         for (const folder of folders) {
           try {
-            const tasks = await this.fetchTasksForFolder(folder.clickup_folder_id);
+            const tasks = await this.fetchTasksForFolder(folder.clickup_folder_id, dateUpdatedGt);
+
+            // Skip logging for folders with no updated tasks in incremental mode
+            if (tasks.length === 0 && mode === 'incremental') {
+              continue;
+            }
+
             console.log(`[ClickUp Cron Sync] Processing ${tasks.length} tasks from folder ${folder.clickup_folder_id}`);
 
             const batchSize = syncConfig.clickup.batchSize;
@@ -174,7 +189,10 @@ export class ClickUpCronSyncService {
           }
         }
 
-        await this.markDeletedTasks();
+        // Only mark deleted tasks in full sync mode (incremental doesn't see all tasks)
+        if (mode === 'full') {
+          await this.markDeletedTasks();
+        }
       }
 
       // 3. Sync invoice tasks
@@ -264,9 +282,11 @@ export class ClickUpCronSyncService {
   }
 
   /**
-   * Fetch all tasks from a folder
+   * Fetch tasks from a folder
+   * @param folderId - The folder ID to fetch tasks from
+   * @param dateUpdatedGt - Only fetch tasks updated after this timestamp (for incremental sync)
    */
-  private async fetchTasksForFolder(folderId: string): Promise<ClickUpTask[]> {
+  private async fetchTasksForFolder(folderId: string, dateUpdatedGt?: number): Promise<ClickUpTask[]> {
     const lists = await fetchWithRetry(() => this.client.getListsInFolder(folderId));
     const allTasks: ClickUpTask[] = [];
 
@@ -287,7 +307,8 @@ export class ClickUpCronSyncService {
             archived: false,
             includeClosed: true,
             subtasks: true,
-            page
+            page,
+            dateUpdatedGt
           })
         );
 

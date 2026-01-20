@@ -83,12 +83,16 @@ export class ClickUpClient {
 
   /**
    * Get tasks from a list
+   * @param listId - The list ID to fetch tasks from
+   * @param options - Query options
+   * @param options.dateUpdatedGt - Only return tasks updated after this timestamp (Unix ms)
    */
   async getTasksFromList(listId: string, options: {
     archived?: boolean;
     includeClosed?: boolean;
     subtasks?: boolean;
     page?: number;
+    dateUpdatedGt?: number;
   } = {}) {
     const params: Record<string, string | boolean> = {
       archived: options.archived ?? false,
@@ -96,6 +100,11 @@ export class ClickUpClient {
       subtasks: options.subtasks ?? true,
       page: (options.page ?? 0).toString()
     };
+
+    // Add date filter for incremental syncs
+    if (options.dateUpdatedGt) {
+      params.date_updated_gt = options.dateUpdatedGt.toString();
+    }
 
     const response = await this.client.get(`/list/${listId}/task`, { params });
     return response.data.tasks || [];

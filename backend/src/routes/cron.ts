@@ -12,6 +12,7 @@ const CRON_SECRET = process.env.CRON_SECRET;
 
 /**
  * Middleware to verify cron request authenticity
+ * Accepts secret via Authorization header OR query parameter (for Render cron compatibility)
  */
 function verifyCronSecret(req: Request, res: Response, next: () => void) {
   // If no secret is configured, allow all (for development)
@@ -21,21 +22,20 @@ function verifyCronSecret(req: Request, res: Response, next: () => void) {
     return;
   }
 
-  // Check Authorization header
+  // Check Authorization header first, then fall back to query parameter
   const authHeader = req.headers.authorization;
-  const expected = `Bearer ${CRON_SECRET}`;
+  const querySecret = req.query.secret as string;
 
-  // Debug logging
-  console.log('[Cron] Auth check - received:', authHeader ? `"${authHeader}"` : '(none)');
-  console.log('[Cron] Auth check - expected:', `"${expected}"`);
-  console.log('[Cron] Auth check - match:', authHeader === expected);
+  // Extract secret from header (Bearer token) or use query param directly
+  const providedSecret = authHeader?.replace('Bearer ', '') || querySecret;
 
-  if (!authHeader || authHeader !== expected) {
+  if (!providedSecret || providedSecret !== CRON_SECRET) {
     console.error('[Cron] Unauthorized cron request - invalid or missing secret');
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
+  console.log('[Cron] Auth verified via', authHeader ? 'header' : 'query param');
   next();
 }
 

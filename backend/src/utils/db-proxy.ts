@@ -13,8 +13,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const BACKEND_API_KEY = process.env.BACKEND_API_KEY;
 
 interface ProxyPayload {
-  operation: 'select' | 'insert' | 'update' | 'upsert' | 'delete';
-  table: string;
+  operation: 'select' | 'insert' | 'update' | 'upsert' | 'delete' | 'rpc';
+  table?: string;
+  function_name?: string;
   data?: Record<string, unknown> | Record<string, unknown>[];
   filters?: Record<string, unknown>;
   select?: string;
@@ -147,6 +148,20 @@ export class DbProxyClient {
       operation: 'delete',
       table,
       filters
+    });
+  }
+
+  /**
+   * Call a database function (RPC)
+   */
+  async rpc<T = unknown>(
+    functionName: string,
+    params: Record<string, unknown> = {}
+  ): Promise<ProxyResponse<T>> {
+    return callProxy<T>({
+      operation: 'rpc',
+      function_name: functionName,
+      data: params
     });
   }
 }

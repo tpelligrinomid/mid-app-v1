@@ -269,6 +269,17 @@ export class ClickUpCronSyncService {
 
       await this.logSyncComplete(syncId, 'success', results);
 
+      // Refresh materialized views for contract points
+      console.log('[ClickUp Cron Sync] Refreshing contract views...');
+      try {
+        await this.refreshContractViews();
+        console.log('[ClickUp Cron Sync] Contract views refreshed');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[ClickUp Cron Sync] Failed to refresh contract views:', message);
+        // Don't fail the sync for this - views can be refreshed manually
+      }
+
       console.log(`[ClickUp Cron Sync] Completed in ${results.durationMs}ms`);
 
     } catch (error) {
@@ -733,6 +744,16 @@ export class ClickUpCronSyncService {
     // For now, log and skip
     console.log('[ClickUp Cron Sync] Note: Deleted task marking may require manual cleanup');
     return 0;
+  }
+
+  /**
+   * Refresh materialized views for contract points calculations
+   */
+  async refreshContractViews(): Promise<void> {
+    const { error } = await dbProxy.rpc('refresh_contract_views');
+    if (error) {
+      throw new Error(`Failed to refresh contract views: ${error.message}`);
+    }
   }
 
   /**

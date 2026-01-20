@@ -449,17 +449,12 @@ export class ClickUpCronSyncService {
   private extractPointsFromCustomFields(customFields?: Array<{ id: string; name: string; value?: unknown }>): number | null {
     if (!customFields || !Array.isArray(customFields)) return null;
 
-    const pointsFieldById = customFields.find(f => f.id === syncConfig.clickup.customFields.points);
-    if (pointsFieldById?.value !== undefined && pointsFieldById.value !== null) {
-      const parsed = parseFloat(String(pointsFieldById.value));
-      return isNaN(parsed) ? null : parsed;
-    }
+    // Only check the specific custom field ID if configured
+    // Do NOT fuzzy match on field names - this caused incorrect values from fields like "Progress Score"
+    const pointsFieldId = syncConfig.clickup.customFields.points;
+    if (!pointsFieldId) return null;
 
-    const pointsField = customFields.find(f =>
-      f.name?.toLowerCase().includes('point') ||
-      f.name?.toLowerCase().includes('score')
-    );
-
+    const pointsField = customFields.find(f => f.id === pointsFieldId);
     if (pointsField?.value !== undefined && pointsField.value !== null) {
       const parsed = parseFloat(String(pointsField.value));
       return isNaN(parsed) ? null : parsed;

@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { ClickUpSyncService } from '../../services/clickup/sync.js';
+import { syncConfig } from '../../config/sync-config.js';
 
 const router = Router();
 
@@ -98,26 +100,152 @@ router.get('/status', async (req: Request, res: Response): Promise<void> => {
 /**
  * POST /api/sync/clickup
  * Trigger a ClickUp sync (admin/team_member only)
+ * Returns immediately with syncId, sync runs in background
  */
 router.post(
   '/clickup',
   requireRole('admin', 'team_member'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      // TODO: Implement ClickUp sync service
-      // const result = await clickUpService.sync();
+      if (!req.supabase) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+      }
 
+      // Check if ClickUp API token is configured
+      if (!syncConfig.clickup.apiToken) {
+        res.status(503).json({
+          error: 'ClickUp integration not configured',
+          details: 'CLICKUP_API_TOKEN environment variable is not set'
+        });
+        return;
+      }
+
+      const { mode = 'incremental' } = req.body as { mode?: 'incremental' | 'full' };
+
+      // Return immediately
+      const syncId = crypto.randomUUID();
       res.json({
-        success: true,
-        message: 'ClickUp sync triggered',
-        syncedAt: new Date().toISOString(),
+        syncId,
+        status: 'started',
+        message: 'ClickUp sync started in background'
+      });
+
+      // Run sync detached (using setImmediate to not block the response)
+      setImmediate(async () => {
+        try {
+          const syncService = new ClickUpSyncService(req.supabase!);
+          const results = await syncService.runSync({ mode });
+          console.log('[ClickUp Sync] Background sync completed:', JSON.stringify(results, null, 2));
+        } catch (error) {
+          console.error('[ClickUp Sync] Background sync failed:', error);
+        }
       });
     } catch (error) {
       console.error('ClickUp sync error:', error);
-      res.status(500).json({ error: 'Failed to sync with ClickUp' });
+      res.status(500).json({ error: 'Failed to start ClickUp sync' });
     }
   }
 );
+
+/**
+ * GET /api/sync/clickup/status
+ * Get current ClickUp sync status
+ */
+router.get('/clickup/status', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { data: status, error } = await req.supabase
+      .from('pulse_sync_state')
+      .select('*')
+      .eq('service', 'clickup')
+      .eq('entity_type', 'tasks')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching ClickUp sync status:', error);
+      res.status(500).json({ error: 'Failed to fetch sync status' });
+      return;
+    }
+
+    res.json(status || { status: 'never_run' });
+  } catch (error) {
+    console.error('Error fetching ClickUp sync status:', error);
+    res.status(500).json({ error: 'Failed to fetch sync status' });
+  }
+});
+
+/**
+ * GET /api/sync/clickup/status/:syncId
+ * Get status of a specific sync operation
+ */
+router.get('/clickup/status/:syncId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { syncId } = req.params;
+
+    const { data: log, error } = await req.supabase
+      .from('pulse_sync_logs')
+      .select('*')
+      .eq('id', syncId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching sync log:', error);
+      res.status(500).json({ error: 'Failed to fetch sync log' });
+      return;
+    }
+
+    if (!log) {
+      res.status(404).json({ error: 'Sync not found' });
+      return;
+    }
+
+    res.json(log);
+  } catch (error) {
+    console.error('Error fetching sync log:', error);
+    res.status(500).json({ error: 'Failed to fetch sync log' });
+  }
+});
+
+/**
+ * GET /api/sync/clickup/logs
+ * Get recent sync logs
+ */
+router.get('/clickup/logs', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.supabase) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { data: logs, error } = await req.supabase
+      .from('pulse_sync_logs')
+      .select('*')
+      .eq('service', 'clickup')
+      .order('started_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      console.error('Error fetching sync logs:', error);
+      res.status(500).json({ error: 'Failed to fetch sync logs' });
+      return;
+    }
+
+    res.json(logs || []);
+  } catch (error) {
+    console.error('Error fetching sync logs:', error);
+    res.status(500).json({ error: 'Failed to fetch sync logs' });
+  }
+});
 
 /**
  * POST /api/sync/quickbooks
@@ -129,7 +257,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       // TODO: Implement QuickBooks sync service
-      // const result = await quickBooksService.sync();
+      // QuickBooks requires OAuth, tokens stored in database
 
       res.json({
         success: true,
@@ -153,7 +281,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       // TODO: Implement HubSpot sync service
-      // const result = await hubSpotService.sync();
+      // HubSpot uses API key from environment
 
       res.json({
         success: true,

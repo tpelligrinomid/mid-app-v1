@@ -9,6 +9,7 @@ import usersRouter from './routes/users.js';
 import contractsRouter from './routes/pulse/contracts.js';
 import syncRouter from './routes/pulse/sync.js';
 import quickbooksAuthRouter from './routes/auth/quickbooks.js';
+import cronRouter from './routes/cron.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -66,6 +67,9 @@ app.get('/health', (_req, res) => {
 
 // Auth routes (no auth middleware - these handle OAuth callbacks)
 app.use('/api/auth/quickbooks', quickbooksAuthRouter);
+
+// Cron routes (no auth middleware - authenticated via CRON_SECRET header)
+app.use('/api/cron', cronRouter);
 
 // Protected routes (require authentication)
 app.use('/api/users', authMiddleware, usersRouter);

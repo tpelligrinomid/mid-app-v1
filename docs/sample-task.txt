@@ -1,0 +1,1713 @@
+{
+    "id": "86dxeq6fu",
+    "custom_id": null,
+    "custom_item_id": 0,
+    "name": "Develop Brand Elements - Visual Language",
+    "text_content": "",
+    "description": "",
+    "status": {
+        "id": "sc901704307605_wLELe8aV",
+        "status": "archived",
+        "color": "#008844",
+        "orderindex": 4,
+        "type": "closed"
+    },
+    "orderindex": "40303848.00000000000000000000000000000000",
+    "date_created": "1754396354754",
+    "date_updated": "1755537542396",
+    "date_closed": "1755535336023",
+    "date_done": "1755535336023",
+    "archived": true,
+    "creator": {
+        "id": 89305543,
+        "username": "Erin Ham",
+        "color": "#e93d82",
+        "email": "erin.ham@marketersindemand.com",
+        "profilePicture": null
+    },
+    "assignees": [
+        {
+            "id": 89305543,
+            "username": "Erin Ham",
+            "color": "#e93d82",
+            "initials": "EH",
+            "email": "erin.ham@marketersindemand.com",
+            "profilePicture": null
+        }
+    ],
+    "group_assignees": [],
+    "watchers": [
+        {
+            "id": 89305543,
+            "username": "Erin Ham",
+            "color": "#e93d82",
+            "initials": "EH",
+            "email": "erin.ham@marketersindemand.com",
+            "profilePicture": null
+        }
+    ],
+    "checklists": [],
+    "tags": [],
+    "parent": null,
+    "top_level_parent": null,
+    "priority": null,
+    "due_date": "1756454400000",
+    "start_date": null,
+    "points": 10,
+    "time_estimate": null,
+    "time_spent": 0,
+    "custom_fields": [
+        {
+            "id": "c2117eed-63cf-4dc9-99d6-e08f65566fee",
+            "name": "Billed Time",
+            "type": "formula",
+            "type_config": {
+                "version": "1.12",
+                "reset_at": 1750903927822,
+                "is_dynamic": false,
+                "return_types": [
+                    "null"
+                ],
+                "calculation_state": "ready"
+            },
+            "date_created": "1658169506750",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "0ee8e586-b959-4426-bc3e-739c695ab87d",
+            "name": "Client",
+            "type": "drop_down",
+            "type_config": {
+                "sorting": "manual",
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "5dffd12b-6d17-457c-a169-7de546f5116c",
+                        "name": "Finley",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "baa42322-22eb-4c08-b8b6-5585ceed8e71",
+                        "name": "Meegle",
+                        "color": null,
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "a933c7a2-ec38-43f6-9c65-a8a98bdef108",
+                        "name": "All On X-Perts",
+                        "color": null,
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "df2ae607-4e61-421c-9a12-18914fec3b5d",
+                        "name": "Certa",
+                        "color": null,
+                        "orderindex": 3
+                    },
+                    {
+                        "id": "5290938d-2a05-475d-89b3-71b072af9531",
+                        "name": "Content Head",
+                        "color": null,
+                        "orderindex": 4
+                    },
+                    {
+                        "id": "d8b03126-355b-4715-925c-25a79fec6602",
+                        "name": "Content Logistics",
+                        "color": null,
+                        "orderindex": 5
+                    },
+                    {
+                        "id": "e6503780-b9a1-49b5-a14e-7e54ae14ed2d",
+                        "name": "Checkwriters",
+                        "color": null,
+                        "orderindex": 6
+                    },
+                    {
+                        "id": "8700cfd7-121d-44c5-b749-6555c21f3d4b",
+                        "name": "Creative Operations",
+                        "color": null,
+                        "orderindex": 7
+                    },
+                    {
+                        "id": "0bf08442-0e97-4f99-a102-bbd6763892dd",
+                        "name": "Direct with Corrina & Taylor",
+                        "color": null,
+                        "orderindex": 8
+                    },
+                    {
+                        "id": "b5e4c632-40e5-4732-817f-a6bcd0cc75b4",
+                        "name": "Inside Tracker",
+                        "color": null,
+                        "orderindex": 9
+                    },
+                    {
+                        "id": "fcc96a47-9f63-4b5f-afd5-3dedb97692eb",
+                        "name": "memoryBlue",
+                        "color": null,
+                        "orderindex": 10
+                    },
+                    {
+                        "id": "2553844d-e027-41ea-9c0a-9fde4917e9d1",
+                        "name": "Modis",
+                        "color": null,
+                        "orderindex": 11
+                    },
+                    {
+                        "id": "5fea36ea-e2d1-4511-867f-d83cdcf86249",
+                        "name": "On Camera on Brand",
+                        "color": null,
+                        "orderindex": 12
+                    },
+                    {
+                        "id": "e35fe2ef-4a4c-4255-ad16-e334c0726aa4",
+                        "name": "RapidSOS",
+                        "color": null,
+                        "orderindex": 13
+                    },
+                    {
+                        "id": "04e880af-bfd2-4565-99a2-62a11112f37e",
+                        "name": "Rep Matters",
+                        "color": null,
+                        "orderindex": 14
+                    },
+                    {
+                        "id": "71ebe8cf-0b53-4662-a5f4-137b79a1fb5c",
+                        "name": "Recorded Content",
+                        "color": null,
+                        "orderindex": 15
+                    },
+                    {
+                        "id": "c4413347-e4e2-4842-8a91-c06e37a509b4",
+                        "name": "SMB Law Group",
+                        "color": null,
+                        "orderindex": 16
+                    },
+                    {
+                        "id": "af0982d5-b5c3-4868-a965-b276e6016ba1",
+                        "name": "Smiles in the Wild",
+                        "color": null,
+                        "orderindex": 17
+                    },
+                    {
+                        "id": "3ac91e45-1f78-4866-951a-aa5b8d3a0b2c",
+                        "name": "Taking the Lead",
+                        "color": null,
+                        "orderindex": 18
+                    },
+                    {
+                        "id": "918733e1-4e42-436b-8ce8-2d128f2da1bb",
+                        "name": "Tech Qualified",
+                        "color": null,
+                        "orderindex": 19
+                    },
+                    {
+                        "id": "c74be028-d8c5-4008-bc66-d7545b412be1",
+                        "name": "The Anonymous Marketer",
+                        "color": null,
+                        "orderindex": 20
+                    },
+                    {
+                        "id": "5cf043b1-4987-4eda-9aa2-cb5f0172e085",
+                        "name": "The Juice",
+                        "color": null,
+                        "orderindex": 21
+                    },
+                    {
+                        "id": "344d391b-e28c-42ea-8f7b-84286e951c28",
+                        "name": "Thermo Fisher",
+                        "color": null,
+                        "orderindex": 22
+                    },
+                    {
+                        "id": "87b6df12-4803-4b54-b80b-ceec1cdacc5c",
+                        "name": "Tyfone Webinars",
+                        "color": null,
+                        "orderindex": 23
+                    },
+                    {
+                        "id": "48afa3a3-5e6e-4fe7-9a57-867de838001b",
+                        "name": "Unspoken Security",
+                        "color": null,
+                        "orderindex": 24
+                    },
+                    {
+                        "id": "3d18f469-816b-4bc5-aa67-66bc4cd6e39b",
+                        "name": "Verisk",
+                        "color": null,
+                        "orderindex": 25
+                    },
+                    {
+                        "id": "e098f50a-c1e2-4698-b454-2f9d94452153",
+                        "name": "WithMe",
+                        "color": null,
+                        "orderindex": 26
+                    },
+                    {
+                        "id": "6cf8728a-2f1c-4cfb-b057-d00abd45558d",
+                        "name": "Clarify Health Solutions",
+                        "color": null,
+                        "orderindex": 27
+                    },
+                    {
+                        "id": "e4dd071c-97ac-4d2a-95ee-ae7fd3d56c11",
+                        "name": "Collibra",
+                        "color": null,
+                        "orderindex": 28
+                    },
+                    {
+                        "id": "dfb3cf4e-266e-4a74-8af3-fb80d68bf84a",
+                        "name": "Constant Contact",
+                        "color": null,
+                        "orderindex": 29
+                    },
+                    {
+                        "id": "12a9f554-f8cb-42ad-827b-247c2c6af13d",
+                        "name": "Cycle Labs",
+                        "color": null,
+                        "orderindex": 30
+                    },
+                    {
+                        "id": "d48d9df5-3259-4b60-a664-9b9e13df9366",
+                        "name": "ECRI",
+                        "color": null,
+                        "orderindex": 31
+                    },
+                    {
+                        "id": "ee1afc18-ea9b-4817-8611-350371addb39",
+                        "name": "Eseye",
+                        "color": null,
+                        "orderindex": 32
+                    },
+                    {
+                        "id": "b654ae36-b3a4-4319-8d99-4c6d828095fb",
+                        "name": "Graphon",
+                        "color": null,
+                        "orderindex": 33
+                    },
+                    {
+                        "id": "c11ad7cd-69c7-4131-a2ca-da51da4825cf",
+                        "name": "Foundersuite",
+                        "color": null,
+                        "orderindex": 34
+                    },
+                    {
+                        "id": "b6ec79d3-07d2-421d-868b-aa189731016f",
+                        "name": "HYAS",
+                        "color": null,
+                        "orderindex": 35
+                    },
+                    {
+                        "id": "9ebd8038-c74a-4004-81ca-ae18a9f74115",
+                        "name": "Lattice",
+                        "color": null,
+                        "orderindex": 36
+                    },
+                    {
+                        "id": "a33c8c71-20e4-4e78-9bbc-d17318bd67b1",
+                        "name": "LLR Partners",
+                        "color": null,
+                        "orderindex": 37
+                    },
+                    {
+                        "id": "e010d8a8-6bfa-49d4-adea-4222ce3595db",
+                        "name": "Marshall Communications",
+                        "color": null,
+                        "orderindex": 38
+                    },
+                    {
+                        "id": "c2d95a6d-5d36-425e-bd21-84465d37db26",
+                        "name": "Own",
+                        "color": null,
+                        "orderindex": 39
+                    },
+                    {
+                        "id": "66359db3-e22f-4c9f-b360-955bf48f5ecf",
+                        "name": "Reveal",
+                        "color": null,
+                        "orderindex": 40
+                    },
+                    {
+                        "id": "029d5be1-a68a-4ddd-a36c-0c08d86dabd9",
+                        "name": "Top Traders Unplugged",
+                        "color": null,
+                        "orderindex": 41
+                    },
+                    {
+                        "id": "8c162200-8dee-4537-bb02-0f51d0da47f7",
+                        "name": "The Joint Commission",
+                        "color": null,
+                        "orderindex": 42
+                    },
+                    {
+                        "id": "a7ef03fe-c89e-4af9-b52e-056ee936adf4",
+                        "name": "Zartico",
+                        "color": null,
+                        "orderindex": 43
+                    },
+                    {
+                        "id": "2a299a5d-cc71-49d0-9712-52f5904fecb7",
+                        "name": "Adroit",
+                        "color": null,
+                        "orderindex": 44
+                    },
+                    {
+                        "id": "d34a10e8-e38d-4dc4-9d7d-73e27a8f8b9b",
+                        "name": "AirBox",
+                        "color": null,
+                        "orderindex": 45
+                    },
+                    {
+                        "id": "c6f9f79a-669f-4b45-84cd-31c642c742e0",
+                        "name": "Aurora",
+                        "color": null,
+                        "orderindex": 46
+                    },
+                    {
+                        "id": "cb020aa7-9460-43ee-b640-2af5dc1305ff",
+                        "name": "BambooHR",
+                        "color": null,
+                        "orderindex": 47
+                    },
+                    {
+                        "id": "5460f593-1b4a-459e-9cbf-1880b969033b",
+                        "name": "Bazaar Voice",
+                        "color": null,
+                        "orderindex": 48
+                    },
+                    {
+                        "id": "52faebc4-801a-49af-9755-7a6d038f78e2",
+                        "name": "BioSafe",
+                        "color": null,
+                        "orderindex": 49
+                    },
+                    {
+                        "id": "2cda6dd3-6c0c-4558-b78a-94a66fcefcd0",
+                        "name": "BrightStar One",
+                        "color": null,
+                        "orderindex": 50
+                    },
+                    {
+                        "id": "0d480909-78a1-42fe-8f95-96ddb49c17ec",
+                        "name": "Candorly",
+                        "color": null,
+                        "orderindex": 51
+                    },
+                    {
+                        "id": "e62709b1-1090-4be8-9178-2974edbf160c",
+                        "name": "Chapter",
+                        "color": null,
+                        "orderindex": 52
+                    },
+                    {
+                        "id": "0b288e1a-4cb1-45d4-8313-e8a309d6bacb",
+                        "name": "ClearPoint",
+                        "color": null,
+                        "orderindex": 53
+                    },
+                    {
+                        "id": "5fed87b0-99d2-4ea5-aa85-15d01696334b",
+                        "name": "COFACE",
+                        "color": null,
+                        "orderindex": 54
+                    },
+                    {
+                        "id": "0d86c104-e406-4237-afd0-d7e16ceaaf44",
+                        "name": "Connex Commerce",
+                        "color": null,
+                        "orderindex": 55
+                    },
+                    {
+                        "id": "79f74eaf-da3f-4bed-a429-23015bf442bd",
+                        "name": "COTA",
+                        "color": null,
+                        "orderindex": 56
+                    },
+                    {
+                        "id": "c3890e3d-1152-4319-8523-15477094ace6",
+                        "name": "Congruex",
+                        "color": null,
+                        "orderindex": 57
+                    },
+                    {
+                        "id": "79dc517f-41ca-4a8e-a1e4-1ec7f6cd07a7",
+                        "name": "Diamond IT",
+                        "color": null,
+                        "orderindex": 58
+                    },
+                    {
+                        "id": "a100db26-b8b5-4fe0-b5bd-51df14a80f29",
+                        "name": "Exum",
+                        "color": null,
+                        "orderindex": 59
+                    },
+                    {
+                        "id": "58b66e77-44a0-475a-8b03-6d913aea4f02",
+                        "name": "Evo Security",
+                        "color": null,
+                        "orderindex": 60
+                    },
+                    {
+                        "id": "49d296cb-d179-48cc-8da1-a16eaacbbfa1",
+                        "name": "F4NP",
+                        "color": null,
+                        "orderindex": 61
+                    },
+                    {
+                        "id": "b84050b1-405e-4614-a9c4-e23a8a925066",
+                        "name": "FDS",
+                        "color": null,
+                        "orderindex": 62
+                    },
+                    {
+                        "id": "6b217478-2353-4459-9219-e3edb198acc0",
+                        "name": "Hydrian",
+                        "color": null,
+                        "orderindex": 63
+                    },
+                    {
+                        "id": "4e2ff122-ad50-4947-9b8f-432cf80394e6",
+                        "name": "ICC",
+                        "color": null,
+                        "orderindex": 64
+                    },
+                    {
+                        "id": "d2530295-2c5e-4089-a8f3-42a2fa880728",
+                        "name": "iCorps",
+                        "color": null,
+                        "orderindex": 65
+                    },
+                    {
+                        "id": "0514735b-6a3d-48bb-b62a-aa90bb1eae13",
+                        "name": "InMobi",
+                        "color": null,
+                        "orderindex": 66
+                    },
+                    {
+                        "id": "0b0c91d0-8c1e-4a5a-a831-a894853837c3",
+                        "name": "Kolbe",
+                        "color": null,
+                        "orderindex": 67
+                    },
+                    {
+                        "id": "6a7a2ed9-de1d-4e9e-b2fc-8b4be287daa5",
+                        "name": "Logistics Lighting",
+                        "color": null,
+                        "orderindex": 68
+                    },
+                    {
+                        "id": "4b678ff0-552f-470f-af9a-8bc4ce929d5a",
+                        "name": "MCDBS",
+                        "color": null,
+                        "orderindex": 69
+                    },
+                    {
+                        "id": "c690eab5-6a80-4b53-877c-32dd27638a62",
+                        "name": "mobileLIVE",
+                        "color": null,
+                        "orderindex": 70
+                    },
+                    {
+                        "id": "ffe6cee5-25fb-4f7b-b6c6-b6404e2f0d63",
+                        "name": "Mosaic",
+                        "color": null,
+                        "orderindex": 71
+                    },
+                    {
+                        "id": "e3a5383b-34f0-48a9-8107-afbc3101a819",
+                        "name": "Motion",
+                        "color": null,
+                        "orderindex": 72
+                    },
+                    {
+                        "id": "4a6d7f2d-04ba-4606-b955-8fd3c7c97300",
+                        "name": "Myriad 360",
+                        "color": null,
+                        "orderindex": 73
+                    },
+                    {
+                        "id": "989edc5b-1463-4773-858e-852b50526bc6",
+                        "name": "NEACH",
+                        "color": null,
+                        "orderindex": 74
+                    },
+                    {
+                        "id": "543f0581-9a02-4c50-9905-71ab27171e8b",
+                        "name": "New North",
+                        "color": null,
+                        "orderindex": 75
+                    },
+                    {
+                        "id": "2e7a43e0-0bd6-4ab0-9e0c-62583f2f19d6",
+                        "name": "NextUp",
+                        "color": null,
+                        "orderindex": 76
+                    },
+                    {
+                        "id": "627fdc2b-919a-424b-98b7-0f4cc7ad73b7",
+                        "name": "Numen",
+                        "color": null,
+                        "orderindex": 77
+                    },
+                    {
+                        "id": "f3b69b35-dfc0-45ec-a281-ddc3364b7259",
+                        "name": "Only Office",
+                        "color": null,
+                        "orderindex": 78
+                    },
+                    {
+                        "id": "7efa483f-f113-4184-9b9f-1123846bc845",
+                        "name": "Qu",
+                        "color": null,
+                        "orderindex": 79
+                    },
+                    {
+                        "id": "79179bf5-a0ec-4ba6-8c63-89a82323f12f",
+                        "name": "Pulse",
+                        "color": null,
+                        "orderindex": 80
+                    },
+                    {
+                        "id": "6b5a852e-9b08-4f94-a629-f030bc8ecf28",
+                        "name": "Red Oak",
+                        "color": null,
+                        "orderindex": 81
+                    },
+                    {
+                        "id": "e5159ac6-3da6-49aa-a46f-bf4e33417d25",
+                        "name": "RFgen Software",
+                        "color": null,
+                        "orderindex": 82
+                    },
+                    {
+                        "id": "ec9da4b2-f22e-47a8-bcc3-9f7744d312e3",
+                        "name": "Ricoh",
+                        "color": null,
+                        "orderindex": 83
+                    },
+                    {
+                        "id": "11852cf2-061a-4adf-a398-aa842df641d5",
+                        "name": "Ricoh/Avanti",
+                        "color": null,
+                        "orderindex": 84
+                    },
+                    {
+                        "id": "e4bcbb49-cc29-4671-9a79-2061b5d95379",
+                        "name": "Ricoh Imaging",
+                        "color": null,
+                        "orderindex": 85
+                    },
+                    {
+                        "id": "010b6df8-31a7-4d30-82e4-ad430ce11914",
+                        "name": "Rod Miller",
+                        "color": null,
+                        "orderindex": 86
+                    },
+                    {
+                        "id": "33c0eb78-70f7-4cea-9ecf-ee5e57ebc7b5",
+                        "name": "SBBD",
+                        "color": null,
+                        "orderindex": 87
+                    },
+                    {
+                        "id": "82360309-85a7-469b-9a71-56056d96b2ac",
+                        "name": "Scout Systems",
+                        "color": null,
+                        "orderindex": 88
+                    },
+                    {
+                        "id": "b58adae3-cf68-44d5-a501-70c4aae63545",
+                        "name": "Summers Cybersecurity",
+                        "color": null,
+                        "orderindex": 89
+                    },
+                    {
+                        "id": "8dcf9a86-64be-44ca-ba12-214cf0e2f0d4",
+                        "name": "Swipesum",
+                        "color": null,
+                        "orderindex": 90
+                    },
+                    {
+                        "id": "bea99f9d-9e87-4c43-baf7-1ef98846633f",
+                        "name": "Syncro",
+                        "color": null,
+                        "orderindex": 91
+                    },
+                    {
+                        "id": "0a4e2a18-7d07-4afa-892c-48d022cf8fc2",
+                        "name": "T.Con",
+                        "color": null,
+                        "orderindex": 92
+                    },
+                    {
+                        "id": "d28bbaac-1a18-4be8-8333-04100811274b",
+                        "name": "Techmode",
+                        "color": null,
+                        "orderindex": 93
+                    },
+                    {
+                        "id": "7a7dd801-6321-4dbd-bf9c-29c233bb91a2",
+                        "name": "ThirdWave",
+                        "color": null,
+                        "orderindex": 94
+                    },
+                    {
+                        "id": "1f86f88a-3c30-4fd3-935b-b254d8a6f6ee",
+                        "name": "TMS",
+                        "color": null,
+                        "orderindex": 95
+                    },
+                    {
+                        "id": "be4c7729-2303-4e24-b1a6-5c2ddabfd65f",
+                        "name": "Tyfone",
+                        "color": null,
+                        "orderindex": 96
+                    },
+                    {
+                        "id": "ec4c28d2-8fe4-4821-917e-9c995aad64a8",
+                        "name": "VITAL",
+                        "color": null,
+                        "orderindex": 97
+                    },
+                    {
+                        "id": "8f9fc6c9-ee32-402a-b816-ee39e323d518",
+                        "name": "WeFixFreight",
+                        "color": null,
+                        "orderindex": 98
+                    },
+                    {
+                        "id": "5ba61501-a2cb-4f5b-adce-5d7654c2b03c",
+                        "name": "Wilburn",
+                        "color": null,
+                        "orderindex": 99
+                    },
+                    {
+                        "id": "77472aef-32f1-4a72-a5ff-8aabc9740968",
+                        "name": "Wind River",
+                        "color": null,
+                        "orderindex": 100
+                    },
+                    {
+                        "id": "4db75068-4d02-49e1-8aec-da1cec100b3c",
+                        "name": "Dunn Capital",
+                        "color": null,
+                        "orderindex": 101
+                    },
+                    {
+                        "id": "fa70d6e7-ee5f-4385-bbfb-1158da6129a0",
+                        "name": "ThreatMark",
+                        "color": null,
+                        "orderindex": 102
+                    },
+                    {
+                        "id": "5ee02e28-f5c2-4539-acb2-5b0ae17654d1",
+                        "name": "Shockoe",
+                        "color": null,
+                        "orderindex": 103
+                    },
+                    {
+                        "id": "c8db87a7-17cd-49ef-b373-41660991de75",
+                        "name": "Epidaurus Health",
+                        "color": null,
+                        "orderindex": 104
+                    },
+                    {
+                        "id": "337bae27-5ffb-4b70-a96e-f5255fa0af65",
+                        "name": "Just Win Consulting",
+                        "color": null,
+                        "orderindex": 105
+                    },
+                    {
+                        "id": "86eb361a-0195-4b41-bd87-892d5796377c",
+                        "name": "Sedra Solutions",
+                        "color": null,
+                        "orderindex": 106
+                    },
+                    {
+                        "id": "6a00f389-9d30-4a8d-b0ee-cb27cff55d76",
+                        "name": "Numeric",
+                        "color": null,
+                        "orderindex": 107
+                    },
+                    {
+                        "id": "d1c1b987-7f35-48b2-9fbf-838791666f6f",
+                        "name": "AutoBytes",
+                        "color": null,
+                        "orderindex": 108
+                    },
+                    {
+                        "id": "a6a36f38-78f3-441d-b8f0-a91048ef721f",
+                        "name": "Noetic",
+                        "color": null,
+                        "orderindex": 109
+                    },
+                    {
+                        "id": "a8f6d871-440e-4ce2-9018-68cb10685ecf",
+                        "name": "Global Shared Services",
+                        "color": null,
+                        "orderindex": 110
+                    },
+                    {
+                        "id": "d1578f70-6e16-4139-a4fc-6913b1998028",
+                        "name": "Lumen5",
+                        "color": null,
+                        "orderindex": 111
+                    },
+                    {
+                        "id": "a0af6fbc-08ea-450b-8877-b4607ba6c41b",
+                        "name": "MiD",
+                        "color": null,
+                        "orderindex": 112
+                    },
+                    {
+                        "id": "c7745c1d-ffa6-4fa2-a780-e2e98f781bcf",
+                        "name": "Fundingstack",
+                        "color": null,
+                        "orderindex": 113
+                    },
+                    {
+                        "id": "8d145abb-74f4-4aa7-ab51-872334fbc8d8",
+                        "name": "Neuralink Systems",
+                        "color": null,
+                        "orderindex": 114
+                    },
+                    {
+                        "id": "96005ae1-6aed-4a93-8e66-9617b45cb327",
+                        "name": "Transport Topics",
+                        "color": null,
+                        "orderindex": 115
+                    },
+                    {
+                        "id": "6a3a4ce1-cc5c-4829-bd0f-a39522794a2f",
+                        "name": "Arpio",
+                        "color": null,
+                        "orderindex": 116
+                    },
+                    {
+                        "id": "d7483969-514c-4a48-b1a4-85c651c12900",
+                        "name": "Cyberhaven",
+                        "color": null,
+                        "orderindex": 117
+                    },
+                    {
+                        "id": "96d0e205-52f2-457b-bb73-f1432d3b02b8",
+                        "name": "Cybernetix",
+                        "color": null,
+                        "orderindex": 118
+                    },
+                    {
+                        "id": "df3a36e8-6201-4a52-bdf6-5dc0b6996880",
+                        "name": "Evolv",
+                        "color": null,
+                        "orderindex": 119
+                    },
+                    {
+                        "id": "00e048a1-44d7-47d6-ae06-3393be3187ff",
+                        "name": "FoxyAI",
+                        "color": null,
+                        "orderindex": 120
+                    },
+                    {
+                        "id": "b0660a89-3279-4380-965a-d0657e3ed8a1",
+                        "name": "Powerhouse Gym",
+                        "color": null,
+                        "orderindex": 121
+                    },
+                    {
+                        "id": "062ccb24-7108-47af-8d2a-f17aaddb99b5",
+                        "name": "Realtime Robotics",
+                        "color": null,
+                        "orderindex": 122
+                    },
+                    {
+                        "id": "4677db6f-18f1-4181-a2b9-9bd003b08ed5",
+                        "name": "Rugged Robotics",
+                        "color": null,
+                        "orderindex": 123
+                    },
+                    {
+                        "id": "86a2fb33-0e48-4799-acd2-2390214458aa",
+                        "name": "Symbotic",
+                        "color": null,
+                        "orderindex": 124
+                    },
+                    {
+                        "id": "9a453b0f-fe6d-46fa-8fd3-5f1c1ced5c73",
+                        "name": "TrueNAS",
+                        "color": null,
+                        "orderindex": 125
+                    },
+                    {
+                        "id": "75f1cba6-d8ab-480c-8ee1-35e92f82f1f9",
+                        "name": "ZiveAI",
+                        "color": null,
+                        "orderindex": 126
+                    },
+                    {
+                        "id": "d73d5ef3-13f7-4015-b84a-4d969b14e516",
+                        "name": "Bionomous",
+                        "color": null,
+                        "orderindex": 127
+                    },
+                    {
+                        "id": "f8068d34-e3bc-4c6f-ad27-5a542c326af8",
+                        "name": "Planon",
+                        "color": null,
+                        "orderindex": 128
+                    },
+                    {
+                        "id": "9f5570a5-6b0d-4a15-b574-be5afcd79b57",
+                        "name": "PTO Exchange",
+                        "color": null,
+                        "orderindex": 129
+                    },
+                    {
+                        "id": "628fab47-5045-491a-ae09-229e124ade3a",
+                        "name": "Ease",
+                        "color": null,
+                        "orderindex": 130
+                    },
+                    {
+                        "id": "70a609f7-b0db-4246-805a-06d822b764f2",
+                        "name": "Beamable",
+                        "color": null,
+                        "orderindex": 131
+                    },
+                    {
+                        "id": "55c4b8bb-1aae-4608-9f24-023278e0de0c",
+                        "name": "Finfare Financial",
+                        "color": null,
+                        "orderindex": 132
+                    },
+                    {
+                        "id": "d057910a-695b-40c4-8271-f0d3b1c17d31",
+                        "name": "Avanti",
+                        "color": null,
+                        "orderindex": 133
+                    },
+                    {
+                        "id": "b92c0f30-0b9b-4b13-83d1-a7d739828483",
+                        "name": "Cyberhaven – Field Marketing",
+                        "color": null,
+                        "orderindex": 134
+                    },
+                    {
+                        "id": "4f31db12-ebe8-4ed5-bdd2-9c74abec7e10",
+                        "name": "TrueNAS - ABM",
+                        "color": null,
+                        "orderindex": 135
+                    },
+                    {
+                        "id": "eabf253e-d82e-49d8-a9dd-c0ca23922551",
+                        "name": "Beamable - Website",
+                        "color": null,
+                        "orderindex": 136
+                    },
+                    {
+                        "id": "b6376410-958b-441f-9a86-c4d1815be9ae",
+                        "name": "Agrippon",
+                        "color": null,
+                        "orderindex": 137
+                    },
+                    {
+                        "id": "785320c1-d95e-4d08-a886-553d8e1ea800",
+                        "name": "LiveRecover",
+                        "color": null,
+                        "orderindex": 138
+                    },
+                    {
+                        "id": "78d40318-3033-4e13-8f2a-1fd7d5d5b3f3",
+                        "name": "Summa SCI",
+                        "color": null,
+                        "orderindex": 139
+                    },
+                    {
+                        "id": "ff7be787-6a7d-4bda-8e34-3194896aed2a",
+                        "name": "Enki",
+                        "color": null,
+                        "orderindex": 140
+                    },
+                    {
+                        "id": "c3707282-3d4a-46eb-9358-c2b63e522744",
+                        "name": "Encamp",
+                        "color": null,
+                        "orderindex": 141
+                    },
+                    {
+                        "id": "cf992e9a-bd71-4ae1-b596-fb88dbfbf5ec",
+                        "name": "Chetu",
+                        "color": null,
+                        "orderindex": 142
+                    },
+                    {
+                        "id": "4baa1fad-49ec-4dc2-8476-a1b44cb89451",
+                        "name": "Ponce Bank",
+                        "color": null,
+                        "orderindex": 143
+                    },
+                    {
+                        "id": "2fd50816-d7db-4d25-9da0-59111f95eaca",
+                        "name": "Savvy Source",
+                        "color": null,
+                        "orderindex": 144
+                    },
+                    {
+                        "id": "c2dbce21-c4b1-4f5c-81d2-b70bac628053",
+                        "name": "Friends and Family Capital",
+                        "color": null,
+                        "orderindex": 145
+                    },
+                    {
+                        "id": "e13d7e05-e745-4bd5-bb89-188a7a9262be",
+                        "name": "Ecosystems",
+                        "color": null,
+                        "orderindex": 146
+                    },
+                    {
+                        "id": "f306b9fd-2e06-4024-a07f-de38429924b6",
+                        "name": "Data Assessment Solutions",
+                        "color": null,
+                        "orderindex": 147
+                    }
+                ]
+            },
+            "date_created": "1654358068332",
+            "hide_from_guests": true,
+            "value": 117,
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "43c00620-ecde-45d6-964c-61150c767582",
+            "name": "Client Need",
+            "type": "text",
+            "type_config": {},
+            "date_created": "1685475681752",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "208569a0-15e3-430b-b0f4-94209533d2a4",
+            "name": "Contract ID",
+            "type": "short_text",
+            "type_config": {},
+            "date_created": "1686337893139",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "8c17ef9a-5970-4472-905d-16b97a0d3ef2",
+            "name": "Contract Stage",
+            "type": "drop_down",
+            "type_config": {
+                "default": 0,
+                "placeholder": null,
+                "options": [
+                    {
+                        "id": "f988717f-af2f-4b95-be2d-5130fd2237ea",
+                        "name": "Initial Engagement",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "ae03fbf3-9213-451e-b963-dcb6a84d5beb",
+                        "name": "Quarterly Renewal",
+                        "color": null,
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "9ac33fd9-1bee-4cff-8565-fa10f434720c",
+                        "name": "Monthly Renewal",
+                        "color": null,
+                        "orderindex": 2
+                    }
+                ]
+            },
+            "date_created": "1686239492925",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "4f1377e5-7ebc-42a5-9813-5395c50565a3",
+            "name": "Contracting Process",
+            "type": "drop_down",
+            "type_config": {
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "f80a6227-0292-474d-a153-93eb46df14c2",
+                        "name": "Possible Outsource",
+                        "color": "#e50000",
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "936b6560-22e0-4cbf-97c2-78216286c5aa",
+                        "name": "Identifying Contractor",
+                        "color": "#f9d900",
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "4e1c7e25-b075-4740-b8a6-ec393eea473e",
+                        "name": "Contractor Selected",
+                        "color": "#fdfdfd",
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "4a2cf336-a8de-4fa0-94c0-ce2f720b3dfe",
+                        "name": "Handed off to SME",
+                        "color": "#9b59b6",
+                        "orderindex": 3
+                    }
+                ]
+            },
+            "date_created": "1659700504347",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "3ce72685-9a51-4a8d-afc5-a8972b63f778",
+            "name": "Date to Waiting on Client",
+            "type": "date",
+            "type_config": {},
+            "date_created": "1702906673510",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "5fb8d4b0-6a35-43d7-b376-87e74948cdd4",
+            "name": "Delivery Role",
+            "type": "drop_down",
+            "type_config": {
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "ae3a996f-85d1-4673-8c89-4b94c43ee2b4",
+                        "name": "Director of Marketing",
+                        "color": "#AF7E2E",
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "98777c9d-d8ac-4fd9-8b4e-4f663877f7d5",
+                        "name": "Strategist",
+                        "color": "#f9d900",
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "ffe83b99-cdbd-4feb-b8ca-620712aeeb30",
+                        "name": "Copywriter",
+                        "color": "#667684",
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "0feac835-fc9c-498d-bcb1-ab837b262106",
+                        "name": "SEO Specialist",
+                        "color": "#e50000",
+                        "orderindex": 3
+                    },
+                    {
+                        "id": "d8119eea-b7ba-4ffd-95ce-c4d0ed14b369",
+                        "name": "Designer",
+                        "color": "#7C4DFF",
+                        "orderindex": 4
+                    },
+                    {
+                        "id": "41bb7288-23ce-468c-9095-ca7dd9684808",
+                        "name": "Developer",
+                        "color": "#b5bcc2",
+                        "orderindex": 5
+                    },
+                    {
+                        "id": "0bdc20d1-9de2-4836-b45d-71447905d9e8",
+                        "name": "Project Manager",
+                        "color": "#f900ea",
+                        "orderindex": 6
+                    },
+                    {
+                        "id": "1d3d5aa7-c7a9-499c-b1d8-9d0e4c759e1d",
+                        "name": "MarTech Specialist",
+                        "color": "#81B1FF",
+                        "orderindex": 7
+                    },
+                    {
+                        "id": "e60228ac-d795-42de-b5ba-f2aa29bc7a97",
+                        "name": "Videographer",
+                        "color": "#AF7E2E",
+                        "orderindex": 8
+                    },
+                    {
+                        "id": "28d50663-6e4a-43a3-a812-9fdca83c2bb7",
+                        "name": "Social Media Specialist",
+                        "color": "#2ecd6f",
+                        "orderindex": 9
+                    },
+                    {
+                        "id": "cb628bf7-cfda-4d99-8c59-95cfb68a5081",
+                        "name": "Proofer/Editor",
+                        "color": "#81B1FF",
+                        "orderindex": 10
+                    },
+                    {
+                        "id": "f191b2ae-07d1-4b26-9e74-e34e16b662e1",
+                        "name": "Photographer",
+                        "color": "#02BCD4",
+                        "orderindex": 11
+                    },
+                    {
+                        "id": "6c3cbc55-4fb0-4e95-a58f-b857aa9532b6",
+                        "name": "Producer",
+                        "color": "#FF7FAB",
+                        "orderindex": 12
+                    },
+                    {
+                        "id": "bb657de9-e2ee-4d1b-8f5a-52dd4658e72e",
+                        "name": "Paid Specialist",
+                        "color": "#9b59b6",
+                        "orderindex": 13
+                    },
+                    {
+                        "id": "99b7ffb3-1827-4d48-b258-56e9f12dfce6",
+                        "name": "Email Specialist",
+                        "color": "#FF4081",
+                        "orderindex": 14
+                    },
+                    {
+                        "id": "5ef34da7-44af-4816-b5fd-af66dbb24946",
+                        "name": "Scrum Master",
+                        "color": "#1bbc9c",
+                        "orderindex": 15
+                    },
+                    {
+                        "id": "42aa70e6-eed7-479d-a80e-b40b4bc9ba4e",
+                        "name": "Client",
+                        "color": "#B2E8EA",
+                        "orderindex": 16
+                    },
+                    {
+                        "id": "b374b9cd-6304-4bfb-bfa2-817facd872b3",
+                        "name": "Sales",
+                        "color": "#667684",
+                        "orderindex": 17
+                    }
+                ]
+            },
+            "date_created": "1654047251165",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "5512c5bd-a982-4b55-8e1a-303343c673d0",
+            "name": "External Description",
+            "type": "text",
+            "type_config": {},
+            "date_created": "1694115143956",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "544ab838-4f0f-4f51-b0d3-a46474d9da1e",
+            "name": "Goal Type",
+            "type": "drop_down",
+            "type_config": {
+                "default": 0,
+                "placeholder": null,
+                "options": [
+                    {
+                        "id": "59f83713-ac33-45f5-9097-ad17e0c23cf6",
+                        "name": "Objective",
+                        "color": "#04A9F4",
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "d559ee62-46a8-4a6d-92a2-534d9de6d026",
+                        "name": "Key Result",
+                        "color": "#1bbc9c",
+                        "orderindex": 1
+                    }
+                ]
+            },
+            "date_created": "1654623221417",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "14bc55b9-f6df-4159-bd4a-0a2c3ed29b38",
+            "name": "Growth Task",
+            "type": "checkbox",
+            "type_config": {},
+            "date_created": "1736716528659",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "c2cc6812-3000-4907-830b-9225c784945c",
+            "name": "Hours > Points Equivalent",
+            "type": "formula",
+            "type_config": {
+                "simple": false,
+                "formula": "Round(TASK_TIME_TRACKED_HOURS*1.75,2)",
+                "version": "1.12",
+                "reset_at": 1750901536226,
+                "is_dynamic": false,
+                "return_types": [
+                    "number"
+                ],
+                "calculation_state": "ready"
+            },
+            "date_created": "1745351448646",
+            "hide_from_guests": false,
+            "value": "0",
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "c5fd10c3-4310-4012-9dc5-71d2e00cc40f",
+            "name": "Hours > Points Equivalent 1.65",
+            "type": "formula",
+            "type_config": {
+                "simple": false,
+                "formula": "Round(TASK_TIME_TRACKED_HOURS*1.65,2)",
+                "version": "1.12",
+                "reset_at": 1750901536223,
+                "is_dynamic": false,
+                "return_types": [
+                    "number"
+                ],
+                "calculation_state": "ready"
+            },
+            "date_created": "1749749303864",
+            "hide_from_guests": true,
+            "value": "0",
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "0490b964-beb3-404f-b9a3-3e0a89281ad5",
+            "name": "Invoice Amount",
+            "type": "currency",
+            "type_config": {
+                "default": null,
+                "precision": 2,
+                "currency_type": "USD"
+            },
+            "date_created": "1702564977721",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "191653b3-7956-40ca-b806-d0c009d22be8",
+            "name": "Invoice Date",
+            "type": "date",
+            "type_config": {},
+            "date_created": "1709311370924",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "f80c6e8e-e8e5-43c6-8173-8b5d637c57a9",
+            "name": "MRR",
+            "type": "currency",
+            "type_config": {
+                "default": null,
+                "precision": 2,
+                "currency_type": "USD"
+            },
+            "date_created": "1689095288300",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "0c1a2861-c601-4202-b728-599c6c86bab6",
+            "name": "Next Bill Due Date",
+            "type": "date",
+            "type_config": {},
+            "date_created": "1702564954337",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "88268203-630a-4213-8f71-c4f8727ef083",
+            "name": "Parent Task Name",
+            "type": "short_text",
+            "type_config": {},
+            "date_created": "1718308360474",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "9884b25d-91db-41b0-9df4-1602576f5b24",
+            "name": "Payment Type",
+            "type": "drop_down",
+            "type_config": {
+                "default": 0,
+                "sorting": "manual",
+                "placeholder": null,
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "7f711744-fafd-47dd-b86c-94a43b2d1207",
+                        "name": "Credit Card",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "c5ab0abc-0646-4248-8e12-729fb010730c",
+                        "name": "Invoice",
+                        "color": null,
+                        "orderindex": 1
+                    }
+                ]
+            },
+            "date_created": "1694440765877",
+            "hide_from_guests": false,
+            "value": 1,
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "b61c1316-669d-4ee9-86c6-620025d61946",
+            "name": "Points",
+            "type": "number",
+            "type_config": {},
+            "date_created": "1671800276466",
+            "hide_from_guests": true,
+            "required": false
+        },
+        {
+            "id": "6db65066-d7b1-4dfe-8a1a-4cc8c497ac54",
+            "name": "Progress",
+            "type": "manual_progress",
+            "type_config": {
+                "end": 10,
+                "start": 0
+            },
+            "date_created": "1654623336254",
+            "hide_from_guests": false,
+            "value": {
+                "current": 0,
+                "percent_completed": 0
+            },
+            "required": false
+        },
+        {
+            "id": "5f781152-a09d-43b5-bd59-2bea2d6100ae",
+            "name": "Service Line",
+            "type": "drop_down",
+            "type_config": {
+                "default": 0,
+                "sorting": "manual",
+                "placeholder": null,
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "fe269bfc-4916-4752-9b92-dabaa81f8243",
+                        "name": "Account Service",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "0161e7fd-7936-40f8-906a-7f6c5fab2eb0",
+                        "name": "Branding",
+                        "color": null,
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "a224b988-49aa-452b-9b6a-a4a3017c25f5",
+                        "name": "Content",
+                        "color": null,
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "d368410b-332c-4a94-a319-9f1081951d72",
+                        "name": "MarTech",
+                        "color": null,
+                        "orderindex": 3
+                    },
+                    {
+                        "id": "fdf46aad-9c63-42fd-a6e3-7487d8e2cd7b",
+                        "name": "Organic Social",
+                        "color": null,
+                        "orderindex": 4
+                    },
+                    {
+                        "id": "24ab8a49-7aad-40c0-92ad-77473772b332",
+                        "name": "Paid Media",
+                        "color": null,
+                        "orderindex": 5
+                    },
+                    {
+                        "id": "ce8396d5-67b7-49d3-82aa-8fd64ae6eb07",
+                        "name": "PR",
+                        "color": null,
+                        "orderindex": 6
+                    },
+                    {
+                        "id": "90728c33-92e4-4914-b3a2-14c8e8847555",
+                        "name": "SEO",
+                        "color": null,
+                        "orderindex": 7
+                    },
+                    {
+                        "id": "19f8b2a5-7755-4d2e-b5a7-903cbd019a6b",
+                        "name": "Web",
+                        "color": null,
+                        "orderindex": 8
+                    },
+                    {
+                        "id": "3294d875-afba-494a-ab36-6037b955de87",
+                        "name": "Operations",
+                        "color": null,
+                        "orderindex": 9
+                    },
+                    {
+                        "id": "36e3ca7a-5399-4a52-9adc-7a14cd42e712",
+                        "name": "Account Based Marketing",
+                        "color": null,
+                        "orderindex": 10
+                    },
+                    {
+                        "id": "73879e3e-79de-4af4-bc4e-be87a1740d4a",
+                        "name": "Project Management",
+                        "color": null,
+                        "orderindex": 11
+                    },
+                    {
+                        "id": "745245bd-984b-4820-af24-75aeb184f2ce",
+                        "name": "Design",
+                        "color": null,
+                        "orderindex": 12
+                    },
+                    {
+                        "id": "d1c5745e-dbb7-4474-a8b1-4dab97c3cdec",
+                        "name": "Development",
+                        "color": null,
+                        "orderindex": 13
+                    }
+                ]
+            },
+            "date_created": "1686678124726",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "e3effd13-2e34-40fb-a838-e426ffcae6c8",
+            "name": "Team Lead",
+            "type": "users",
+            "type_config": {
+                "single_user": true,
+                "include_groups": null,
+                "include_guests": false,
+                "include_team_members": true
+            },
+            "date_created": "1690302842840",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "bb4056e0-8600-478a-8b41-09abbe2d2f76",
+            "name": "Transaction Type",
+            "type": "drop_down",
+            "type_config": {
+                "sorting": "manual",
+                "options": [
+                    {
+                        "id": "82122924-59d5-440b-b990-2807e9a05294",
+                        "name": "Invoice",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "97448d85-7bbf-4126-96dc-5ed4b6df13b8",
+                        "name": "Credit Memo",
+                        "color": null,
+                        "orderindex": 1
+                    }
+                ]
+            },
+            "date_created": "1726854295852",
+            "hide_from_guests": false,
+            "value": 0,
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "30fc1bad-a70c-40d9-8617-80bb7b5b0f8d",
+            "name": "Deliverable Asset Type",
+            "type": "drop_down",
+            "type_config": {
+                "sorting": "manual",
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "6439fc5e-1b14-457e-a6c8-789e5395da17",
+                        "name": "PDF",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "9b302215-7408-4a97-b6ef-7a71a8a2de75",
+                        "name": "Video",
+                        "color": null,
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "e48dab79-867a-4a6d-8a17-6a7d56e22fa4",
+                        "name": "Audio",
+                        "color": null,
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "77b335d7-5741-4b90-be74-29bddd5457f5",
+                        "name": "Web",
+                        "color": null,
+                        "orderindex": 3
+                    },
+                    {
+                        "id": "ee294177-44bc-44a2-8265-efe0136f9309",
+                        "name": "Image",
+                        "color": null,
+                        "orderindex": 4
+                    },
+                    {
+                        "id": "26c7f3f7-1878-45d3-b429-108655e6bf1d",
+                        "name": "https://www.techmode.com/amazon-connect-2/",
+                        "color": null,
+                        "orderindex": 5
+                    },
+                    {
+                        "id": "6c8c4f9e-9fed-4ebd-9cef-de8ce5906d22",
+                        "name": "https://50136759.hubspotpreview-na1.com/_hcms/preview/email/196103279688?portalId=50136759&preview_key=CSgZdCVC&_preview=true&from_buffer=true&hsPreviewerApp=email&cacheBust=1757992838394",
+                        "color": null,
+                        "orderindex": 6
+                    }
+                ]
+            },
+            "date_created": "1708549259355",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "ab7c8ff1-5dde-44e0-ba5c-5ad5fb1afb23",
+            "name": "Internal Only",
+            "type": "checkbox",
+            "type_config": {},
+            "date_created": "1702063146217",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "49bccdb9-6413-496c-894c-bed6feb197bd",
+            "name": "Link to Final Deliverable",
+            "type": "url",
+            "type_config": {},
+            "date_created": "1675281984495",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "1247a0ff-d003-4b68-b097-92fd73dd6a8c",
+            "name": "Link to Review Tool",
+            "type": "url",
+            "type_config": {},
+            "date_created": "1674839169376",
+            "hide_from_guests": false,
+            "required": false
+        },
+        {
+            "id": "9e3d9731-4b75-4a85-bcd5-43a019b93093",
+            "name": "Record Type",
+            "type": "drop_down",
+            "type_config": {
+                "default": 0,
+                "placeholder": null,
+                "new_drop_down": true,
+                "options": [
+                    {
+                        "id": "3d8100dd-c87c-4066-8c56-cd97fde71467",
+                        "name": "Deliverable",
+                        "color": null,
+                        "orderindex": 0
+                    },
+                    {
+                        "id": "bfe83d26-18a6-4c67-a1a4-99989459da3a",
+                        "name": "Goal",
+                        "color": null,
+                        "orderindex": 1
+                    },
+                    {
+                        "id": "792dbcfe-8cbb-4d12-8058-29fa94149278",
+                        "name": "Invoice",
+                        "color": null,
+                        "orderindex": 2
+                    },
+                    {
+                        "id": "f974e0f0-f560-4206-8b7c-97d0599c9658",
+                        "name": "Cost",
+                        "color": null,
+                        "orderindex": 3
+                    }
+                ]
+            },
+            "date_created": "1654047360435",
+            "hide_from_guests": true,
+            "value": 0,
+            "value_richtext": null,
+            "required": false
+        },
+        {
+            "id": "be4e8ce9-e1bc-4624-a8ea-f3e8e09ed829",
+            "name": "Task Description",
+            "type": "text",
+            "type_config": {},
+            "date_created": "1658347635059",
+            "hide_from_guests": false,
+            "required": false
+        }
+    ],
+    "dependencies": [],
+    "linked_tasks": [],
+    "locations": [],
+    "team_id": "14292505",
+    "url": "https://app.clickup.com/t/86dxeq6fu",
+    "sharing": {
+        "public": false,
+        "public_share_expires_on": null,
+        "public_fields": [
+            "assignees",
+            "priority",
+            "due_date",
+            "content",
+            "comments",
+            "attachments",
+            "customFields",
+            "subtasks",
+            "tags",
+            "checklists",
+            "coverimage"
+        ],
+        "token": null,
+        "seo_optimized": false
+    },
+    "permission_level": "create",
+    "list": {
+        "id": "901704307605",
+        "name": "Deliverables",
+        "access": true
+    },
+    "project": {
+        "id": "90172248168",
+        "name": "Cyberhaven - CDE - MID20257266",
+        "hidden": false,
+        "access": true
+    },
+    "folder": {
+        "id": "90172248168",
+        "name": "Cyberhaven - CDE - MID20257266",
+        "hidden": false,
+        "access": true
+    },
+    "space": {
+        "id": "61312210"
+    },
+    "attachments": []
+}

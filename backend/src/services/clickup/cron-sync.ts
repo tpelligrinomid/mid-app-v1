@@ -745,15 +745,15 @@ export class ClickUpCronSyncService {
    * Sets parent_task_id based on clickup_parent_id
    */
   async resolveParentRelationships(): Promise<number> {
-    // Get all tasks that have a clickup_parent_id but no parent_task_id
+    // Get all tasks that have no parent_task_id set yet
+    // We filter for clickup_parent_id in application code since db-proxy doesn't support NOT NULL filters
     const { data: orphanedTasks, error: selectError } = await dbProxy.select<Array<{
       task_id: string;
-      clickup_parent_id: string;
+      clickup_parent_id: string | null;
     }>>('pulse_tasks', {
       columns: 'task_id, clickup_parent_id',
       filters: {
-        parent_task_id: null,
-        'clickup_parent_id.not': null
+        parent_task_id: null
       }
     });
 
@@ -766,7 +766,7 @@ export class ClickUpCronSyncService {
       return 0;
     }
 
-    // Filter out tasks with null clickup_parent_id (the filter might not work as expected)
+    // Filter to only tasks that have a clickup_parent_id (subtasks)
     const tasksToResolve = orphanedTasks.filter(t => t.clickup_parent_id);
 
     let resolvedCount = 0;

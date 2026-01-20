@@ -178,12 +178,30 @@ export class ClickUpCronSyncService {
 
             console.log(`[ClickUp Cron Sync] Processing ${tasks.length} tasks from folder ${folder.clickup_folder_id}`);
 
-            const batchSize = syncConfig.clickup.batchSize;
-            for (let i = 0; i < tasks.length; i += batchSize) {
-              const batch = tasks.slice(i, i + batchSize);
-              await Promise.all(batch.map(task =>
-                this.transformAndStoreTask(task, folder.contract_id, folder.clickup_folder_id)
-              ));
+            // Batch upsert tasks (50 at a time to avoid overwhelming Edge Function)
+            const upsertBatchSize = 50;
+            for (let i = 0; i < tasks.length; i += upsertBatchSize) {
+              const batch = tasks.slice(i, i + upsertBatchSize);
+
+              // Transform all tasks in this batch
+              const transformedBatch = batch.map(task =>
+                this.transformTask(task, folder.contract_id, folder.clickup_folder_id)
+              );
+
+              // Upsert the entire batch in one request
+              const { error } = await dbProxy.upsert('pulse_tasks', transformedBatch, {
+                onConflict: 'clickup_task_id'
+              });
+
+              if (error) {
+                console.error(`[ClickUp Cron Sync] Batch upsert error:`, error);
+                // Continue with next batch rather than failing entire folder
+              }
+
+              // Small delay between batches to avoid overwhelming the Edge Function
+              if (i + upsertBatchSize < tasks.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
             }
 
             results.tasksProcessed += tasks.length;
@@ -386,14 +404,14 @@ export class ClickUpCronSyncService {
   }
 
   /**
-   * Transform and store a task
+   * Transform a ClickUp task to database format (without storing)
    */
-  private async transformAndStoreTask(
+  private transformTask(
     clickupTask: ClickUpTask,
     contractId: string | null,
     folderId: string
-  ): Promise<void> {
-    const transformed = {
+  ): Record<string, unknown> {
+    return {
       clickup_task_id: clickupTask.id,
       clickup_parent_id: clickupTask.parent || null,
       contract_id: contractId,
@@ -426,15 +444,6 @@ export class ClickUpCronSyncService {
       last_synced_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-
-    const { error } = await dbProxy.upsert('pulse_tasks', transformed, {
-      onConflict: 'clickup_task_id'
-    });
-
-    if (error) {
-      console.error(`[ClickUp Cron Sync] Error storing task ${clickupTask.id}:`, error);
-      throw new Error(error.message);
-    }
   }
 
   private extractPointsFromCustomFields(customFields?: Array<{ id: string; name: string; value?: unknown }>): number | null {

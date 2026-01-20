@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
 import { ClickUpSyncService } from '../services/clickup/sync.js';
 import { syncConfig } from '../config/sync-config.js';
+import { createUserClient } from '../utils/supabase.js';
 
 const router = Router();
 
@@ -10,6 +10,13 @@ const router = Router();
  * Set CRON_SECRET environment variable on Render
  */
 const CRON_SECRET = process.env.CRON_SECRET;
+
+/**
+ * System user token for cron jobs
+ * This should be a valid JWT for an admin user in your system
+ * Set SYSTEM_USER_TOKEN environment variable on Render
+ */
+const SYSTEM_USER_TOKEN = process.env.SYSTEM_USER_TOKEN;
 
 /**
  * Middleware to verify cron request authenticity
@@ -34,17 +41,15 @@ function verifyCronSecret(req: Request, res: Response, next: () => void) {
 }
 
 /**
- * Create a Supabase client with service role for cron jobs
+ * Create a Supabase client for cron jobs using system user token
+ * This uses the same auth pattern as the rest of the app (no service role key needed)
  */
-function createServiceClient() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for cron jobs');
+function createCronClient() {
+  if (!SYSTEM_USER_TOKEN) {
+    throw new Error('SYSTEM_USER_TOKEN is required for cron jobs. Create an admin user and set their JWT as this env var.');
   }
 
-  return createClient(supabaseUrl, supabaseServiceKey);
+  return createUserClient(SYSTEM_USER_TOKEN);
 }
 
 // POST /api/cron/clickup-sync
@@ -82,7 +87,7 @@ router.post('/clickup-sync', verifyCronSecret, async (req: Request, res: Respons
     }
 
     // Create Supabase client with service role
-    const supabase = createServiceClient();
+    const supabase = createCronClient();
 
     // Run sync
     const syncService = new ClickUpSyncService(supabase);
@@ -151,7 +156,7 @@ router.post('/clickup-full-sync', verifyCronSecret, async (req: Request, res: Re
       return;
     }
 
-    const supabase = createServiceClient();
+    const supabase = createCronClient();
     const syncService = new ClickUpSyncService(supabase);
     const results = await syncService.runSync({ mode: 'full' });
 

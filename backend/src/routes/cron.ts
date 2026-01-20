@@ -23,7 +23,14 @@ function verifyCronSecret(req: Request, res: Response, next: () => void) {
 
   // Check Authorization header
   const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== `Bearer ${CRON_SECRET}`) {
+  const expected = `Bearer ${CRON_SECRET}`;
+
+  // Debug logging
+  console.log('[Cron] Auth check - received:', authHeader ? `"${authHeader}"` : '(none)');
+  console.log('[Cron] Auth check - expected:', `"${expected}"`);
+  console.log('[Cron] Auth check - match:', authHeader === expected);
+
+  if (!authHeader || authHeader !== expected) {
     console.error('[Cron] Unauthorized cron request - invalid or missing secret');
     res.status(401).json({ error: 'Unauthorized' });
     return;

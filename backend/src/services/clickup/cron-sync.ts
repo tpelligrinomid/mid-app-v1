@@ -205,6 +205,11 @@ export class ClickUpCronSyncService {
         if (mode === 'full') {
           await this.markDeletedTasks();
         }
+
+        // Resolve parent/subtask relationships
+        console.log('[ClickUp Cron Sync] Resolving parent task relationships...');
+        const resolvedCount = await this.resolveParentRelationships();
+        console.log(`[ClickUp Cron Sync] Resolved ${resolvedCount} parent relationships`);
       }
 
       // 3. Sync invoice tasks
@@ -390,6 +395,7 @@ export class ClickUpCronSyncService {
   ): Promise<void> {
     const transformed = {
       clickup_task_id: clickupTask.id,
+      clickup_parent_id: clickupTask.parent || null,
       contract_id: contractId,
       clickup_folder_id: folderId,
       clickup_list_id: clickupTask.list_id || clickupTask.list?.id,
@@ -723,6 +729,62 @@ export class ClickUpCronSyncService {
     // For now, log and skip
     console.log('[ClickUp Cron Sync] Note: Deleted task marking may require manual cleanup');
     return 0;
+  }
+
+  /**
+   * Resolve parent/subtask relationships
+   * Sets parent_task_id based on clickup_parent_id
+   */
+  async resolveParentRelationships(): Promise<number> {
+    // Get all tasks that have a clickup_parent_id but no parent_task_id
+    const { data: orphanedTasks, error: selectError } = await dbProxy.select<Array<{
+      task_id: string;
+      clickup_parent_id: string;
+    }>>('pulse_tasks', {
+      columns: 'task_id, clickup_parent_id',
+      filters: {
+        parent_task_id: null,
+        'clickup_parent_id.not': null
+      }
+    });
+
+    if (selectError) {
+      console.error('[ClickUp Cron Sync] Error fetching orphaned tasks:', selectError);
+      return 0;
+    }
+
+    if (!orphanedTasks || orphanedTasks.length === 0) {
+      return 0;
+    }
+
+    // Filter out tasks with null clickup_parent_id (the filter might not work as expected)
+    const tasksToResolve = orphanedTasks.filter(t => t.clickup_parent_id);
+
+    let resolvedCount = 0;
+
+    for (const task of tasksToResolve) {
+      // Look up the parent task by its clickup_task_id
+      const { data: parentData } = await dbProxy.select<Array<{ task_id: string }>>('pulse_tasks', {
+        columns: 'task_id',
+        filters: { clickup_task_id: task.clickup_parent_id },
+        single: true
+      });
+
+      if (parentData && parentData.length > 0) {
+        const parentTaskId = parentData[0].task_id;
+
+        // Update the child task with the parent's task_id
+        const { error: updateError } = await dbProxy.update('pulse_tasks', {
+          parent_task_id: parentTaskId
+        }, { task_id: task.task_id });
+
+        if (!updateError) {
+          resolvedCount++;
+        }
+      }
+    }
+
+    return resolvedCount;
   }
 
   private async logSyncStart(syncId: string, mode: string): Promise<void> {

@@ -89,6 +89,10 @@ export function parseCustomerMemo(
     if (contractNumber.length < 3) {
       contractNumber = null;
     }
+    // Don't accept pure numeric strings as contract numbers (could be customer IDs)
+    if (contractNumber && /^\d+$/.test(contractNumber)) {
+      contractNumber = null;
+    }
   }
 
   // POINTS PATTERNS
@@ -102,11 +106,12 @@ export function parseCustomerMemo(
   for (const pattern of pointsPatterns) {
     const pointsMatch = memoText.match(pattern);
     if (pointsMatch && pointsMatch[1]) {
-      points = parseInt(pointsMatch[1].replace(/,/g, ''), 10);
-      if (!isNaN(points)) {
+      const parsedPoints = parseInt(pointsMatch[1].replace(/,/g, ''), 10);
+      // Sanity check: points shouldn't exceed 1,000,000 (likely a customer ID if larger)
+      if (!isNaN(parsedPoints) && parsedPoints <= 1000000) {
+        points = parsedPoints;
         break;
       }
-      points = null;
     }
   }
 

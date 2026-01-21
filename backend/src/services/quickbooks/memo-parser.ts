@@ -30,10 +30,10 @@ export function parseCustomerMemo(
     return { contractNumber: null, points: null };
   }
 
-  // STRICT FORMAT: "ContractNumber:MID20250001;Points:600;" or "Points:13.5;"
+  // STRICT FORMAT: "ContractNumber:MID20250001;Points:600;" or "Points:13.5;" or "Points:-25;"
   // Contract number must start with MID
-  // Points can be decimal (e.g., 13.5, 24.5)
-  const exactPattern = memoText.match(/ContractNumber:(MID[^;]+);Points:([\d.]+);?/i);
+  // Points can be decimal (e.g., 13.5, 24.5) or negative (e.g., -25)
+  const exactPattern = memoText.match(/ContractNumber:(MID[^;]+);Points:(-?[\d.]+);?/i);
   if (exactPattern) {
     const contractNumber = exactPattern[1].trim();
     const points = parseFloat(exactPattern[2]);
@@ -44,8 +44,8 @@ export function parseCustomerMemo(
   const contractOnlyPattern = memoText.match(/ContractNumber:(MID[^;]+);/i);
   if (contractOnlyPattern) {
     const contractNumber = contractOnlyPattern[1].trim();
-    // Look for points separately (supports decimals)
-    const pointsMatch = memoText.match(/Points:([\d.]+);?/i);
+    // Look for points separately (supports decimals and negatives)
+    const pointsMatch = memoText.match(/Points:(-?[\d.]+);?/i);
     const points = pointsMatch ? parseFloat(pointsMatch[1]) : null;
     return { contractNumber, points: (points !== null && !isNaN(points)) ? points : null };
   }

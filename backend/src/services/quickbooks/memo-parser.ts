@@ -87,23 +87,23 @@ export function parseInvoiceMemo(invoice: {
 }
 
 /**
- * Parse memo from a credit memo (only checks CustomerMemo)
+ * Parse memo from a credit memo (checks PrivateNote first, then CustomerMemo)
  */
 export function parseCreditMemoMemo(creditMemo: {
   CustomerMemo?: { value: string } | string;
   PrivateNote?: string;
 }): ParsedMemo {
-  // Check CustomerMemo first for credit memos
-  if (creditMemo.CustomerMemo) {
-    const parsed = parseCustomerMemo(creditMemo.CustomerMemo);
+  // Check PrivateNote first (this is where the correct data is)
+  if (creditMemo.PrivateNote) {
+    const parsed = parseCustomerMemo(creditMemo.PrivateNote);
     if (parsed.contractNumber) {
       return parsed;
     }
   }
 
-  // Fall back to PrivateNote
-  if (creditMemo.PrivateNote) {
-    return parseCustomerMemo(creditMemo.PrivateNote);
+  // Fall back to CustomerMemo
+  if (creditMemo.CustomerMemo) {
+    return parseCustomerMemo(creditMemo.CustomerMemo);
   }
 
   return { contractNumber: null, points: null };

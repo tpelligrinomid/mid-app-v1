@@ -11,13 +11,21 @@ import { QuickBooksClient, fetchWithRetry, QuickBooksInvoice, QuickBooksCreditMe
 import { parseInvoiceMemo, parseCreditMemoMemo, getRawMemoText } from './memo-parser.js';
 import { dbProxy } from '../../utils/db-proxy.js';
 
-// QuickBooks OAuth client for token refresh
-const oauthClient = new OAuthClient({
-  clientId: process.env.QUICKBOOKS_CLIENT_ID!,
-  clientSecret: process.env.QUICKBOOKS_CLIENT_SECRET!,
-  environment: (process.env.QUICKBOOKS_ENVIRONMENT as 'sandbox' | 'production') || 'production',
-  redirectUri: process.env.QUICKBOOKS_REDIRECT_URI!,
-});
+/**
+ * Create a fresh OAuth client instance
+ * IMPORTANT: We create a new instance for each token operation to avoid
+ * race conditions when multiple realms refresh tokens concurrently.
+ * The OAuth client is stateful (setToken stores state), so sharing one
+ * instance across realms causes token mix-ups.
+ */
+function createOAuthClient(): OAuthClient {
+  return new OAuthClient({
+    clientId: process.env.QUICKBOOKS_CLIENT_ID!,
+    clientSecret: process.env.QUICKBOOKS_CLIENT_SECRET!,
+    environment: (process.env.QUICKBOOKS_ENVIRONMENT as 'sandbox' | 'production') || 'production',
+    redirectUri: process.env.QUICKBOOKS_REDIRECT_URI!,
+  });
+}
 
 interface ContractToSync {
   contract_id: string;
@@ -331,9 +339,14 @@ export class QuickBooksCronSyncService {
 
   /**
    * Refresh an expired OAuth token
+   * Creates a fresh OAuth client instance to avoid race conditions
    */
   private async refreshToken(token: StoredToken, realmId: string): Promise<StoredToken | null> {
     try {
+      // Create a fresh OAuth client for this refresh operation
+      // This prevents race conditions when multiple realms refresh concurrently
+      const oauthClient = createOAuthClient();
+
       // Set the current token on the OAuth client
       oauthClient.setToken({
         access_token: token.access_token,

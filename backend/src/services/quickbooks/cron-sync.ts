@@ -26,6 +26,9 @@ interface ContractToSync {
   quickbooks_customer_id: string;
 }
 
+// Map of external_id (MID number) -> contract_id (UUID)
+type ContractLookupMap = Map<string, string>;
+
 interface OrganizationWithRealm {
   organization_id: string;
   quickbooks_realm_id: string;
@@ -116,6 +119,11 @@ export class QuickBooksCronSyncService {
       const contracts = await this.getContractsToSync();
       console.log(`[QuickBooks Cron Sync] Found ${contracts.length} contracts with QuickBooks info`);
 
+      // 1b. Build lookup map: external_id (MID number) -> contract_id (UUID)
+      // This is used to correctly link invoices/credit memos to contracts based on parsed memo
+      const contractLookupMap = this.buildContractLookupMap(contracts);
+      console.log(`[QuickBooks Cron Sync] Built contract lookup map with ${contractLookupMap.size} entries`);
+
       // 2. Group contracts by realm (business unit)
       const contractsByRealm = this.groupContractsByRealm(contracts);
       console.log(`[QuickBooks Cron Sync] Contracts span ${Object.keys(contractsByRealm).length} QuickBooks realms`);
@@ -155,6 +163,7 @@ export class QuickBooksCronSyncService {
                 client,
                 contract,
                 realmId,
+                contractLookupMap,
                 { syncInvoices, syncCreditMemos, syncPayments, updatedSince }
               );
 
@@ -264,6 +273,23 @@ export class QuickBooksCronSyncService {
   }
 
   /**
+   * Build a lookup map from external_id (MID number) to contract_id (UUID)
+   * This is used to correctly link invoices/credit memos to contracts
+   * based on the contract number parsed from the memo field.
+   */
+  private buildContractLookupMap(contracts: ContractToSync[]): ContractLookupMap {
+    const map = new Map<string, string>();
+
+    for (const contract of contracts) {
+      if (contract.external_id) {
+        map.set(contract.external_id, contract.contract_id);
+      }
+    }
+
+    return map;
+  }
+
+  /**
    * Get OAuth tokens for a realm from pulse_sync_tokens table
    * Tokens are stored with service='quickbooks' and identifier=realmId
    * Will refresh the token if expired
@@ -354,12 +380,16 @@ export class QuickBooksCronSyncService {
   }
 
   /**
-   * Sync data for a single contract
+   * Sync data for a single contract's QuickBooks customer
+   * Note: One customer may have multiple contracts, so we use contractLookupMap
+   * to correctly link each invoice/credit memo to the right contract based on
+   * the contract_external_id parsed from the memo field.
    */
   private async syncContractData(
     client: QuickBooksClient,
     contract: ContractToSync,
     realmId: string,
+    contractLookupMap: ContractLookupMap,
     options: {
       syncInvoices: boolean;
       syncCreditMemos: boolean;
@@ -377,8 +407,8 @@ export class QuickBooksCronSyncService {
       );
 
       if (invoices.length > 0) {
-        console.log(`[QuickBooks Cron Sync] Processing ${invoices.length} invoices for ${contract.external_id}`);
-        await this.storeInvoices(invoices, contract, realmId);
+        console.log(`[QuickBooks Cron Sync] Processing ${invoices.length} invoices for customer ${customerId}`);
+        await this.storeInvoices(invoices, realmId, contractLookupMap);
         results.invoices = invoices.length;
       }
     }
@@ -390,8 +420,8 @@ export class QuickBooksCronSyncService {
       );
 
       if (creditMemos.length > 0) {
-        console.log(`[QuickBooks Cron Sync] Processing ${creditMemos.length} credit memos for ${contract.external_id}`);
-        await this.storeCreditMemos(creditMemos, contract, realmId);
+        console.log(`[QuickBooks Cron Sync] Processing ${creditMemos.length} credit memos for customer ${customerId}`);
+        await this.storeCreditMemos(creditMemos, realmId, contractLookupMap);
         results.creditMemos = creditMemos.length;
       }
     }
@@ -403,8 +433,8 @@ export class QuickBooksCronSyncService {
       );
 
       if (payments.length > 0) {
-        console.log(`[QuickBooks Cron Sync] Processing ${payments.length} payments for ${contract.external_id}`);
-        await this.storePayments(payments, contract, realmId);
+        console.log(`[QuickBooks Cron Sync] Processing ${payments.length} payments for customer ${customerId}`);
+        await this.storePayments(payments, realmId, contractLookupMap);
         results.payments = payments.length;
       }
     }
@@ -414,27 +444,39 @@ export class QuickBooksCronSyncService {
 
   /**
    * Store invoices in database
+   * Uses contractLookupMap to link invoices to the CORRECT contract
+   * based on the contract_external_id parsed from the memo field.
    */
   private async storeInvoices(
     invoices: QuickBooksInvoice[],
-    contract: ContractToSync,
-    realmId: string
+    realmId: string,
+    contractLookupMap: ContractLookupMap
   ): Promise<void> {
     const batch = invoices.map(invoice => {
       const parsed = parseInvoiceMemo(invoice);
+
+      // Look up the correct contract_id using the parsed contract number
+      // If no match found, contract_id will be null (unlinked invoice)
+      const contractId = parsed.contractNumber
+        ? contractLookupMap.get(parsed.contractNumber) || null
+        : null;
+
+      if (parsed.contractNumber && !contractId) {
+        console.warn(`[QuickBooks Cron Sync] Invoice ${invoice.DocNumber}: contract ${parsed.contractNumber} not found in lookup map`);
+      }
 
       return {
         quickbooks_id: invoice.Id,
         quickbooks_realm_id: realmId,
         quickbooks_customer_id: invoice.CustomerRef?.value,
-        contract_id: contract.contract_id,
+        contract_id: contractId,
         doc_number: invoice.DocNumber || null,
         customer_name: invoice.CustomerRef?.name || null,
         transaction_date: invoice.TxnDate,
         due_date: invoice.DueDate || null,
         amount: invoice.TotalAmt,
         balance: invoice.Balance,
-        contract_external_id: parsed.contractNumber || contract.external_id,
+        contract_external_id: parsed.contractNumber,
         points: parsed.points,
         memo_raw: getRawMemoText(invoice),
         status: invoice.Balance === 0 ? 'paid' : 'open',
@@ -460,26 +502,37 @@ export class QuickBooksCronSyncService {
 
   /**
    * Store credit memos in database
+   * Uses contractLookupMap to link credit memos to the CORRECT contract
+   * based on the contract_external_id parsed from the memo field.
    */
   private async storeCreditMemos(
     creditMemos: QuickBooksCreditMemo[],
-    contract: ContractToSync,
-    realmId: string
+    realmId: string,
+    contractLookupMap: ContractLookupMap
   ): Promise<void> {
     const batch = creditMemos.map(creditMemo => {
       const parsed = parseCreditMemoMemo(creditMemo);
+
+      // Look up the correct contract_id using the parsed contract number
+      const contractId = parsed.contractNumber
+        ? contractLookupMap.get(parsed.contractNumber) || null
+        : null;
+
+      if (parsed.contractNumber && !contractId) {
+        console.warn(`[QuickBooks Cron Sync] Credit memo ${creditMemo.DocNumber}: contract ${parsed.contractNumber} not found in lookup map`);
+      }
 
       return {
         quickbooks_id: creditMemo.Id,
         quickbooks_realm_id: realmId,
         quickbooks_customer_id: creditMemo.CustomerRef?.value,
-        contract_id: contract.contract_id,
+        contract_id: contractId,
         doc_number: creditMemo.DocNumber || null,
         customer_name: creditMemo.CustomerRef?.name || null,
         transaction_date: creditMemo.TxnDate,
         amount: creditMemo.TotalAmt,
         balance: creditMemo.Balance || 0,
-        contract_external_id: parsed.contractNumber || contract.external_id,
+        contract_external_id: parsed.contractNumber,
         points: parsed.points,
         memo_raw: getRawMemoText(creditMemo),
         raw_data: JSON.stringify(creditMemo),
@@ -504,20 +557,26 @@ export class QuickBooksCronSyncService {
 
   /**
    * Store payments in database
+   * Payments are linked to invoices via the linked_invoices field.
+   * The contract linkage is determined at query time via the linked invoices,
+   * since a single payment may span multiple invoices/contracts.
    */
   private async storePayments(
     payments: QuickBooksPayment[],
-    contract: ContractToSync,
-    realmId: string
+    realmId: string,
+    _contractLookupMap: ContractLookupMap
   ): Promise<void> {
     const batch = payments.map(payment => {
       const linkedInvoices = this.extractLinkedInvoices(payment);
 
+      // Payments don't have their own contract linkage - they link to invoices.
+      // The contract_id can be determined at query time by joining through linked_invoices.
+      // Set to null for now to avoid incorrect linkage.
       return {
         quickbooks_id: payment.Id,
         quickbooks_realm_id: realmId,
         quickbooks_customer_id: payment.CustomerRef?.value,
-        contract_id: contract.contract_id,
+        contract_id: null,
         customer_name: payment.CustomerRef?.name || null,
         payment_date: payment.TxnDate,
         payment_method: payment.PaymentMethodRef?.name || null,

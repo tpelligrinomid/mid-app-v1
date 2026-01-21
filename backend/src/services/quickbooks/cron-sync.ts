@@ -557,26 +557,31 @@ export class QuickBooksCronSyncService {
 
   /**
    * Store payments in database
-   * Payments are linked to invoices via the linked_invoices field.
-   * The contract linkage is determined at query time via the linked invoices,
-   * since a single payment may span multiple invoices/contracts.
+   * Payments are linked to invoices - we look up the invoice's contract_id
+   * to correctly link the payment to the right contract.
    */
   private async storePayments(
     payments: QuickBooksPayment[],
     realmId: string,
     _contractLookupMap: ContractLookupMap
   ): Promise<void> {
-    const batch = payments.map(payment => {
+    // Process payments one at a time to look up contract_id from linked invoices
+    const batch: Array<Record<string, unknown>> = [];
+
+    for (const payment of payments) {
       const linkedInvoices = this.extractLinkedInvoices(payment);
 
-      // Payments don't have their own contract linkage - they link to invoices.
-      // The contract_id can be determined at query time by joining through linked_invoices.
-      // Set to null for now to avoid incorrect linkage.
-      return {
+      // Look up contract_id from linked invoices
+      let contractId: string | null = null;
+      if (linkedInvoices.length > 0) {
+        contractId = await this.getContractIdFromInvoices(linkedInvoices.map(i => i.id), realmId);
+      }
+
+      batch.push({
         quickbooks_id: payment.Id,
         quickbooks_realm_id: realmId,
         quickbooks_customer_id: payment.CustomerRef?.value,
-        contract_id: null,
+        contract_id: contractId,
         customer_name: payment.CustomerRef?.name || null,
         payment_date: payment.TxnDate,
         payment_method: payment.PaymentMethodRef?.name || null,
@@ -586,8 +591,8 @@ export class QuickBooksCronSyncService {
         raw_data: JSON.stringify(payment),
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      };
-    });
+      });
+    }
 
     // Batch upsert
     const batchSize = 50;
@@ -601,6 +606,35 @@ export class QuickBooksCronSyncService {
         console.error('[QuickBooks Cron Sync] Error storing payments:', error);
       }
     }
+  }
+
+  /**
+   * Look up contract_id from linked invoices in the database
+   */
+  private async getContractIdFromInvoices(invoiceIds: string[], realmId: string): Promise<string | null> {
+    if (invoiceIds.length === 0) return null;
+
+    // Query invoices to find their contract_id
+    const { data, error } = await dbProxy.select<Array<{ contract_id: string | null }>>('pulse_invoices', {
+      columns: 'contract_id',
+      filters: {
+        quickbooks_realm_id: realmId,
+        quickbooks_id: { in: invoiceIds },
+      },
+    });
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    // Get the first non-null contract_id
+    for (const invoice of data) {
+      if (invoice.contract_id) {
+        return invoice.contract_id;
+      }
+    }
+
+    return null;
   }
 
   /**

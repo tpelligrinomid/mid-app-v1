@@ -9,6 +9,7 @@ import usersRouter from './routes/users.js';
 import contractsRouter from './routes/pulse/contracts.js';
 import syncRouter from './routes/pulse/sync.js';
 import quickbooksAuthRouter from './routes/auth/quickbooks.js';
+import quickbooksPdfRouter from './routes/quickbooks-pdf.js';
 import cronRouter from './routes/cron.js';
 
 // Validate required environment variables
@@ -75,6 +76,7 @@ app.use('/api/cron', cronRouter);
 app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/contracts', authMiddleware, contractsRouter);
 app.use('/api/sync', authMiddleware, syncRouter);
+app.use('/api/quickbooks', authMiddleware, quickbooksPdfRouter);
 
 // 404 handler
 app.use((_req, res) => {

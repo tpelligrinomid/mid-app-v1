@@ -42,6 +42,7 @@ interface ClickUpUser {
   username: string;
   email: string;
   profilePicture?: string;
+  role_key?: string;  // 'member' or 'guest'
 }
 
 interface ClickUpTimeEntry {
@@ -532,8 +533,8 @@ export class ClickUpCronSyncService {
             full_name: user.username || this.extractNameFromEmail(user.email),
             profile_picture: user.profilePicture || null,
             initials: this.generateInitials(user.username || user.email || ''),
-            user_type: member.role?.name || 'member',
-            is_assignable: ['member', 'owner', 'admin'].includes(member.role?.name?.toLowerCase() || ''),
+            user_type: user.role_key || 'member',
+            is_assignable: user.role_key !== 'guest',
             raw_data: JSON.stringify(user),
             last_synced_at: new Date().toISOString()
           });

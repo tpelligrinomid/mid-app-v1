@@ -11,6 +11,7 @@ import syncRouter from './routes/pulse/sync.js';
 import quickbooksAuthRouter from './routes/auth/quickbooks.js';
 import quickbooksPdfRouter from './routes/quickbooks-pdf.js';
 import cronRouter from './routes/cron.js';
+import notesRouter from './routes/compass/notes.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -77,6 +78,9 @@ app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/contracts', authMiddleware, contractsRouter);
 app.use('/api/sync', authMiddleware, syncRouter);
 app.use('/api/quickbooks', authMiddleware, quickbooksPdfRouter);
+
+// Compass routes (require authentication)
+app.use('/api/compass/notes', authMiddleware, notesRouter);
 
 // 404 handler
 app.use((_req, res) => {

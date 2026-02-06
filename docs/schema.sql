@@ -358,11 +358,12 @@ CREATE TABLE pulse_payments (
 -- COMPASS MODULE TABLES
 -- ============================================================================
 
--- Strategy notes
+-- Strategy and activity notes
+-- Notes can be manual (team-written) or auto-generated from meeting transcripts
 CREATE TABLE compass_notes (
     note_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     contract_id uuid REFERENCES contracts(contract_id),
-    note_type text NOT NULL, -- 'weekly', 'abm', 'paid', 'content', 'web'
+    note_type text NOT NULL, -- 'meeting', 'abm', 'paid', 'content', 'web', 'status', 'strategy'
     title text NOT NULL,
     content_raw text,
     content_structured jsonb, -- Normalized/parsed content
@@ -370,6 +371,10 @@ CREATE TABLE compass_notes (
     week_number integer,
     year integer,
     status text DEFAULT 'draft', -- 'draft', 'published', 'archived'
+    -- Meeting integration (for auto-generated meeting notes)
+    meeting_id uuid REFERENCES compass_meetings(meeting_id), -- Links to source transcript, NULL for manual notes
+    action_items jsonb, -- Extracted action items: [{"item": "...", "assignee": "...", "due": "..."}, ...]
+    is_auto_generated boolean DEFAULT false, -- TRUE if created by AI from transcript
     created_by uuid REFERENCES users(user_id),
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
@@ -425,22 +430,21 @@ CREATE TABLE compass_assets (
     updated_at timestamptz DEFAULT now()
 );
 
--- Meetings (from Fireflies or other sources)
+-- Meetings / Transcript Archive (from Fireflies or other sources)
+-- Raw transcript storage. Processed summary and action items live in compass_notes
+-- with meeting_id linking back to this record.
 CREATE TABLE compass_meetings (
     meeting_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     contract_id uuid REFERENCES contracts(contract_id),
     meeting_date timestamptz NOT NULL,
-    source text DEFAULT 'fireflies',
-    external_id text, -- Fireflies meeting ID
+    source text DEFAULT 'fireflies', -- 'fireflies', 'manual', etc.
+    external_id text, -- Fireflies meeting ID or other external reference
     title text,
     participants text[],
     duration_seconds integer,
     recording_url text,
-    transcript jsonb,
-    summary text,
-    action_items jsonb,
-    sentiment jsonb,
-    raw_metadata jsonb,
+    transcript jsonb, -- Full transcript content
+    raw_metadata jsonb, -- Additional metadata from source
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
 );
@@ -789,6 +793,7 @@ CREATE INDEX idx_pulse_sync_logs_started_at ON pulse_sync_logs(started_at DESC);
 -- Compass table indexes
 CREATE INDEX idx_compass_notes_contract_id ON compass_notes(contract_id);
 CREATE INDEX idx_compass_notes_date ON compass_notes(note_date DESC);
+CREATE INDEX idx_compass_notes_meeting_id ON compass_notes(meeting_id);
 CREATE INDEX idx_compass_deliverables_contract_id ON compass_deliverables(contract_id);
 CREATE INDEX idx_compass_meetings_contract_id ON compass_meetings(contract_id);
 CREATE INDEX idx_compass_meetings_date ON compass_meetings(meeting_date DESC);

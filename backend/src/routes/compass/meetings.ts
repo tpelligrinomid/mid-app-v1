@@ -71,6 +71,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       duration_seconds,
       recording_url,
       transcript,
+      sentiment,
       created_at,
       updated_at
     `)
@@ -131,6 +132,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     duration_seconds: meeting.duration_seconds,
     has_transcript: meeting.transcript !== null,
     has_recording: meeting.recording_url !== null,
+    has_sentiment: meeting.sentiment !== null,
+    sentiment_label: meeting.sentiment?.label || null,
     has_note: !!notesMap[meeting.meeting_id],
     note: notesMap[meeting.meeting_id] || null,
     created_at: meeting.created_at,
@@ -281,6 +284,7 @@ router.post(
         duration_seconds: meetingData.duration_seconds || null,
         recording_url: meetingData.recording_url || null,
         transcript: meetingData.transcript || null,
+        sentiment: meetingData.sentiment || null,
         raw_metadata: meetingData.raw_metadata || null,
       })
       .select()
@@ -437,6 +441,7 @@ router.put(
     if (updateData.duration_seconds !== undefined) updateFields.duration_seconds = updateData.duration_seconds;
     if (updateData.recording_url !== undefined) updateFields.recording_url = updateData.recording_url;
     if (updateData.transcript !== undefined) updateFields.transcript = updateData.transcript;
+    if (updateData.sentiment !== undefined) updateFields.sentiment = updateData.sentiment;
     if (updateData.raw_metadata !== undefined) updateFields.raw_metadata = updateData.raw_metadata;
 
     if (Object.keys(updateFields).length === 0) {

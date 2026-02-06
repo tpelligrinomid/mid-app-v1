@@ -444,6 +444,7 @@ CREATE TABLE compass_meetings (
     duration_seconds integer,
     recording_url text,
     transcript jsonb, -- Full transcript content
+    sentiment jsonb, -- AI-generated sentiment analysis: {label, confidence, bullets, highlights, topics, model, version, generated_at}
     raw_metadata jsonb, -- Additional metadata from source
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()

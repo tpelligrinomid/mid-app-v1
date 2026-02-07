@@ -117,7 +117,7 @@ async function writeProcessingResults(
     note_date: date,
     week_number: weekNumber,
     year: meetingDate.getFullYear(),
-    status: 'draft',
+    status: 'published',
     action_items: actionItems,
     is_auto_generated: true,
   });

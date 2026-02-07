@@ -46,7 +46,7 @@ async function masterMarketerFetch<T>(
   const response = await fetch(`${config.baseUrl}${endpoint}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${config.apiKey}`,
+      'x-api-key': config.apiKey,
       'Content-Type': 'application/json',
       ...options.headers,
     },

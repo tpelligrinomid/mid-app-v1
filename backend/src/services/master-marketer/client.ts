@@ -97,14 +97,21 @@ export async function pollUntilComplete(
   const timeoutMs = options?.timeoutMs ?? 300_000;
   const deadline = Date.now() + timeoutMs;
 
+  let pollCount = 0;
   while (Date.now() < deadline) {
     const status = await getJobStatus(jobId);
+    const normalizedStatus = status.status?.toLowerCase();
 
-    if (status.status === 'completed') {
+    pollCount++;
+    if (pollCount <= 3 || pollCount % 5 === 0) {
+      console.log(`[Master Marketer] Poll #${pollCount} for job ${jobId}: status=${status.status}, hasOutput=${!!status.output}`);
+    }
+
+    if (normalizedStatus === 'completed') {
       return status;
     }
 
-    if (status.status === 'failed') {
+    if (normalizedStatus === 'failed') {
       throw new Error(`Master Marketer job failed: ${status.error || 'unknown error'}`);
     }
 

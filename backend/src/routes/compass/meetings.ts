@@ -604,7 +604,7 @@ router.post(
         external_id: firefliesData.id,
         title: firefliesData.title,
         participants: firefliesData.participants,
-        duration_seconds: firefliesData.duration ? firefliesData.duration * 60 : null,
+        duration_seconds: firefliesData.duration ? Math.round(firefliesData.duration * 60) : null,
         recording_url: firefliesData.audio_url || firefliesData.transcript_url || null,
         transcript: transcriptSegments,
         raw_metadata: {

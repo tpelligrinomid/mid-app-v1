@@ -43,7 +43,7 @@ export interface JobOutput {
 // Poll response from GET /api/jobs/:jobId
 export interface JobStatusResponse {
   jobId: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'processing' | 'complete' | 'completed' | 'failed' | 'fail';
   output?: JobOutput;
   error?: string;
   createdAt?: string;

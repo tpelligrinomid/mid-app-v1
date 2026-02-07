@@ -107,11 +107,11 @@ export async function pollUntilComplete(
       console.log(`[Master Marketer] Poll #${pollCount} for job ${jobId}: status=${status.status}, hasOutput=${!!status.output}`);
     }
 
-    if (normalizedStatus === 'completed') {
+    if (normalizedStatus === 'completed' || normalizedStatus === 'complete') {
       return status;
     }
 
-    if (normalizedStatus === 'failed') {
+    if (normalizedStatus === 'failed' || normalizedStatus === 'fail') {
       throw new Error(`Master Marketer job failed: ${status.error || 'unknown error'}`);
     }
 

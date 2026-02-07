@@ -9,6 +9,7 @@
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
 const EDGE_FUNCTION_SECRET = process.env.EDGE_FUNCTION_SECRET!;
 
 const PROXY_ENDPOINT = `${SUPABASE_URL}/functions/v1/backend-proxy`;
@@ -71,6 +72,7 @@ async function callProxy<T>(request: ProxyRequest): Promise<ProxyResponse<T>> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
       'x-backend-key': EDGE_FUNCTION_SECRET,
     },
     body: JSON.stringify(request),

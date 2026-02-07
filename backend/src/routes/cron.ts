@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ClickUpCronSyncService } from '../services/clickup/cron-sync.js';
 import { QuickBooksCronSyncService } from '../services/quickbooks/cron-sync.js';
+import { ManagementReportService } from '../services/reports/management-report.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -306,6 +307,53 @@ router.post('/quickbooks-full-sync', verifyCronSecret, async (req: Request, res:
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     console.error(`[Cron] QuickBooks FULL sync failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/generate-management-report
+// Triggered by Render Cron Job for weekly management report
+//
+// Render Cron Job Configuration:
+// - Name: management-report-weekly
+// - Schedule: 0 12 * * 1 (Monday 12:00 UTC / 7 AM ET)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/generate-management-report?secret=$CRON_SECRET"
+router.post('/generate-management-report', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting management report generation...');
+
+  try {
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const service = new ManagementReportService();
+    const result = await service.generateReport({ triggeredBy: 'scheduled' });
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] Management report completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      report_id: result.reportId,
+      summary: result.summary,
+      duration: `${duration}ms`
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] Management report failed after ${duration}ms:`, error);
 
     res.status(500).json({
       success: false,

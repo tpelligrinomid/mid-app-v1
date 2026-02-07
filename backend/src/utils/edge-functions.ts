@@ -78,9 +78,21 @@ async function callProxy<T>(request: ProxyRequest): Promise<ProxyResponse<T>> {
     body: JSON.stringify(request),
   });
 
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[edge-fn proxy] ${response.status} from ${PROXY_ENDPOINT}`, {
+      body: errorText.substring(0, 500),
+      hasAnonKey: !!SUPABASE_ANON_KEY,
+      hasSecret: !!EDGE_FUNCTION_SECRET,
+      operation: request.operation,
+      table: request.table,
+    });
+    throw new Error(`Proxy ${response.status}: ${errorText.substring(0, 200)}`);
+  }
+
   const result = await response.json() as ProxyResponse<T>;
 
-  if (!response.ok || result.error) {
+  if (result.error) {
     throw new Error(result.error?.message || String(result.error) || 'Proxy request failed');
   }
 

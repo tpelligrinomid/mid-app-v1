@@ -13,6 +13,7 @@ import type {
 interface ContractRow {
   contract_id: string;
   contract_name: string;
+  contract_status: string;
   external_id: string | null;
 }
 
@@ -79,7 +80,7 @@ export class ClientStatusReportService {
     const contracts = await select<ContractRow[]>(
       'contracts',
       {
-        select: 'contract_id,contract_name,external_id',
+        select: 'contract_id,contract_name,contract_status,external_id',
         filters: { contract_id: config.contract_id },
         limit: 1,
       }
@@ -90,6 +91,17 @@ export class ClientStatusReportService {
     }
 
     const contract = contracts[0];
+
+    // Skip and auto-disable if contract is no longer active
+    if (contract.contract_status !== 'active') {
+      console.log(`[StatusReport] Contract ${config.contract_id} is ${contract.contract_status}, auto-disabling config ${configId}`);
+      await update(
+        'compass_report_configs',
+        { enabled: false },
+        { config_id: configId }
+      );
+      throw new Error(`Contract is ${contract.contract_status}, config auto-disabled`);
+    }
 
     // 3. Fetch points summary
     const pointsRows = await select<PointsSummaryRow[]>(

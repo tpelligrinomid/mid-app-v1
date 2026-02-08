@@ -20,7 +20,8 @@ import type {
   ProcessingState,
   JobOutput,
 } from '../../services/master-marketer/types.js';
-import { update as edgeFnUpdate, insert as edgeFnInsert } from '../../utils/edge-functions.js';
+import { update as edgeFnUpdate, insert as edgeFnInsert, del as edgeFnDel } from '../../utils/edge-functions.js';
+import { ingestContent } from '../../services/rag/ingestion.js';
 
 const router = Router();
 
@@ -108,19 +109,51 @@ async function writeProcessingResults(
   );
   const weekNumber = Math.ceil((dayOfYear + startOfYear.getDay() + 1) / 7);
 
-  await edgeFnInsert('compass_notes', {
+  const noteContent = contentParts.join('\n\n');
+
+  const insertedNotes = await edgeFnInsert<{ note_id: string }[]>('compass_notes', {
     contract_id: contractId,
     meeting_id: meetingId,
     note_type: 'meeting',
     title: `Meeting Notes: ${title}`,
-    content_raw: contentParts.join('\n\n'),
+    content_raw: noteContent,
     note_date: date,
     week_number: weekNumber,
     year: meetingDate.getFullYear(),
     status: 'published',
     action_items: actionItems,
     is_auto_generated: true,
-  });
+  }, { select: 'note_id' });
+
+  // Auto-embed the generated note
+  if (noteContent && process.env.OPENAI_API_KEY && insertedNotes?.[0]) {
+    try {
+      await ingestContent({
+        contract_id: contractId,
+        source_type: 'note',
+        source_id: insertedNotes[0].note_id,
+        title: `Meeting Notes: ${title}`,
+        content: noteContent,
+      });
+    } catch (embedErr) {
+      console.error('[Meetings] Note embedding failed (non-blocking):', embedErr);
+    }
+  }
+
+  // Also embed the meeting transcript itself
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      await ingestContent({
+        contract_id: contractId,
+        source_type: 'meeting',
+        source_id: meetingId,
+        title: title,
+        content: noteContent,
+      });
+    } catch (embedErr) {
+      console.error('[Meetings] Transcript embedding failed (non-blocking):', embedErr);
+    }
+  }
 }
 
 /**
@@ -484,6 +517,29 @@ router.post(
       return;
     }
 
+    // Auto-embed transcript if provided
+    if (meeting.transcript && process.env.OPENAI_API_KEY) {
+      const transcriptText = typeof meeting.transcript === 'string'
+        ? meeting.transcript
+        : Array.isArray(meeting.transcript)
+          ? (meeting.transcript as { text: string; speaker?: string }[]).map((s) => s.text).join(' ')
+          : JSON.stringify(meeting.transcript);
+
+      if (transcriptText) {
+        try {
+          await ingestContent({
+            contract_id: meeting.contract_id,
+            source_type: 'meeting',
+            source_id: meeting.meeting_id,
+            title: meeting.title || 'Meeting',
+            content: transcriptText,
+          });
+        } catch (embedErr) {
+          console.error('[Meetings] Embedding failed (non-blocking):', embedErr);
+        }
+      }
+    }
+
     res.status(201).json({ meeting });
   }
 );
@@ -813,6 +869,29 @@ router.put(
       return;
     }
 
+    // Re-embed if transcript changed
+    if (updateData.transcript !== undefined && process.env.OPENAI_API_KEY && meeting.transcript) {
+      const transcriptText = typeof meeting.transcript === 'string'
+        ? meeting.transcript
+        : Array.isArray(meeting.transcript)
+          ? (meeting.transcript as { text: string; speaker?: string }[]).map((s) => s.text).join(' ')
+          : JSON.stringify(meeting.transcript);
+
+      if (transcriptText) {
+        try {
+          await ingestContent({
+            contract_id: meeting.contract_id,
+            source_type: 'meeting',
+            source_id: meeting.meeting_id,
+            title: meeting.title || 'Meeting',
+            content: transcriptText,
+          });
+        } catch (embedErr) {
+          console.error('[Meetings] Re-embedding failed (non-blocking):', embedErr);
+        }
+      }
+    }
+
     res.json({ meeting });
   }
 );
@@ -847,6 +926,13 @@ router.delete(
       console.error('Error fetching meeting:', fetchError);
       res.status(500).json({ error: 'Failed to fetch meeting' });
       return;
+    }
+
+    // Delete knowledge chunks for this meeting
+    try {
+      await edgeFnDel('compass_knowledge', { source_id: id });
+    } catch (chunkErr) {
+      console.warn('[Meetings] Knowledge chunk cleanup warning:', chunkErr);
     }
 
     // Unlink any associated notes (set meeting_id to null, don't delete the note)

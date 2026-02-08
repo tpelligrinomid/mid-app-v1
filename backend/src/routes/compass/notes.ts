@@ -11,6 +11,8 @@ import {
   NOTE_TYPE_VALUES,
   NOTE_STATUS_VALUES,
 } from '../../types/notes.js';
+import { ingestContent } from '../../services/rag/ingestion.js';
+import { del } from '../../utils/edge-functions.js';
 
 const router = Router();
 
@@ -281,6 +283,23 @@ router.post(
       return;
     }
 
+    // Auto-embed content if provided
+    const contentToEmbed = note.content_raw ||
+      (note.content_structured ? JSON.stringify(note.content_structured) : null);
+    if (contentToEmbed && process.env.OPENAI_API_KEY) {
+      try {
+        await ingestContent({
+          contract_id: note.contract_id,
+          source_type: 'note',
+          source_id: note.note_id,
+          title: note.title,
+          content: contentToEmbed,
+        });
+      } catch (embedErr) {
+        console.error('[Notes] Embedding failed (non-blocking):', embedErr);
+      }
+    }
+
     res.status(201).json({ note });
   }
 );
@@ -360,6 +379,26 @@ router.put(
       return;
     }
 
+    // Re-embed if content changed
+    const contentChanged = updateData.content_raw !== undefined || updateData.content_structured !== undefined;
+    if (contentChanged && process.env.OPENAI_API_KEY) {
+      const contentToEmbed = note.content_raw ||
+        (note.content_structured ? JSON.stringify(note.content_structured) : null);
+      if (contentToEmbed) {
+        try {
+          await ingestContent({
+            contract_id: note.contract_id,
+            source_type: 'note',
+            source_id: note.note_id,
+            title: note.title,
+            content: contentToEmbed,
+          });
+        } catch (embedErr) {
+          console.error('[Notes] Re-embedding failed (non-blocking):', embedErr);
+        }
+      }
+    }
+
     res.json({ note });
   }
 );
@@ -394,6 +433,13 @@ router.delete(
       console.error('Error fetching note:', fetchError);
       res.status(500).json({ error: 'Failed to fetch note' });
       return;
+    }
+
+    // Delete knowledge chunks
+    try {
+      await del('compass_knowledge', { source_id: id });
+    } catch (chunkErr) {
+      console.warn('[Notes] Knowledge chunk cleanup warning:', chunkErr);
     }
 
     // Delete the note

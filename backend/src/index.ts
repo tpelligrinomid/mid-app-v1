@@ -14,6 +14,7 @@ import cronRouter from './routes/cron.js';
 import notesRouter from './routes/compass/notes.js';
 import meetingsRouter from './routes/compass/meetings.js';
 import reportsRouter from './routes/pulse/reports.js';
+import statusReportsRouter from './routes/compass/status-reports.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -84,6 +85,9 @@ app.use('/api/quickbooks', authMiddleware, quickbooksPdfRouter);
 // Compass routes (require authentication)
 app.use('/api/compass/notes', authMiddleware, notesRouter);
 app.use('/api/compass/meetings', authMiddleware, meetingsRouter);
+
+// Compass status reports (require authentication)
+app.use('/api/compass/status-reports', authMiddleware, statusReportsRouter);
 
 // Pulse reports (require authentication)
 app.use('/api/pulse/reports', authMiddleware, reportsRouter);

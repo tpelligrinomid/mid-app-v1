@@ -3,6 +3,7 @@ import { ClickUpCronSyncService } from '../services/clickup/cron-sync.js';
 import { QuickBooksCronSyncService } from '../services/quickbooks/cron-sync.js';
 import { ManagementReportService } from '../services/reports/management-report.js';
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
+import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -405,6 +406,66 @@ router.post('/process-status-reports', verifyCronSecret, async (req: Request, re
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     console.error(`[Cron] Status report processing failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/backfill-embeddings
+// Backfill existing notes, meetings, and deliverables into compass_knowledge
+//
+// Render Cron Job Configuration:
+// - Name: backfill-embeddings
+// - Schedule: 0 4 * * 0 (Sunday 4 AM UTC — one-time or weekly catch-up)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/backfill-embeddings?secret=$CRON_SECRET"
+router.post('/backfill-embeddings', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting embedding backfill...');
+
+  try {
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('[Cron] OPENAI_API_KEY not configured');
+      res.status(503).json({
+        error: 'OpenAI API not configured',
+        details: 'OPENAI_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const batchSize = parseInt(req.query.batch_size as string) || 10;
+    const stats = await backfillEmbeddings({ batch_size: batchSize });
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] Embedding backfill completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      duration: `${duration}ms`,
+      stats: {
+        processed: stats.processed,
+        skipped: stats.skipped,
+        failed: stats.failed,
+      },
+      errors: stats.errors.length > 0 ? stats.errors : undefined
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] Embedding backfill failed after ${duration}ms:`, error);
 
     res.status(500).json({
       success: false,

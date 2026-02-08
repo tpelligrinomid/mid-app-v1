@@ -202,7 +202,7 @@ router.post(
         clickup_task_id: input.clickup_task_id || null,
         due_date: input.due_date || null,
         delivered_date: input.delivered_date || null,
-        created_by: req.user.auth_id,
+        created_by: req.user.id,
       };
 
       const result = await insert<Deliverable[]>(
@@ -471,7 +471,7 @@ router.post(
         version_number: nextVersion,
         drive_url: deliverable.drive_url || null,
         change_summary: change_summary || null,
-        created_by: req.user.auth_id,
+        created_by: req.user.id,
       };
 
       const result = await insert<DeliverableVersion[]>(

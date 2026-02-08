@@ -36,9 +36,12 @@ export interface Deliverable {
   content_raw: string | null;
   content_structured: Record<string, unknown> | null;
   clickup_task_id: string | null;
+  drive_url: string | null;
   due_date: string | null;
   delivered_date: string | null;
-  current_version: number;
+  tags: string[] | null;
+  metadata: Record<string, unknown> | null;
+  version: string;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -80,9 +83,8 @@ export interface DeliverableUpdate {
 export interface DeliverableVersion {
   version_id: string;
   deliverable_id: string;
-  version_number: number;
-  title: string;
-  content_structured: Record<string, unknown> | null;
+  version_number: string;
+  drive_url: string | null;
   change_summary: string | null;
   created_by: string | null;
   created_at: string;
@@ -102,7 +104,7 @@ export interface DeliverableListItem {
   clickup_task_id: string | null;
   due_date: string | null;
   delivered_date: string | null;
-  current_version: number;
+  version: string;
   created_by: string | null;
   created_at: string;
   updated_at: string;

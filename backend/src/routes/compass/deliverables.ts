@@ -69,7 +69,7 @@ router.get(
           clickup_task_id,
           due_date,
           delivered_date,
-          current_version,
+          version,
           created_by,
           created_at,
           updated_at
@@ -202,7 +202,6 @@ router.post(
         clickup_task_id: input.clickup_task_id || null,
         due_date: input.due_date || null,
         delivered_date: input.delivered_date || null,
-        current_version: 1,
         created_by: req.user.auth_id,
       };
 
@@ -463,14 +462,14 @@ router.post(
     }
 
     try {
-      const nextVersion = (deliverable.current_version || 0) + 1;
+      const currentVer = parseFloat(deliverable.version || '1.0');
+      const nextVersion = (Math.floor(currentVer) + 1).toFixed(1);
       const { change_summary } = req.body;
 
       const versionData: Record<string, unknown> = {
         deliverable_id: deliverableId,
         version_number: nextVersion,
-        title: deliverable.title,
-        content_structured: deliverable.content_structured || null,
+        drive_url: deliverable.drive_url || null,
         change_summary: change_summary || null,
         created_by: req.user.auth_id,
       };
@@ -481,10 +480,10 @@ router.post(
         { select: '*' }
       );
 
-      // Update current_version on the deliverable
+      // Update version on the deliverable
       await update(
         'compass_deliverables',
-        { current_version: nextVersion },
+        { version: nextVersion },
         { deliverable_id: deliverableId }
       );
 

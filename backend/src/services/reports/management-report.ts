@@ -9,23 +9,33 @@ import type {
   ManagementReport,
 } from '../../types/reports.js';
 
-// Raw row from contract_performance_view
-interface PerformanceViewRow {
+// Raw row from contracts table
+interface ContractRow {
   contract_id: string;
   contract_name: string;
-  contract_number: string | null;
+  external_id: string | null;
   priority: string | null;
-  delivery_status: string | null;
-  account_manager_name: string | null;
-  team_manager_name: string | null;
-  mrr: number | null;
+  amount: number | null;
   monthly_points_allotment: number | null;
+  account_manager: string | null;
+  team_manager: string | null;
+}
+
+// Raw row from contract_points_summary materialized view
+interface PointsSummaryRow {
+  contract_id: string;
   points_purchased: number | null;
   points_credited: number | null;
   points_delivered: number | null;
   points_working: number | null;
   points_balance: number | null;
   points_burden: number | null;
+}
+
+// Raw row from pulse_clickup_users
+interface ClickUpUserRow {
+  id: string;
+  full_name: string | null;
 }
 
 // Raw meeting row
@@ -96,22 +106,58 @@ export class ManagementReportService {
     console.log(`[Management Report] Created placeholder row: ${reportId}`);
 
     try {
-      // 3. Fetch all active non-hosting contracts from the materialized view
-      const contracts = await select<PerformanceViewRow[]>(
-        'contract_performance_view',
+      // 3. Fetch data from three separate tables and join in TypeScript
+
+      // 3a. Active non-hosting contracts
+      const contractRows = await select<ContractRow[]>(
+        'contracts',
         {
-          select: 'contract_id,contract_name,contract_number:external_id,priority,delivery_status,account_manager_name,team_manager_name,mrr,monthly_points_allotment,points_purchased,points_credited,points_delivered,points_working,points_balance,points_burden',
+          select: 'contract_id,contract_name,external_id,priority,amount,monthly_points_allotment,account_manager,team_manager',
+          filters: {
+            contract_status: 'active',
+            hosting: false,
+          },
         }
       );
 
-      console.log(`[Management Report] Found ${contracts.length} active contracts`);
+      console.log(`[Management Report] Found ${contractRows.length} active contracts`);
+
+      // 3b. Points summaries for all contracts (materialized view)
+      const pointsRows = await select<PointsSummaryRow[]>(
+        'contract_points_summary',
+        {
+          select: 'contract_id,points_purchased,points_credited,points_delivered,points_working,points_balance,points_burden',
+        }
+      );
+      const pointsMap = new Map(pointsRows.map((p) => [p.contract_id, p]));
+
+      // 3c. ClickUp users for manager name lookups
+      const managerIds = new Set<string>();
+      for (const c of contractRows) {
+        if (c.account_manager) managerIds.add(c.account_manager);
+        if (c.team_manager) managerIds.add(c.team_manager);
+      }
+      const usersMap = new Map<string, string>();
+      if (managerIds.size > 0) {
+        const userRows = await select<ClickUpUserRow[]>(
+          'pulse_clickup_users',
+          {
+            select: 'id,full_name',
+            filters: { id: { in: Array.from(managerIds) } },
+          }
+        );
+        for (const u of userRows) {
+          if (u.full_name) usersMap.set(u.id, u.full_name);
+        }
+      }
 
       // 4. Build snapshots for each contract
       const snapshots: ReportContractSnapshot[] = [];
 
-      for (let i = 0; i < contracts.length; i++) {
-        const contract = contracts[i];
-        console.log(`[Management Report] Processing ${i + 1}/${contracts.length}: ${contract.contract_name}`);
+      for (let i = 0; i < contractRows.length; i++) {
+        const contract = contractRows[i];
+        const points = pointsMap.get(contract.contract_id);
+        console.log(`[Management Report] Processing ${i + 1}/${contractRows.length}: ${contract.contract_name}`);
 
         // 4a. Fetch meetings with sentiment in the 90-day window
         const meetings = await select<MeetingRow[]>(
@@ -153,25 +199,28 @@ export class ManagementReportService {
         const weeklyBuckets = buildWeeklyBuckets(periodStart, periodEnd, tasks);
 
         // 4d. Assemble snapshot
+        const burden = Number(points?.points_burden) || 0;
+        const deliveryStatus = burden <= 0 ? 'on-track' : 'off-track';
+
         const financials: ContractFinancials = {
-          mrr: contract.mrr,
+          mrr: contract.amount,
           monthly_points_allotment: contract.monthly_points_allotment,
-          points_purchased: contract.points_purchased,
-          points_credited: contract.points_credited,
-          points_delivered: contract.points_delivered,
-          points_working: contract.points_working,
-          points_balance: contract.points_balance,
-          points_burden: contract.points_burden,
+          points_purchased: points?.points_purchased ?? null,
+          points_credited: points?.points_credited ?? null,
+          points_delivered: points?.points_delivered ?? null,
+          points_working: points?.points_working ?? null,
+          points_balance: points?.points_balance ?? null,
+          points_burden: points?.points_burden ?? null,
         };
 
         snapshots.push({
           contract_id: contract.contract_id,
           contract_name: contract.contract_name,
-          contract_number: contract.contract_number,
+          contract_number: contract.external_id,
           priority: contract.priority,
-          delivery_status: contract.delivery_status,
-          account_manager_name: contract.account_manager_name,
-          team_manager_name: contract.team_manager_name,
+          delivery_status: deliveryStatus,
+          account_manager_name: contract.account_manager ? (usersMap.get(contract.account_manager) ?? null) : null,
+          team_manager_name: contract.team_manager ? (usersMap.get(contract.team_manager) ?? null) : null,
           financials,
           meetings_90d: meetingEntries,
           point_production_90d: weeklyBuckets,

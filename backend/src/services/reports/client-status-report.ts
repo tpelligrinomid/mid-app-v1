@@ -117,14 +117,17 @@ export class ClientStatusReportService {
     const lookaheadDate = new Date(today);
     lookaheadDate.setDate(lookaheadDate.getDate() + config.lookahead_days);
 
-    // Shared filters for non-internal, deliverable/todo tasks
+    // Shared base filters — match Compass client view exactly:
+    // non-internal, non-deleted, non-archived, parent tasks only (no subtasks)
     const baseFilters = {
       contract_id: config.contract_id,
       is_internal_only: false,
       is_deleted: false,
+      is_archived: false,
+      parent_task_id: { is: null },
     };
 
-    // 4a. Completed tasks: delivered within lookback window
+    // 4a. Completed tasks: delivered within lookback window (any list type)
     const completedTasks = await select<TaskRow[]>(
       'pulse_tasks',
       {
@@ -133,13 +136,12 @@ export class ClientStatusReportService {
           ...baseFilters,
           status: 'delivered',
           date_done: { gte: lookbackDate.toISOString() },
-          list_type: { in: ['Deliverables', 'ToDos'] },
         },
         order: [{ column: 'date_done', ascending: false }],
       }
     );
 
-    // 4b. Working tasks: due within lookahead window
+    // 4b. Working tasks: Deliverables only, due within lookahead window
     const workingTasks = await select<TaskRow[]>(
       'pulse_tasks',
       {
@@ -147,22 +149,22 @@ export class ClientStatusReportService {
         filters: {
           ...baseFilters,
           status: 'working',
+          list_type: 'Deliverables',
           due_date: { lte: lookaheadDate.toISOString() },
-          list_type: { in: ['Deliverables', 'ToDos'] },
         },
         order: [{ column: 'due_date', ascending: true }],
       }
     );
 
-    // 4c. Blocked / waiting on client tasks
+    // 4c. Waiting on client: ToDos list with status_raw = 'waiting on client'
     const blockedTasks = await select<TaskRow[]>(
       'pulse_tasks',
       {
         select: 'name,status,points,due_date,date_done',
         filters: {
           ...baseFilters,
-          status: 'blocked',
-          list_type: { in: ['Deliverables', 'ToDos'] },
+          status_raw: 'waiting on client',
+          list_type: 'ToDos',
         },
         order: [{ column: 'due_date', ascending: true }],
       }

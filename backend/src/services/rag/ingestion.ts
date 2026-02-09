@@ -11,7 +11,7 @@ import { getEmbeddings } from './embeddings.js';
 import { insert, del } from '../../utils/edge-functions.js';
 
 export interface IngestParams {
-  contract_id: string;
+  contract_id: string | null;
   source_type: SourceType;
   source_id: string;
   title: string;

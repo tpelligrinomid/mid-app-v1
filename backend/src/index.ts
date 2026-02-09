@@ -16,6 +16,7 @@ import meetingsRouter from './routes/compass/meetings.js';
 import reportsRouter from './routes/pulse/reports.js';
 import statusReportsRouter from './routes/compass/status-reports.js';
 import deliverablesRouter from './routes/compass/deliverables.js';
+import processLibraryRouter from './routes/compass/process-library.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -92,6 +93,9 @@ app.use('/api/compass/status-reports', authMiddleware, statusReportsRouter);
 
 // Compass deliverables (require authentication)
 app.use('/api/compass/deliverables', authMiddleware, deliverablesRouter);
+
+// Compass process library (require authentication)
+app.use('/api/compass/process-library', authMiddleware, processLibraryRouter);
 
 // Pulse reports (require authentication)
 app.use('/api/pulse/reports', authMiddleware, reportsRouter);

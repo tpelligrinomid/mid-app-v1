@@ -60,6 +60,15 @@ export const syncConfig = {
     deletedTaskThresholdDays: 7
   },
 
+  processLibrary: {
+    spaceId: '61333242',
+    customFields: {
+      midPointsMenu: '9ef19ee7-6946-4a35-9dd1-3c564cee36b4',
+      externalDescription: '5512c5bd-a982-4b55-8e1a-303343c673d0',
+      points: 'b61c1316-669d-4ee9-86c6-620025d61946',
+    }
+  },
+
   hubspot: {
     apiKey: process.env.HUBSPOT_API_KEY
   },

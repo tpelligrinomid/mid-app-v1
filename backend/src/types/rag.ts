@@ -4,9 +4,9 @@
 // Source types
 // ============================================================================
 
-export type SourceType = 'note' | 'deliverable' | 'meeting' | 'document';
+export type SourceType = 'note' | 'deliverable' | 'meeting' | 'document' | 'process';
 
-export const SOURCE_TYPE_VALUES: SourceType[] = ['note', 'deliverable', 'meeting', 'document'];
+export const SOURCE_TYPE_VALUES: SourceType[] = ['note', 'deliverable', 'meeting', 'document', 'process'];
 
 // ============================================================================
 // Embeddings
@@ -51,7 +51,7 @@ export interface KnowledgeChunk {
 }
 
 export interface KnowledgeInsert {
-  contract_id: string;
+  contract_id: string | null;
   source_type: SourceType;
   source_id: string;
   title: string;

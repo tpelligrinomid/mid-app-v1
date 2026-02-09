@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ClickUpCronSyncService } from '../services/clickup/cron-sync.js';
+import { ProcessLibrarySyncService } from '../services/clickup/process-library-sync.js';
 import { QuickBooksCronSyncService } from '../services/quickbooks/cron-sync.js';
 import { ManagementReportService } from '../services/reports/management-report.js';
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
@@ -468,6 +469,66 @@ router.post('/backfill-embeddings', verifyCronSecret, async (req: Request, res: 
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     console.error(`[Cron] Embedding backfill failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/sync-process-library
+// Sync Process Library from ClickUp space into compass_process_library + RAG embeddings
+//
+// Render Cron Job Configuration:
+// - Name: sync-process-library
+// - Schedule: 0 6 * * 1 (Monday 6 AM UTC)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/sync-process-library?secret=$CRON_SECRET"
+router.post('/sync-process-library', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting Process Library sync...');
+
+  try {
+    if (!syncConfig.clickup.apiToken) {
+      console.error('[Cron] ClickUp API token not configured');
+      res.status(503).json({
+        error: 'ClickUp integration not configured',
+        details: 'CLICKUP_API_TOKEN environment variable is not set'
+      });
+      return;
+    }
+
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const syncService = new ProcessLibrarySyncService();
+    const results = await syncService.runSync();
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] Process Library sync completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      duration: `${duration}ms`,
+      stats: {
+        items_synced: results.items_synced,
+        items_deactivated: results.items_deactivated,
+        items_embedded: results.items_embedded,
+      },
+      errors: results.errors.length > 0 ? results.errors : undefined
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] Process Library sync failed after ${duration}ms:`, error);
 
     res.status(500).json({
       success: false,

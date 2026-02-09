@@ -456,9 +456,11 @@ router.post('/backfill-embeddings', verifyCronSecret, async (req: Request, res: 
       duration: `${duration}ms`,
       stats: {
         processed: stats.processed,
-        skipped: stats.skipped,
+        skipped_already_embedded: stats.skipped_already_embedded,
+        skipped_no_content: stats.skipped_no_content,
         failed: stats.failed,
       },
+      breakdown: stats.breakdown,
       errors: stats.errors.length > 0 ? stats.errors : undefined
     });
   } catch (error) {

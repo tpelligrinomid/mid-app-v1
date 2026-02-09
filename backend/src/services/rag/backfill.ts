@@ -16,9 +16,15 @@ export interface BackfillOptions {
 
 export interface BackfillResult {
   processed: number;
-  skipped: number;
+  skipped_already_embedded: number;
+  skipped_no_content: number;
   failed: number;
   errors: string[];
+  breakdown: {
+    notes: { total: number; already_embedded: number; no_content: number; to_process: number };
+    meetings: { total: number; already_embedded: number; no_content: number; to_process: number };
+    deliverables: { total: number; already_embedded: number; no_content: number; to_process: number };
+  };
 }
 
 interface ExistingChunkRow {
@@ -118,20 +124,28 @@ export async function backfillEmbeddings(
 
   const result: BackfillResult = {
     processed: 0,
-    skipped: 0,
+    skipped_already_embedded: 0,
+    skipped_no_content: 0,
     failed: 0,
     errors: [],
+    breakdown: {
+      notes: { total: 0, already_embedded: 0, no_content: 0, to_process: 0 },
+      meetings: { total: 0, already_embedded: 0, no_content: 0, to_process: 0 },
+      deliverables: { total: 0, already_embedded: 0, no_content: 0, to_process: 0 },
+    },
   };
 
   // Get existing source_ids in compass_knowledge to skip already-processed records
+  // Use limit: 50000 to avoid Supabase default pagination (1000 rows)
   let existingSourceIds: Set<string>;
   try {
     const existing = await select<ExistingChunkRow[]>('compass_knowledge', {
       select: 'source_id',
+      limit: 50000,
     });
     // Deduplicate since multiple chunks share the same source_id
     existingSourceIds = new Set((existing || []).map((r) => r.source_id));
-    console.log(`[Backfill] Found ${existingSourceIds.size} already-embedded source records`);
+    console.log(`[Backfill] Found ${existingSourceIds.size} already-embedded source records (from ${(existing || []).length} chunks)`);
   } catch {
     existingSourceIds = new Set();
     console.warn('[Backfill] Could not fetch existing chunks, will process all');
@@ -142,14 +156,25 @@ export async function backfillEmbeddings(
     try {
       const notes = await select<NoteRow[]>('compass_notes', {
         select: 'note_id, contract_id, title, content_raw, content_structured',
+        limit: 10000,
       });
 
-      const toProcess = (notes || []).filter(
+      const allNotes = notes || [];
+      const alreadyEmbedded = allNotes.filter((n) => existingSourceIds.has(n.note_id));
+      const noContent = allNotes.filter((n) => !existingSourceIds.has(n.note_id) && !n.content_raw && !n.content_structured);
+      const toProcess = allNotes.filter(
         (n) => !existingSourceIds.has(n.note_id) && (n.content_raw || n.content_structured)
       );
 
-      console.log(`[Backfill] Notes: ${toProcess.length} to process, ${(notes || []).length - toProcess.length} skipped`);
-      result.skipped += (notes || []).length - toProcess.length;
+      result.breakdown.notes = {
+        total: allNotes.length,
+        already_embedded: alreadyEmbedded.length,
+        no_content: noContent.length,
+        to_process: toProcess.length,
+      };
+      result.skipped_already_embedded += alreadyEmbedded.length;
+      result.skipped_no_content += noContent.length;
+      console.log(`[Backfill] Notes: ${allNotes.length} total, ${alreadyEmbedded.length} already embedded, ${noContent.length} no content, ${toProcess.length} to process`);
 
       for (let i = 0; i < toProcess.length; i += batchSize) {
         const batch = toProcess.slice(i, i + batchSize);
@@ -186,14 +211,25 @@ export async function backfillEmbeddings(
     try {
       const meetings = await select<MeetingRow[]>('compass_meetings', {
         select: 'meeting_id, contract_id, title, transcript, sentiment',
+        limit: 10000,
       });
 
-      const toProcess = (meetings || []).filter(
+      const allMeetings = meetings || [];
+      const alreadyEmbedded = allMeetings.filter((m) => existingSourceIds.has(m.meeting_id));
+      const noContent = allMeetings.filter((m) => !existingSourceIds.has(m.meeting_id) && !m.transcript && !m.sentiment);
+      const toProcess = allMeetings.filter(
         (m) => !existingSourceIds.has(m.meeting_id) && (m.transcript || m.sentiment)
       );
 
-      console.log(`[Backfill] Meetings: ${toProcess.length} to process, ${(meetings || []).length - toProcess.length} skipped`);
-      result.skipped += (meetings || []).length - toProcess.length;
+      result.breakdown.meetings = {
+        total: allMeetings.length,
+        already_embedded: alreadyEmbedded.length,
+        no_content: noContent.length,
+        to_process: toProcess.length,
+      };
+      result.skipped_already_embedded += alreadyEmbedded.length;
+      result.skipped_no_content += noContent.length;
+      console.log(`[Backfill] Meetings: ${allMeetings.length} total, ${alreadyEmbedded.length} already embedded, ${noContent.length} no content, ${toProcess.length} to process`);
 
       for (let i = 0; i < toProcess.length; i += batchSize) {
         const batch = toProcess.slice(i, i + batchSize);
@@ -202,7 +238,7 @@ export async function backfillEmbeddings(
           try {
             const content = getMeetingContent(meeting);
             if (!content.trim()) {
-              result.skipped++;
+              result.skipped_no_content++;
               continue;
             }
 
@@ -234,14 +270,25 @@ export async function backfillEmbeddings(
     try {
       const deliverables = await select<DeliverableRow[]>('compass_deliverables', {
         select: 'deliverable_id, contract_id, title, content_raw, content_structured, description',
+        limit: 10000,
       });
 
-      const toProcess = (deliverables || []).filter(
+      const allDeliverables = deliverables || [];
+      const alreadyEmbedded = allDeliverables.filter((d) => existingSourceIds.has(d.deliverable_id));
+      const noContent = allDeliverables.filter((d) => !existingSourceIds.has(d.deliverable_id) && !d.content_raw && !d.content_structured && !d.description);
+      const toProcess = allDeliverables.filter(
         (d) => !existingSourceIds.has(d.deliverable_id) && (d.content_raw || d.content_structured || d.description)
       );
 
-      console.log(`[Backfill] Deliverables: ${toProcess.length} to process, ${(deliverables || []).length - toProcess.length} skipped`);
-      result.skipped += (deliverables || []).length - toProcess.length;
+      result.breakdown.deliverables = {
+        total: allDeliverables.length,
+        already_embedded: alreadyEmbedded.length,
+        no_content: noContent.length,
+        to_process: toProcess.length,
+      };
+      result.skipped_already_embedded += alreadyEmbedded.length;
+      result.skipped_no_content += noContent.length;
+      console.log(`[Backfill] Deliverables: ${allDeliverables.length} total, ${alreadyEmbedded.length} already embedded, ${noContent.length} no content, ${toProcess.length} to process`);
 
       for (let i = 0; i < toProcess.length; i += batchSize) {
         const batch = toProcess.slice(i, i + batchSize);
@@ -250,7 +297,7 @@ export async function backfillEmbeddings(
           try {
             const content = getDeliverableContent(deliverable);
             if (!content.trim()) {
-              result.skipped++;
+              result.skipped_no_content++;
               continue;
             }
 
@@ -277,7 +324,7 @@ export async function backfillEmbeddings(
     }
   }
 
-  console.log(`[Backfill] Complete: ${result.processed} processed, ${result.skipped} skipped, ${result.failed} failed`);
+  console.log(`[Backfill] Complete: ${result.processed} processed, ${result.skipped_already_embedded} already embedded, ${result.skipped_no_content} no content, ${result.failed} failed`);
 
   return result;
 }

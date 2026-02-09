@@ -2,27 +2,28 @@
  * Content Chunking Service
  *
  * Splits text into embeddable chunks with configurable size and overlap.
- * Target: 500-1000 tokens per chunk (approximated via word count / 0.75).
+ * Target: ~500 tokens per chunk. Hard cap at 7500 tokens (model limit is 8191).
  */
 
 import type { TextChunk, ChunkingOptions } from '../../types/rag.js';
 
-const DEFAULT_MAX_TOKENS = 800;
+const DEFAULT_MAX_TOKENS = 500;
 const DEFAULT_OVERLAP_SENTENCES = 2;
+// text-embedding-3-small has 8191 token limit; leave margin
+const HARD_TOKEN_CAP = 7500;
 
 /**
- * Approximate token count from text (words / 0.75 is a rough estimate for English)
+ * Conservative token estimate (words * 1.4 accounts for subword tokenization)
  */
 function estimateTokens(text: string): number {
   const wordCount = text.split(/\s+/).filter(Boolean).length;
-  return Math.ceil(wordCount / 0.75);
+  return Math.ceil(wordCount * 1.4);
 }
 
 /**
  * Split text into sentences (basic sentence boundary detection)
  */
 function splitSentences(text: string): string[] {
-  // Split on sentence-ending punctuation followed by whitespace
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
@@ -31,24 +32,27 @@ function splitSentences(text: string): string[] {
 }
 
 /**
- * Split text into paragraphs
+ * Split text into paragraphs, falling back to single line breaks
  */
 function splitParagraphs(text: string): string[] {
-  return text
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
+  // Try double line breaks first
+  let parts = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+
+  // If we got one giant block, try single line breaks
+  if (parts.length === 1 && estimateTokens(parts[0]) > HARD_TOKEN_CAP) {
+    parts = text.split(/\n/).map((p) => p.trim()).filter(Boolean);
+  }
+
+  return parts;
 }
 
 /**
  * Detect section headings in text and extract metadata
  */
 function detectHeading(paragraph: string): string | null {
-  // Markdown headings
   const mdMatch = paragraph.match(/^#{1,6}\s+(.+)$/m);
   if (mdMatch) return mdMatch[1];
 
-  // All-caps short lines (likely headings)
   const lines = paragraph.split('\n');
   if (lines.length === 1 && lines[0].length < 80 && lines[0] === lines[0].toUpperCase() && /[A-Z]/.test(lines[0])) {
     return lines[0];
@@ -58,13 +62,28 @@ function detectHeading(paragraph: string): string | null {
 }
 
 /**
+ * Hard-split text by word count when all other splitting fails.
+ * Guarantees no chunk exceeds maxWords.
+ */
+function hardSplitByWords(text: string, maxWords: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const parts: string[] = [];
+
+  for (let i = 0; i < words.length; i += maxWords) {
+    parts.push(words.slice(i, i + maxWords).join(' '));
+  }
+
+  return parts;
+}
+
+/**
  * Chunk text into embeddable segments
  *
  * Strategy:
- * 1. Split by paragraphs first
+ * 1. Split by paragraphs first (double line breaks, then single)
  * 2. If a paragraph exceeds max_tokens, split by sentences
- * 3. Carry overlap_sentences from previous chunk into next for context continuity
- * 4. Track section headings in chunk metadata
+ * 3. If a sentence is still too long, hard-split by words
+ * 4. Carry overlap_sentences from previous chunk for context continuity
  */
 export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] {
   const maxTokens = options?.max_tokens ?? DEFAULT_MAX_TOKENS;
@@ -87,11 +106,27 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
   const chunks: TextChunk[] = [];
   let currentContent = '';
   let currentHeading: string | null = null;
-  let overlapBuffer: string[] = []; // sentences to carry forward
+  let overlapBuffer: string[] = [];
 
   function flushChunk() {
-    const content = currentContent.trim();
+    let content = currentContent.trim();
     if (!content) return;
+
+    // Safety: if a chunk is still too large, hard-split by words
+    if (estimateTokens(content) > HARD_TOKEN_CAP) {
+      const maxWords = Math.floor(HARD_TOKEN_CAP / 1.4);
+      const subParts = hardSplitByWords(content, maxWords);
+      for (const part of subParts) {
+        chunks.push({
+          content: part,
+          chunk_index: chunks.length,
+          metadata: currentHeading ? { section: currentHeading } : {},
+        });
+      }
+      overlapBuffer = [];
+      currentContent = '';
+      return;
+    }
 
     chunks.push({
       content,
@@ -99,10 +134,8 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
       metadata: currentHeading ? { section: currentHeading } : {},
     });
 
-    // Extract last N sentences for overlap
     const sentences = splitSentences(content);
     overlapBuffer = sentences.slice(-overlapSentences);
-
     currentContent = '';
   }
 
@@ -116,12 +149,23 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
 
     // If this single paragraph is too large, split by sentences
     if (paragraphTokens > maxTokens) {
-      // Flush any accumulated content first
       if (currentContent) {
         flushChunk();
       }
 
       const sentences = splitSentences(paragraph);
+
+      // If sentence splitting didn't help (e.g., one giant run-on), hard-split
+      if (sentences.length <= 1 && paragraphTokens > HARD_TOKEN_CAP) {
+        const maxWords = Math.floor(maxTokens / 1.4);
+        const subParts = hardSplitByWords(paragraph, maxWords);
+        for (const part of subParts) {
+          currentContent = part;
+          flushChunk();
+        }
+        continue;
+      }
+
       let sentenceBuffer = overlapBuffer.length > 0 ? [...overlapBuffer] : [];
       overlapBuffer = [];
 
@@ -130,7 +174,6 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
         const bufferText = sentenceBuffer.join(' ');
 
         if (estimateTokens(bufferText) > maxTokens && sentenceBuffer.length > 1) {
-          // Remove last sentence and flush
           sentenceBuffer.pop();
           currentContent = sentenceBuffer.join(' ');
           flushChunk();
@@ -138,21 +181,18 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
         }
       }
 
-      // Remaining sentences
       if (sentenceBuffer.length > 0) {
         currentContent = sentenceBuffer.join(' ');
       }
       continue;
     }
 
-    // Check if adding this paragraph would exceed the limit
     const withParagraph = currentContent
       ? `${currentContent}\n\n${paragraph}`
       : (overlapBuffer.length > 0 ? `${overlapBuffer.join(' ')}\n\n${paragraph}` : paragraph);
 
     if (estimateTokens(withParagraph) > maxTokens && currentContent) {
       flushChunk();
-      // Start new chunk with overlap + current paragraph
       currentContent = overlapBuffer.length > 0
         ? `${overlapBuffer.join(' ')}\n\n${paragraph}`
         : paragraph;
@@ -165,7 +205,6 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
     }
   }
 
-  // Flush remaining content
   if (currentContent.trim()) {
     flushChunk();
   }

@@ -67,7 +67,7 @@ function getMeetingContent(meeting: MeetingRow): string {
     } else if (Array.isArray(meeting.transcript)) {
       // TranscriptSegment[]
       const segments = meeting.transcript as { text: string; speaker?: string }[];
-      parts.push(segments.map((s) => s.text).join(' '));
+      parts.push(segments.map((s) => s.speaker ? `${s.speaker}: ${s.text}` : s.text).join('\n'));
     } else if (typeof meeting.transcript === 'object') {
       parts.push(JSON.stringify(meeting.transcript));
     }

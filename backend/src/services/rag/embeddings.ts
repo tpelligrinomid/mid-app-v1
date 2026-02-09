@@ -10,6 +10,9 @@ import type { EmbeddingResult } from '../../types/rag.js';
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const MAX_BATCH_SIZE = 100;
+// Safety: truncate any input to ~6000 tokens worth of characters (8191 limit)
+// cl100k_base worst case is ~3 chars/token, so 18000 chars ≈ 6000 tokens
+const MAX_INPUT_CHARS = 18000;
 
 function getApiKey(): string {
   const key = process.env.OPENAI_API_KEY;
@@ -47,6 +50,11 @@ async function callEmbeddingsApi(
 ): Promise<{ embedding: number[]; tokens: number }[]> {
   const apiKey = getApiKey();
 
+  // Safety truncation: prevent any single input from exceeding token limit
+  const safeTexts = texts.map((t) =>
+    t.length > MAX_INPUT_CHARS ? t.substring(0, MAX_INPUT_CHARS) : t
+  );
+
   const response = await fetch(OPENAI_EMBEDDINGS_URL, {
     method: 'POST',
     headers: {
@@ -55,7 +63,7 @@ async function callEmbeddingsApi(
     },
     body: JSON.stringify({
       model: EMBEDDING_MODEL,
-      input: texts,
+      input: safeTexts,
     }),
   });
 

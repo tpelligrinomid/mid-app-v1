@@ -2,22 +2,27 @@
  * Content Chunking Service
  *
  * Splits text into embeddable chunks with configurable size and overlap.
- * Target: ~500 tokens per chunk. Hard cap at 7500 tokens (model limit is 8191).
+ * Target: ~500 tokens per chunk. Hard cap at 6000 tokens (model limit is 8191).
+ *
+ * Uses character-based token estimation (chars / 3) for reliability with
+ * diverse content like meeting transcripts with timestamps and speaker labels.
  */
 
 import type { TextChunk, ChunkingOptions } from '../../types/rag.js';
 
 const DEFAULT_MAX_TOKENS = 500;
 const DEFAULT_OVERLAP_SENTENCES = 2;
-// text-embedding-3-small has 8191 token limit; leave margin
-const HARD_TOKEN_CAP = 7500;
+// text-embedding-3-small has 8191 token limit; chars/3 is conservative
+// so 6000 estimated tokens ≈ 18,000 chars ≈ ~6000 actual tokens max
+const HARD_TOKEN_CAP = 6000;
 
 /**
- * Conservative token estimate (words * 1.4 accounts for subword tokenization)
+ * Conservative token estimate using character count.
+ * cl100k_base averages ~4 chars/token for English, ~3 for mixed content.
+ * We use chars/3 (pessimistic) to avoid exceeding the 8191 token limit.
  */
 function estimateTokens(text: string): number {
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  return Math.ceil(wordCount * 1.4);
+  return Math.ceil(text.length / 3);
 }
 
 /**
@@ -113,8 +118,9 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
     if (!content) return;
 
     // Safety: if a chunk is still too large, hard-split by words
+    // 6000 tokens * 3 chars/token = 18000 chars; ~2000 words is safe
     if (estimateTokens(content) > HARD_TOKEN_CAP) {
-      const maxWords = Math.floor(HARD_TOKEN_CAP / 1.4);
+      const maxWords = 2000;
       const subParts = hardSplitByWords(content, maxWords);
       for (const part of subParts) {
         chunks.push({
@@ -157,7 +163,7 @@ export function chunkText(text: string, options?: ChunkingOptions): TextChunk[] 
 
       // If sentence splitting didn't help (e.g., one giant run-on), hard-split
       if (sentences.length <= 1 && paragraphTokens > HARD_TOKEN_CAP) {
-        const maxWords = Math.floor(maxTokens / 1.4);
+        const maxWords = 2000;
         const subParts = hardSplitByWords(paragraph, maxWords);
         for (const part of subParts) {
           currentContent = part;

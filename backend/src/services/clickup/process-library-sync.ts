@@ -156,7 +156,12 @@ export class ProcessLibrarySyncService {
       // Filter to tasks with MiD Points Menu = true and no parent (parent tasks only)
       const filteredTasks = tasks.filter(task => {
         if (task.parent) return false;
-        return this.hasMidPointsMenu(task);
+        const passes = this.hasMidPointsMenu(task);
+        if (passes) {
+          const field = task.custom_fields?.find(f => f.id === this.config.customFields.midPointsMenu);
+          console.log(`[Process Library Sync] Task ${task.id} "${task.name}" passes filter, MiD Points Menu value: ${JSON.stringify(field?.value)}`);
+        }
+        return passes;
       });
 
       // Batch upsert

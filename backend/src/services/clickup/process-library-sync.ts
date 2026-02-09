@@ -7,6 +7,7 @@ interface ClickUpTask {
   id: string;
   name: string;
   description?: string;
+  points?: number;
   time_estimate?: number;
   parent?: string;
   custom_fields?: Array<{
@@ -223,6 +224,11 @@ export class ProcessLibrarySyncService {
   }
 
   private extractPoints(task: ClickUpTask): number | null {
+    // Check native ClickUp points field first
+    if (task.points !== undefined && task.points !== null) {
+      return task.points;
+    }
+    // Fall back to custom field
     if (!task.custom_fields || !Array.isArray(task.custom_fields)) return null;
     const field = task.custom_fields.find(
       f => f.id === this.config.customFields.points

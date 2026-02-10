@@ -136,12 +136,11 @@ export class QuickBooksCronSyncService {
       const contractsByRealm = this.groupContractsByRealm(contracts);
       console.log(`[QuickBooks Cron Sync] Contracts span ${Object.keys(contractsByRealm).length} QuickBooks realms`);
 
-      // 3. For incremental mode, calculate cutoff date (30 minutes ago)
-      let updatedSince: Date | undefined;
-      if (mode === 'incremental') {
-        updatedSince = new Date(Date.now() - 30 * 60 * 1000);
-        console.log(`[QuickBooks Cron Sync] Incremental mode: only fetching items updated since ${updatedSince.toISOString()}`);
-      }
+      // 3. Always fetch all invoices (no updatedSince filter).
+      // We upsert on conflict, so re-fetching is safe and ensures:
+      // - Invoices get re-linked when new contracts are added
+      // - Amount/status changes are always picked up
+      const updatedSince: Date | undefined = undefined;
 
       // 4. Process each realm
       for (const [realmId, realmContracts] of Object.entries(contractsByRealm)) {

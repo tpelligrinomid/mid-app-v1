@@ -75,13 +75,15 @@ export async function submitMeetingNotes(
 }
 
 /**
- * Submit a deliverable for AI generation
- * Returns a job ID for polling
+ * Submit a deliverable for AI generation.
+ * Routes to the correct type-specific endpoint:
+ *   /api/intake/research, /api/intake/roadmap, /api/intake/plan, /api/intake/brief
  */
 export async function submitDeliverable(
   data: DeliverableSubmission
 ): Promise<SubmitJobResponse> {
-  return masterMarketerFetch<SubmitJobResponse>('/api/intake/deliverable', {
+  const endpoint = `/api/intake/${encodeURIComponent(data.deliverable_type)}`;
+  return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(data),
   });

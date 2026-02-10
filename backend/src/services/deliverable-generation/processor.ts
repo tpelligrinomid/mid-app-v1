@@ -12,7 +12,7 @@ import { submitDeliverable, pollUntilComplete } from '../master-marketer/client.
 import type { DeliverableJobOutput } from '../master-marketer/types.js';
 import { ingestContent } from '../rag/ingestion.js';
 import { assembleContext } from './context.js';
-import type { GenerationState } from './types.js';
+import type { GenerationState, ResearchInputs } from './types.js';
 
 // ============================================================================
 // Helpers
@@ -49,7 +49,8 @@ export async function generateDeliverableInBackground(
   title: string,
   deliverableType: string,
   instructions?: string,
-  primaryMeetingIds?: string[]
+  primaryMeetingIds?: string[],
+  researchInputs?: ResearchInputs
 ): Promise<void> {
   try {
     // 1. Assembling context
@@ -82,6 +83,8 @@ export async function generateDeliverableInBackground(
       contract_id: contractId,
       title,
       instructions,
+      client: researchInputs?.client,
+      competitors: researchInputs?.competitors,
       context,
     });
 

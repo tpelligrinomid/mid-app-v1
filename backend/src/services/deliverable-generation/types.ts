@@ -16,8 +16,24 @@ export interface DeliverableSubmission {
   contract_id: string;
   title: string;
   instructions?: string;
+  client?: CompanyProfile;
+  competitors?: CompanyProfile[];
   context: DeliverableContext;
   metadata?: Record<string, unknown>;
+}
+
+/** Shared shape for client and each competitor */
+export interface CompanyProfile {
+  company_name: string;
+  domain: string;
+  linkedin_handle?: string;
+  youtube_channel_id?: string;
+}
+
+/** Strategist-provided research inputs for the generate request */
+export interface ResearchInputs {
+  client: CompanyProfile;
+  competitors?: CompanyProfile[];
 }
 
 export interface DeliverableContext {
@@ -52,6 +68,7 @@ export interface DeliverableContext {
 export interface GenerateDeliverableRequest {
   instructions?: string;
   primary_meeting_ids?: string[];
+  research_inputs?: ResearchInputs;
 }
 
 // ============================================================================

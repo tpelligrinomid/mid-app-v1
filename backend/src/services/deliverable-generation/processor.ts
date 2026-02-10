@@ -85,6 +85,7 @@ export async function generateDeliverableInBackground(
       instructions,
       client: researchInputs?.client,
       competitors: researchInputs?.competitors,
+      context: {},
       knowledge_base: context,
     });
 
@@ -97,8 +98,8 @@ export async function generateDeliverableInBackground(
     });
 
     const result = await pollUntilComplete(jobId, {
-      intervalMs: 7000,
-      timeoutMs: 600_000, // 10 min — deliverables may take longer than meetings
+      intervalMs: 10_000,
+      timeoutMs: 2_700_000, // 45 min — research reports can take 25-30 min
     });
 
     if (!result.output) {

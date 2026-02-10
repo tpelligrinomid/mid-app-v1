@@ -85,7 +85,7 @@ export async function generateDeliverableInBackground(
       instructions,
       client: researchInputs?.client,
       competitors: researchInputs?.competitors,
-      context,
+      knowledge_base: context,
     });
 
     // 3. Poll for completion

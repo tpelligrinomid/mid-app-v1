@@ -10,7 +10,7 @@
 // Submission Payload
 // ============================================================================
 
-/** Payload sent to Master Marketer /api/intake/deliverable */
+/** Payload sent to Master Marketer /api/intake/{type} */
 export interface DeliverableSubmission {
   deliverable_type: string;
   contract_id: string;
@@ -18,7 +18,8 @@ export interface DeliverableSubmission {
   instructions?: string;
   client?: CompanyProfile;
   competitors?: CompanyProfile[];
-  context: DeliverableContext;
+  context?: Record<string, unknown>;
+  knowledge_base: DeliverableContext;
   metadata?: Record<string, unknown>;
 }
 

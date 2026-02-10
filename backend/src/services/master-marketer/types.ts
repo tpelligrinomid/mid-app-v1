@@ -50,6 +50,12 @@ export interface JobStatusResponse {
   completedAt?: string;
 }
 
+// AI output for deliverable generation
+export interface DeliverableJobOutput {
+  content_raw: string;
+  content_structured: Record<string, unknown>;
+}
+
 // Processing state stored in compass_meetings.raw_metadata
 export interface ProcessingState {
   master_marketer?: {

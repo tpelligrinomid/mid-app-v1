@@ -14,6 +14,7 @@ import type {
   SubmitJobResponse,
   JobStatusResponse,
 } from './types.js';
+import type { DeliverableSubmission } from '../deliverable-generation/types.js';
 
 interface MasterMarketerConfig {
   baseUrl: string;
@@ -68,6 +69,19 @@ export async function submitMeetingNotes(
   data: MeetingNotesSubmission
 ): Promise<SubmitJobResponse> {
   return masterMarketerFetch<SubmitJobResponse>('/api/intake/meeting-notes', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Submit a deliverable for AI generation
+ * Returns a job ID for polling
+ */
+export async function submitDeliverable(
+  data: DeliverableSubmission
+): Promise<SubmitJobResponse> {
+  return masterMarketerFetch<SubmitJobResponse>('/api/intake/deliverable', {
     method: 'POST',
     body: JSON.stringify(data),
   });

@@ -15,6 +15,8 @@ import type {
 } from '../../types/deliverables.js';
 import { insert, update, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
+import { generateDeliverableInBackground } from '../../services/deliverable-generation/processor.js';
+import type { GenerateDeliverableRequest, GenerationState } from '../../services/deliverable-generation/types.js';
 
 const router = Router();
 
@@ -386,6 +388,127 @@ router.delete(
       console.error('[Deliverables] Delete error:', err);
       res.status(500).json({ error: message });
     }
+  }
+);
+
+// ============================================================================
+// AI Generation
+// ============================================================================
+
+/**
+ * POST /api/compass/deliverables/:id/generate
+ * Trigger AI generation for a deliverable.
+ * Returns 202 immediately; generation runs in the background.
+ */
+router.post(
+  '/:id/generate',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // Check Master Marketer is configured
+    if (!process.env.MASTER_MARKETER_URL || !process.env.MASTER_MARKETER_API_KEY) {
+      res.status(503).json({
+        error: 'Master Marketer integration not configured',
+        details: 'MASTER_MARKETER_URL and MASTER_MARKETER_API_KEY environment variables are required.',
+      });
+      return;
+    }
+
+    const deliverableId = req.params.id;
+    const { instructions, primary_meeting_ids } = req.body as GenerateDeliverableRequest;
+
+    // Fetch the deliverable
+    const { data: deliverable, error: fetchError } = await req.supabase
+      .from('compass_deliverables')
+      .select('*')
+      .eq('deliverable_id', deliverableId)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('[Deliverables] Generate fetch error:', fetchError);
+      res.status(500).json({ error: fetchError.message });
+      return;
+    }
+
+    if (!deliverable) {
+      res.status(404).json({ error: 'Deliverable not found' });
+      return;
+    }
+
+    // Check not already generating (prevent duplicate runs)
+    const metadata = deliverable.metadata as GenerationState | null;
+    const currentStatus = metadata?.generation?.status;
+    if (
+      currentStatus === 'assembling_context' ||
+      currentStatus === 'submitted' ||
+      currentStatus === 'polling'
+    ) {
+      res.status(409).json({
+        error: 'Generation is already in progress',
+        generation: metadata?.generation,
+      });
+      return;
+    }
+
+    // Return 202 immediately
+    res.status(202).json({
+      message: 'Generation started',
+      deliverable_id: deliverableId,
+      processing: { status: 'pending' },
+    });
+
+    // Fire-and-forget
+    generateDeliverableInBackground(
+      deliverableId,
+      deliverable.contract_id,
+      deliverable.title,
+      deliverable.deliverable_type,
+      instructions,
+      primary_meeting_ids
+    ).catch(() => {
+      // Already handled inside generateDeliverableInBackground
+    });
+  }
+);
+
+/**
+ * GET /api/compass/deliverables/:id/generation-status
+ * Check AI generation progress for a deliverable.
+ */
+router.get(
+  '/:id/generation-status',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const deliverableId = req.params.id;
+
+    const { data: deliverable, error } = await req.supabase
+      .from('compass_deliverables')
+      .select('metadata')
+      .eq('deliverable_id', deliverableId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Deliverables] Generation status error:', error);
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    if (!deliverable) {
+      res.status(404).json({ error: 'Deliverable not found' });
+      return;
+    }
+
+    const metadata = deliverable.metadata as GenerationState | null;
+    res.json({ generation: metadata?.generation || null });
   }
 );
 

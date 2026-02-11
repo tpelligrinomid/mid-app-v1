@@ -379,6 +379,13 @@ router.delete(
         console.warn('[Deliverables] Knowledge chunk cleanup warning:', chunkErr);
       }
 
+      // Delete versions (FK constraint)
+      try {
+        await del('compass_deliverable_versions', { deliverable_id: deliverableId });
+      } catch (versionErr) {
+        console.warn('[Deliverables] Version cleanup warning:', versionErr);
+      }
+
       // Delete the deliverable
       await del('compass_deliverables', { deliverable_id: deliverableId });
 

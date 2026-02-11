@@ -2,8 +2,8 @@
  * Types for the AI deliverable generation system.
  *
  * Flow: user triggers generation -> backend assembles context from
- * contract knowledge base -> submits to Master Marketer -> polls for
- * completion -> writes result back to deliverable content fields.
+ * contract knowledge base -> submits to Master Marketer with callback_url
+ * -> MM calls webhook when done -> webhook writes result back to deliverable.
  */
 
 // ============================================================================
@@ -20,6 +20,7 @@ export interface DeliverableSubmission {
   competitors?: CompanyProfile[];
   context?: Record<string, unknown>;
   knowledge_base: DeliverableContext;
+  callback_url?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -94,7 +95,6 @@ export interface GenerationState {
       | 'pending'
       | 'assembling_context'
       | 'submitted'
-      | 'polling'
       | 'completed'
       | 'failed';
     job_id?: string;
@@ -107,4 +107,22 @@ export interface GenerationState {
       processes_count: number;
     };
   };
+}
+
+// ============================================================================
+// Webhook Callback Payload (from Master Marketer)
+// ============================================================================
+
+/** Body POSTed by Master Marketer to our webhook when a job completes */
+export interface WebhookCallbackPayload {
+  job_id: string;
+  status: 'completed' | 'failed';
+  deliverable_id: string;
+  contract_id: string;
+  title: string;
+  output?: {
+    content_raw: string;
+    content_structured: Record<string, unknown>;
+  };
+  error?: string;
 }

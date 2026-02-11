@@ -444,8 +444,7 @@ router.post(
     const currentStatus = metadata?.generation?.status;
     if (
       currentStatus === 'assembling_context' ||
-      currentStatus === 'submitted' ||
-      currentStatus === 'polling'
+      currentStatus === 'submitted'
     ) {
       res.status(409).json({
         error: 'Generation is already in progress',

@@ -78,14 +78,33 @@ export async function submitMeetingNotes(
  * Submit a deliverable for AI generation.
  * Routes to the correct type-specific endpoint:
  *   /api/intake/research, /api/intake/roadmap, /api/intake/plan, /api/intake/brief
+ *
+ * Includes callback_url so MM can POST results back when the job completes,
+ * and metadata (deliverable_id, contract_id, title) for MM to echo back.
  */
 export async function submitDeliverable(
   data: DeliverableSubmission
 ): Promise<SubmitJobResponse> {
+  const backendUrl = process.env.BACKEND_URL;
+  const callbackUrl = backendUrl
+    ? `${backendUrl.replace(/\/+$/, '')}/api/webhooks/master-marketer/job-complete`
+    : undefined;
+
+  const payload = {
+    ...data,
+    ...(callbackUrl && { callback_url: callbackUrl }),
+    metadata: {
+      ...data.metadata,
+      deliverable_id: data.metadata?.deliverable_id,
+      contract_id: data.contract_id,
+      title: data.title,
+    },
+  };
+
   const endpoint = `/api/intake/${encodeURIComponent(data.deliverable_type)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   });
 }
 

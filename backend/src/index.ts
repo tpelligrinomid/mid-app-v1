@@ -11,6 +11,7 @@ import syncRouter from './routes/pulse/sync.js';
 import quickbooksAuthRouter from './routes/auth/quickbooks.js';
 import quickbooksPdfRouter from './routes/quickbooks-pdf.js';
 import cronRouter from './routes/cron.js';
+import webhooksRouter from './routes/webhooks.js';
 import notesRouter from './routes/compass/notes.js';
 import meetingsRouter from './routes/compass/meetings.js';
 import reportsRouter from './routes/pulse/reports.js';
@@ -77,6 +78,9 @@ app.use('/api/auth/quickbooks', quickbooksAuthRouter);
 
 // Cron routes (no auth middleware - authenticated via CRON_SECRET header)
 app.use('/api/cron', cronRouter);
+
+// Webhook routes (no auth middleware - authenticated via x-api-key header)
+app.use('/api/webhooks', webhooksRouter);
 
 // Protected routes (require authentication)
 app.use('/api/users', authMiddleware, usersRouter);

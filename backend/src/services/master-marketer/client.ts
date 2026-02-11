@@ -116,6 +116,14 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
 }
 
 /**
+ * Recover job output by Trigger.dev run ID.
+ * Fallback for when the webhook callback fails to deliver.
+ */
+export async function getJobByRunId(triggerRunId: string): Promise<JobStatusResponse> {
+  return masterMarketerFetch<JobStatusResponse>(`/api/jobs/by-run/${encodeURIComponent(triggerRunId)}`);
+}
+
+/**
  * Poll a job until it completes or times out
  *
  * @param jobId - The job ID to poll

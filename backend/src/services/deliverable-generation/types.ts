@@ -98,6 +98,7 @@ export interface GenerationState {
       | 'completed'
       | 'failed';
     job_id?: string;
+    trigger_run_id?: string;
     submitted_at?: string;
     completed_at?: string;
     error?: string;

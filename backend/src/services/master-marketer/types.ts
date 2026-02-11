@@ -24,7 +24,8 @@ export interface MeetingNotesSubmission {
 // Immediate response from submission
 export interface SubmitJobResponse {
   jobId: string;
-  status: 'queued' | 'processing';
+  triggerRunId?: string;
+  status: 'queued' | 'processing' | 'accepted';
 }
 
 // AI analysis output

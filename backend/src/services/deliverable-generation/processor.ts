@@ -62,7 +62,7 @@ export async function generateDeliverableInBackground(
     );
 
     // 2. Submit to Master Marketer (includes callback_url for webhook delivery)
-    const { jobId } = await submitDeliverable({
+    const { jobId, triggerRunId } = await submitDeliverable({
       deliverable_type: deliverableType,
       contract_id: contractId,
       title,
@@ -78,12 +78,13 @@ export async function generateDeliverableInBackground(
     await updateGenerationState(deliverableId, {
       status: 'submitted',
       job_id: jobId,
+      trigger_run_id: triggerRunId,
       submitted_at: new Date().toISOString(),
       context_summary: contextSummary,
     });
 
     console.log(
-      `[Deliverable Generation] Submitted "${title}" (job ${jobId}), awaiting webhook callback`
+      `[Deliverable Generation] Submitted "${title}" (job ${jobId}, run ${triggerRunId}), awaiting webhook callback`
     );
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

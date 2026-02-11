@@ -8,7 +8,6 @@ import { Router, Request, Response } from 'express';
 import { update as edgeFnUpdate } from '../utils/edge-functions.js';
 import { ingestContent } from '../services/rag/ingestion.js';
 import type { WebhookCallbackPayload, GenerationState } from '../services/deliverable-generation/types.js';
-import type { DeliverableJobOutput } from '../services/master-marketer/types.js';
 import { select } from '../utils/edge-functions.js';
 import { getJobByRunId } from '../services/master-marketer/client.js';
 
@@ -19,6 +18,38 @@ interface DeliverableRow {
 }
 
 const router = Router();
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Normalize MM output into { content_raw, content_structured }.
+ *
+ * MM's raw Trigger.dev output uses `full_document_markdown` for the markdown
+ * and the entire object as the structured data. The webhook callback *may*
+ * already use our field names. This handles both shapes.
+ */
+function normalizeOutput(raw: Record<string, unknown>): {
+  content_raw: string | null;
+  content_structured: Record<string, unknown> | null;
+} {
+  // If MM already mapped to our field names (webhook callback)
+  if (typeof raw.content_raw === 'string' || raw.content_structured) {
+    return {
+      content_raw: (raw.content_raw as string) || null,
+      content_structured: (raw.content_structured as Record<string, unknown>) || null,
+    };
+  }
+
+  // Raw Trigger.dev output: full_document_markdown + structured object
+  const contentRaw = (raw.full_document_markdown as string) || null;
+  const { full_document_markdown: _, ...structured } = raw;
+  return {
+    content_raw: contentRaw,
+    content_structured: Object.keys(structured).length > 0 ? structured : null,
+  };
+}
 
 // ============================================================================
 // Auth middleware for webhook routes
@@ -86,13 +117,15 @@ router.post(
           return;
         }
 
+        const output = normalizeOutput(payload.output as unknown as Record<string, unknown>);
+
         // Write content + update status
         await edgeFnUpdate(
           'compass_deliverables',
           {
             status: 'planned',
-            content_raw: payload.output.content_raw || null,
-            content_structured: payload.output.content_structured || null,
+            content_raw: output.content_raw,
+            content_structured: output.content_structured,
             metadata: {
               generation: {
                 status: 'completed',
@@ -108,9 +141,9 @@ router.post(
 
         // Auto-embed (non-blocking)
         const contentToEmbed =
-          payload.output.content_raw ||
-          (payload.output.content_structured
-            ? JSON.stringify(payload.output.content_structured)
+          output.content_raw ||
+          (output.content_structured
+            ? JSON.stringify(output.content_structured)
             : null);
 
         if (contentToEmbed && process.env.OPENAI_API_KEY) {
@@ -212,14 +245,14 @@ router.post(
           return;
         }
 
-        const output = result.output as unknown as DeliverableJobOutput;
+        const output = normalizeOutput(result.output as unknown as Record<string, unknown>);
 
         await edgeFnUpdate(
           'compass_deliverables',
           {
             status: 'planned',
-            content_raw: output.content_raw || null,
-            content_structured: output.content_structured || null,
+            content_raw: output.content_raw,
+            content_structured: output.content_structured,
             metadata: {
               generation: {
                 status: 'completed',

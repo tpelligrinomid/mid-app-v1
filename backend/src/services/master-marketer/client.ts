@@ -101,8 +101,6 @@ export async function submitDeliverable(
     },
   };
 
-  console.log(`[Master Marketer] submitDeliverable: BACKEND_URL=${backendUrl || '(not set)'}, callback_url=${callbackUrl || '(none)'}, metadata=${JSON.stringify(payload.metadata)}`);
-
   const endpoint = `/api/intake/${encodeURIComponent(data.deliverable_type)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',

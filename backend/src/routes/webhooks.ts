@@ -218,9 +218,8 @@ router.post(
         return;
       }
 
-      // Allow re-recovery even if marked completed (content may have been null)
-      if (generation.status === 'completed' && !req.query.force) {
-        res.status(200).json({ ok: true, skipped: true, message: 'Already completed — add ?force=true to re-recover' });
+      if (generation.status === 'completed') {
+        res.status(200).json({ ok: true, skipped: true, message: 'Already completed' });
         return;
       }
 
@@ -236,8 +235,6 @@ router.post(
       // Fetch output from MM via Trigger.dev run ID
       const result = await getJobByRunId(generation.trigger_run_id);
       const normalizedStatus = result.status?.toLowerCase();
-
-      console.log(`[Webhooks] Recovery MM response: status=${result.status}, output keys=${result.output ? Object.keys(result.output) : 'none'}`, JSON.stringify(result.output)?.slice(0, 500));
 
       if (normalizedStatus === 'completed' || normalizedStatus === 'complete') {
         if (!result.output) {
@@ -285,16 +282,7 @@ router.post(
         }
 
         console.log(`[Webhooks] Recovery succeeded for deliverable ${deliverableId}`);
-        res.status(200).json({
-          ok: true,
-          recovered: true,
-          debug: {
-            mm_output_keys: Object.keys(result.output),
-            has_content_raw: !!output.content_raw,
-            has_content_structured: !!output.content_structured,
-            content_raw_length: output.content_raw?.length ?? 0,
-          },
-        });
+        res.status(200).json({ ok: true, recovered: true });
       } else if (normalizedStatus === 'failed' || normalizedStatus === 'fail') {
         await edgeFnUpdate(
           'compass_deliverables',

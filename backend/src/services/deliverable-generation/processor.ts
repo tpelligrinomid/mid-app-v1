@@ -7,7 +7,7 @@
  * State is tracked in compass_deliverables.metadata.generation.
  */
 
-import { update as edgeFnUpdate } from '../../utils/edge-functions.js';
+import { update as edgeFnUpdate, select } from '../../utils/edge-functions.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
 import type { GenerationState, ResearchInputs } from './types.js';
@@ -29,6 +29,65 @@ async function updateGenerationState(
 }
 
 /**
+ * Resolve the previous roadmap for evolutionary generation.
+ * If an explicit ID is given, fetch that specific deliverable.
+ * Otherwise, auto-detect the most recent completed roadmap for the contract
+ * (excluding the one currently being generated).
+ */
+async function resolvePreviousRoadmap(
+  contractId: string,
+  currentDeliverableId: string,
+  explicitId?: string
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    if (explicitId) {
+      const result = await select<Array<{ content_structured: Record<string, unknown> | null }>>(
+        'compass_deliverables',
+        {
+          select: 'content_structured',
+          filters: { deliverable_id: explicitId },
+          single: true,
+        }
+      );
+      const structured = (result as unknown as { content_structured: Record<string, unknown> | null })?.content_structured;
+      if (structured) {
+        console.log(`[Deliverable Generation] Using explicit previous roadmap: ${explicitId}`);
+        return structured;
+      }
+      console.warn(`[Deliverable Generation] Explicit previous_roadmap_id ${explicitId} has no content_structured, skipping`);
+      return undefined;
+    }
+
+    // Auto-detect: find the latest completed roadmap for this contract
+    const results = await select<Array<{ deliverable_id: string; content_structured: Record<string, unknown> | null }>>(
+      'compass_deliverables',
+      {
+        select: 'deliverable_id, content_structured',
+        filters: {
+          contract_id: contractId,
+          deliverable_type: 'roadmap',
+          deliverable_id: { neq: currentDeliverableId },
+        },
+        order: [{ column: 'created_at', ascending: false }],
+        limit: 1,
+      }
+    );
+
+    const prev = results?.[0];
+    if (prev?.content_structured) {
+      console.log(`[Deliverable Generation] Auto-detected previous roadmap: ${prev.deliverable_id}`);
+      return prev.content_structured;
+    }
+
+    console.log('[Deliverable Generation] No previous roadmap found for contract, generating from scratch');
+    return undefined;
+  } catch (err) {
+    console.warn('[Deliverable Generation] Failed to resolve previous roadmap (non-blocking):', err);
+    return undefined;
+  }
+}
+
+/**
  * Generate a deliverable in the background (fire-and-forget).
  *
  * State machine: pending -> assembling_context -> submitted -> (webhook) -> completed | failed
@@ -40,7 +99,8 @@ export async function generateDeliverableInBackground(
   deliverableType: string,
   instructions?: string,
   primaryMeetingIds?: string[],
-  researchInputs?: ResearchInputs
+  researchInputs?: ResearchInputs,
+  previousRoadmapId?: string
 ): Promise<void> {
   try {
     // 1. Assembling context
@@ -61,7 +121,13 @@ export async function generateDeliverableInBackground(
       contextSummary
     );
 
-    // 2. Submit to Master Marketer (includes callback_url for webhook delivery)
+    // 2. For roadmaps, resolve previous roadmap for evolutionary generation
+    let previousRoadmap: Record<string, unknown> | undefined;
+    if (deliverableType === 'roadmap') {
+      previousRoadmap = await resolvePreviousRoadmap(contractId, deliverableId, previousRoadmapId);
+    }
+
+    // 3. Submit to Master Marketer (includes callback_url for webhook delivery)
     const { jobId, triggerRunId } = await submitDeliverable({
       deliverable_type: deliverableType,
       contract_id: contractId,
@@ -72,9 +138,10 @@ export async function generateDeliverableInBackground(
       context: {},
       knowledge_base: context,
       metadata: { deliverable_id: deliverableId },
+      ...(previousRoadmap && { previous_roadmap: previousRoadmap }),
     });
 
-    // 3. Record submitted state — webhook handles the rest
+    // 4. Record submitted state — webhook handles the rest
     await updateGenerationState(deliverableId, {
       status: 'submitted',
       job_id: jobId,

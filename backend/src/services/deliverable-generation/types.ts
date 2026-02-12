@@ -22,6 +22,8 @@ export interface DeliverableSubmission {
   knowledge_base: DeliverableContext;
   callback_url?: string;
   metadata?: Record<string, unknown>;
+  /** Optional prior roadmap output — MM evolves from this instead of cold-starting */
+  previous_roadmap?: Record<string, unknown>;
 }
 
 /** Shared shape for client and each competitor */
@@ -71,6 +73,8 @@ export interface GenerateDeliverableRequest {
   instructions?: string;
   primary_meeting_ids?: string[];
   research_inputs?: ResearchInputs;
+  /** Explicit prior roadmap ID to evolve from. If omitted, auto-detects the latest completed roadmap for the contract. */
+  previous_roadmap_id?: string;
 }
 
 // ============================================================================

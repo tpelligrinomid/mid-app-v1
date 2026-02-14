@@ -426,7 +426,13 @@ router.post(
     }
 
     const deliverableId = req.params.id;
-    const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id, seed_topics, max_crawl_pages } = req.body as GenerateDeliverableRequest;
+    const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id } = req.body as GenerateDeliverableRequest;
+
+    // Frontend nests seed_topics/max_crawl_pages inside research_inputs; accept both locations
+    const body = req.body as Record<string, unknown>;
+    const ri = research_inputs as Record<string, unknown> | undefined;
+    const seed_topics = (body.seed_topics ?? ri?.seed_topics) as string[] | undefined;
+    const max_crawl_pages = (body.max_crawl_pages ?? ri?.max_crawl_pages) as number | undefined;
 
     console.log('[Deliverables] Generate request body:', JSON.stringify({
       has_instructions: !!instructions,

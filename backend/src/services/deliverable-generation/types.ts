@@ -19,11 +19,17 @@ export interface DeliverableSubmission {
   client?: CompanyProfile;
   competitors?: CompanyProfile[];
   context?: Record<string, unknown>;
-  knowledge_base: DeliverableContext;
+  knowledge_base?: DeliverableContext;
   callback_url?: string;
   metadata?: Record<string, unknown>;
   /** Optional prior roadmap output — MM evolves from this instead of cold-starting */
   previous_roadmap?: Record<string, unknown>;
+  /** SEO audit: topic seeds for crawl prioritization */
+  seed_topics?: string[];
+  /** SEO audit: max pages to crawl per domain */
+  max_crawl_pages?: number;
+  /** SEO audit: prior research report for context */
+  research_context?: { full_document_markdown: string; competitive_scores: Record<string, unknown> };
 }
 
 /** Shared shape for client and each competitor */
@@ -75,6 +81,10 @@ export interface GenerateDeliverableRequest {
   research_inputs?: ResearchInputs;
   /** Explicit prior roadmap ID to evolve from. If omitted, auto-detects the latest completed roadmap for the contract. */
   previous_roadmap_id?: string;
+  /** SEO audit: topic seeds for crawl prioritization */
+  seed_topics?: string[];
+  /** SEO audit: max pages to crawl per domain */
+  max_crawl_pages?: number;
 }
 
 // ============================================================================

@@ -426,7 +426,7 @@ router.post(
     }
 
     const deliverableId = req.params.id;
-    const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id } = req.body as GenerateDeliverableRequest;
+    const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id, seed_topics, max_crawl_pages } = req.body as GenerateDeliverableRequest;
 
     // Fetch the deliverable
     const { data: deliverable, error: fetchError } = await req.supabase
@@ -476,7 +476,9 @@ router.post(
       instructions,
       primary_meeting_ids,
       research_inputs,
-      previous_roadmap_id
+      previous_roadmap_id,
+      seed_topics,
+      max_crawl_pages
     ).catch(() => {
       // Already handled inside generateDeliverableInBackground
     });

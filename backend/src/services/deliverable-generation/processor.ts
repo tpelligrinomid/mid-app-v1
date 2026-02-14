@@ -88,6 +88,46 @@ async function resolvePreviousRoadmap(
 }
 
 /**
+ * Resolve the latest completed research deliverable for a contract.
+ * Used by SEO audits to include prior research as context.
+ */
+async function resolvePriorResearch(
+  contractId: string,
+  currentDeliverableId: string
+): Promise<{ full_document_markdown: string; competitive_scores: Record<string, unknown> } | undefined> {
+  try {
+    const results = await select<Array<{ deliverable_id: string; content_structured: Record<string, unknown> | null }>>(
+      'compass_deliverables',
+      {
+        select: 'deliverable_id, content_structured',
+        filters: {
+          contract_id: contractId,
+          deliverable_type: 'research',
+          deliverable_id: { neq: currentDeliverableId },
+        },
+        order: [{ column: 'created_at', ascending: false }],
+        limit: 1,
+      }
+    );
+
+    const prev = results?.[0];
+    if (prev?.content_structured) {
+      console.log(`[Deliverable Generation] Auto-detected prior research: ${prev.deliverable_id}`);
+      return {
+        full_document_markdown: (prev.content_structured as Record<string, unknown>).full_document_markdown as string || '',
+        competitive_scores: (prev.content_structured as Record<string, unknown>).competitive_scores as Record<string, unknown> || {},
+      };
+    }
+
+    console.log('[Deliverable Generation] No prior research found for contract');
+    return undefined;
+  } catch (err) {
+    console.warn('[Deliverable Generation] Failed to resolve prior research (non-blocking):', err);
+    return undefined;
+  }
+}
+
+/**
  * Generate a deliverable in the background (fire-and-forget).
  *
  * State machine: pending -> assembling_context -> submitted -> (webhook) -> completed | failed
@@ -100,13 +140,51 @@ export async function generateDeliverableInBackground(
   instructions?: string,
   primaryMeetingIds?: string[],
   researchInputs?: ResearchInputs,
-  previousRoadmapId?: string
+  previousRoadmapId?: string,
+  seedTopics?: string[],
+  maxCrawlPages?: number
 ): Promise<void> {
   try {
     // 1. Assembling context
     await updateGenerationState(deliverableId, {
       status: 'assembling_context',
     });
+
+    // SEO audits skip knowledge_base context — they use client/competitors + research_context
+    if (deliverableType === 'seo_audit') {
+      // Resolve prior research report for context
+      const researchContext = await resolvePriorResearch(contractId, deliverableId);
+
+      console.log(
+        `[Deliverable Generation] SEO audit context for "${title}":`,
+        { has_research_context: !!researchContext, seed_topics: seedTopics?.length ?? 0, max_crawl_pages: maxCrawlPages }
+      );
+
+      const { jobId, triggerRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client: researchInputs?.client,
+        competitors: researchInputs?.competitors,
+        metadata: { deliverable_id: deliverableId },
+        seed_topics: seedTopics,
+        max_crawl_pages: maxCrawlPages,
+        ...(researchContext && { research_context: researchContext }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: jobId,
+        trigger_run_id: triggerRunId,
+        submitted_at: new Date().toISOString(),
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted SEO audit "${title}" (job ${jobId}, run ${triggerRunId}), awaiting webhook callback`
+      );
+      return;
+    }
 
     const context = await assembleContext(contractId, title, primaryMeetingIds);
 

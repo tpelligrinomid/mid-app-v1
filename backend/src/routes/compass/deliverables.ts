@@ -428,6 +428,15 @@ router.post(
     const deliverableId = req.params.id;
     const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id, seed_topics, max_crawl_pages } = req.body as GenerateDeliverableRequest;
 
+    console.log('[Deliverables] Generate request body:', JSON.stringify({
+      has_instructions: !!instructions,
+      has_research_inputs: !!research_inputs,
+      client: research_inputs?.client,
+      competitors_count: research_inputs?.competitors?.length,
+      seed_topics,
+      max_crawl_pages,
+    }));
+
     // Fetch the deliverable
     const { data: deliverable, error: fetchError } = await req.supabase
       .from('compass_deliverables')

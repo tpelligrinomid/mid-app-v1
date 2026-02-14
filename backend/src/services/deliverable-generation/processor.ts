@@ -157,7 +157,14 @@ export async function generateDeliverableInBackground(
 
       console.log(
         `[Deliverable Generation] SEO audit context for "${title}":`,
-        { has_research_context: !!researchContext, seed_topics: seedTopics?.length ?? 0, max_crawl_pages: maxCrawlPages }
+        {
+          has_research_context: !!researchContext,
+          has_client: !!researchInputs?.client,
+          client: researchInputs?.client,
+          competitors_count: researchInputs?.competitors?.length,
+          seed_topics: seedTopics?.length ?? 0,
+          max_crawl_pages: maxCrawlPages,
+        }
       );
 
       const { jobId, triggerRunId } = await submitDeliverable({

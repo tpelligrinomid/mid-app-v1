@@ -88,13 +88,14 @@ async function resolvePreviousRoadmap(
 }
 
 /**
- * Resolve the latest completed research deliverable for a contract.
- * Used by SEO audits to include prior research as context.
+ * Generic helper: resolve the latest completed deliverable of a given type for a contract.
+ * Returns the full content_structured or undefined.
  */
-async function resolvePriorResearch(
+async function resolvePriorDeliverable(
   contractId: string,
+  type: string,
   currentDeliverableId: string
-): Promise<{ full_document_markdown: string; competitive_scores: Record<string, unknown> } | undefined> {
+): Promise<Record<string, unknown> | undefined> {
   try {
     const results = await select<Array<{ deliverable_id: string; content_structured: Record<string, unknown> | null }>>(
       'compass_deliverables',
@@ -102,7 +103,7 @@ async function resolvePriorResearch(
         select: 'deliverable_id, content_structured',
         filters: {
           contract_id: contractId,
-          deliverable_type: 'research',
+          deliverable_type: type,
           deliverable_id: { neq: currentDeliverableId },
         },
         order: [{ column: 'created_at', ascending: false }],
@@ -112,19 +113,32 @@ async function resolvePriorResearch(
 
     const prev = results?.[0];
     if (prev?.content_structured) {
-      console.log(`[Deliverable Generation] Auto-detected prior research: ${prev.deliverable_id}`);
-      return {
-        full_document_markdown: (prev.content_structured as Record<string, unknown>).full_document_markdown as string || '',
-        competitive_scores: (prev.content_structured as Record<string, unknown>).competitive_scores as Record<string, unknown> || {},
-      };
+      console.log(`[Deliverable Generation] Auto-detected prior ${type}: ${prev.deliverable_id}`);
+      return prev.content_structured;
     }
 
-    console.log('[Deliverable Generation] No prior research found for contract');
+    console.log(`[Deliverable Generation] No prior ${type} found for contract`);
     return undefined;
   } catch (err) {
-    console.warn('[Deliverable Generation] Failed to resolve prior research (non-blocking):', err);
+    console.warn(`[Deliverable Generation] Failed to resolve prior ${type} (non-blocking):`, err);
     return undefined;
   }
+}
+
+/**
+ * Resolve the latest completed research deliverable for a contract.
+ * Extracts the specific fields MM expects for research context.
+ */
+async function resolvePriorResearch(
+  contractId: string,
+  currentDeliverableId: string
+): Promise<{ full_document_markdown: string; competitive_scores: Record<string, unknown> } | undefined> {
+  const data = await resolvePriorDeliverable(contractId, 'research', currentDeliverableId);
+  if (!data) return undefined;
+  return {
+    full_document_markdown: (data.full_document_markdown as string) || '',
+    competitive_scores: (data.competitive_scores as Record<string, unknown>) || {},
+  };
 }
 
 /**
@@ -160,9 +174,8 @@ export async function generateDeliverableInBackground(
         {
           has_research_context: !!researchContext,
           has_client: !!researchInputs?.client,
-          client: researchInputs?.client,
           competitors_count: researchInputs?.competitors?.length,
-          seed_topics: seedTopics?.length ?? 0,
+          seed_topics_count: seedTopics?.length ?? 0,
           max_crawl_pages: maxCrawlPages,
         }
       );
@@ -189,6 +202,62 @@ export async function generateDeliverableInBackground(
 
       console.log(
         `[Deliverable Generation] Submitted SEO audit "${title}" (job ${jobId}, run ${triggerRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
+    // Content plans pull from prior deliverables (roadmap, SEO audit, research) + meeting transcripts
+    if (deliverableType === 'content_plan') {
+      const [roadmapData, seoAuditData, researchData, previousContentPlan, context] = await Promise.all([
+        resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
+        resolvePriorDeliverable(contractId, 'seo_audit', deliverableId),
+        resolvePriorResearch(contractId, deliverableId),
+        resolvePriorDeliverable(contractId, 'content_plan', deliverableId),
+        assembleContext(contractId, title, primaryMeetingIds),
+      ]);
+
+      // Extract transcripts from primary meetings (brainstorm/planning sessions)
+      const transcripts = context.primary_meetings.map(m => m.transcript);
+
+      console.log(
+        `[Deliverable Generation] Content plan context for "${title}":`,
+        {
+          has_roadmap: !!roadmapData,
+          has_seo_audit: !!seoAuditData,
+          has_research: !!researchData,
+          has_previous_content_plan: !!previousContentPlan,
+          transcript_count: transcripts.length,
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+        }
+      );
+
+      const { jobId: cpJobId, triggerRunId: cpRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        metadata: { deliverable_id: deliverableId },
+        ...(roadmapData && { roadmap: roadmapData }),
+        ...(seoAuditData && { seo_audit: seoAuditData }),
+        ...(researchData && { research: researchData }),
+        ...(transcripts.length > 0 && { transcripts }),
+        ...(previousContentPlan && { previous_content_plan: previousContentPlan }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: cpJobId,
+        trigger_run_id: cpRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: context.processes.length,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted content plan "${title}" (job ${cpJobId}, run ${cpRunId}), awaiting webhook callback`
       );
       return;
     }

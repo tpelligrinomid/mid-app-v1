@@ -102,9 +102,6 @@ export async function submitDeliverable(
   };
 
   const endpoint = `/api/intake/${encodeURIComponent(data.deliverable_type)}`;
-
-  console.log(`[Master Marketer] POST ${endpoint}`, JSON.stringify(payload, null, 2).slice(0, 2000));
-
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload),

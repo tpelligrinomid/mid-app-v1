@@ -30,6 +30,16 @@ export interface DeliverableSubmission {
   max_crawl_pages?: number;
   /** SEO audit: prior research report for context */
   research_context?: { full_document_markdown: string; competitive_scores: Record<string, unknown> };
+  /** Content plan: full roadmap output as input context */
+  roadmap?: Record<string, unknown>;
+  /** Content plan: full SEO audit output as input context */
+  seo_audit?: Record<string, unknown>;
+  /** Content plan: research report context */
+  research?: { full_document_markdown: string; competitive_scores: Record<string, unknown> };
+  /** Content plan: meeting transcripts */
+  transcripts?: string[];
+  /** Content plan: prior content plan for quarterly iteration */
+  previous_content_plan?: Record<string, unknown>;
 }
 
 /** Shared shape for client and each competitor */

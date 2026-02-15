@@ -4,11 +4,11 @@
 // Enums
 // ============================================================================
 
-export type DeliverableType = 'research' | 'roadmap' | 'seo_audit' | 'plan' | 'brief' | 'presentation' | 'other';
+export type DeliverableType = 'research' | 'roadmap' | 'seo_audit' | 'content_plan' | 'plan' | 'brief' | 'presentation' | 'other';
 export type DeliverableStatus = 'planned' | 'working' | 'waiting_on_client' | 'delivered';
 
 export const DELIVERABLE_TYPE_VALUES: DeliverableType[] = [
-  'research', 'roadmap', 'seo_audit', 'plan', 'brief', 'presentation', 'other',
+  'research', 'roadmap', 'seo_audit', 'content_plan', 'plan', 'brief', 'presentation', 'other',
 ];
 export const DELIVERABLE_STATUS_VALUES: DeliverableStatus[] = [
   'planned', 'working', 'waiting_on_client', 'delivered',

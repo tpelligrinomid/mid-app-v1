@@ -434,15 +434,6 @@ router.post(
     const seed_topics = (body.seed_topics ?? ri?.seed_topics) as string[] | undefined;
     const max_crawl_pages = (body.max_crawl_pages ?? ri?.max_crawl_pages) as number | undefined;
 
-    console.log('[Deliverables] Generate request body:', JSON.stringify({
-      has_instructions: !!instructions,
-      has_research_inputs: !!research_inputs,
-      client: research_inputs?.client,
-      competitors_count: research_inputs?.competitors?.length,
-      seed_topics,
-      max_crawl_pages,
-    }));
-
     // Fetch the deliverable
     const { data: deliverable, error: fetchError } = await req.supabase
       .from('compass_deliverables')

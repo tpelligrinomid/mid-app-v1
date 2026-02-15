@@ -219,6 +219,21 @@ export async function generateDeliverableInBackground(
       // Extract transcripts from primary meetings (brainstorm/planning sessions)
       const transcripts = context.primary_meetings.map(m => m.transcript);
 
+      // Auto-extract client/competitors from SEO audit output (MM requires them at top level)
+      let client: { company_name: string; domain: string } | undefined;
+      let competitors: Array<{ company_name: string; domain: string }> | undefined;
+      if (seoAuditData) {
+        const cs = seoAuditData.competitive_search as Record<string, unknown> | undefined;
+        const cp = cs?.client_profile as Record<string, unknown> | undefined;
+        if (cp?.company_name && cp?.domain) {
+          client = { company_name: cp.company_name as string, domain: cp.domain as string };
+        }
+        const profiles = cs?.competitor_profiles as Array<Record<string, unknown>> | undefined;
+        if (profiles?.length) {
+          competitors = profiles.map(p => ({ company_name: p.company_name as string, domain: p.domain as string }));
+        }
+      }
+
       console.log(
         `[Deliverable Generation] Content plan context for "${title}":`,
         {
@@ -228,6 +243,8 @@ export async function generateDeliverableInBackground(
           has_previous_content_plan: !!previousContentPlan,
           transcript_count: transcripts.length,
           meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          client: client?.company_name,
+          competitors_count: competitors?.length ?? 0,
         }
       );
 
@@ -236,6 +253,8 @@ export async function generateDeliverableInBackground(
         contract_id: contractId,
         title,
         instructions,
+        client,
+        competitors,
         metadata: { deliverable_id: deliverableId },
         ...(roadmapData && { roadmap: roadmapData }),
         ...(seoAuditData && { seo_audit: seoAuditData }),

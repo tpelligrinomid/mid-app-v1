@@ -101,7 +101,10 @@ export async function submitDeliverable(
     },
   };
 
-  const endpoint = `/api/intake/${encodeURIComponent(data.deliverable_type)}`;
+  // MM has two route prefixes: /api/generate/ for generation tasks, /api/intake/ for newer task types
+  const GENERATE_ROUTE_TYPES = new Set(['roadmap', 'research']);
+  const prefix = GENERATE_ROUTE_TYPES.has(data.deliverable_type) ? '/api/generate' : '/api/intake';
+  const endpoint = `${prefix}/${encodeURIComponent(data.deliverable_type)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload),

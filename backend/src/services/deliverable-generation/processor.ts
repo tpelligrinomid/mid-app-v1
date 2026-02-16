@@ -314,18 +314,8 @@ export async function generateDeliverableInBackground(
           points: p.points!,
         }));
 
-      // Auto-extract client from prior research/SEO audit if not provided
-      let client = researchInputs?.client;
-      if (!client) {
-        const seoAuditData = await resolvePriorDeliverable(contractId, 'seo_audit', deliverableId);
-        if (seoAuditData) {
-          const cs = seoAuditData.competitive_search as Record<string, unknown> | undefined;
-          const cp = cs?.client_profile as Record<string, unknown> | undefined;
-          if (cp?.company_name && cp?.domain) {
-            client = { company_name: cp.company_name as string, domain: cp.domain as string };
-          }
-        }
-      }
+      // Client comes from frontend research_inputs (same form as research generation)
+      const client = researchInputs?.client;
 
       console.log(
         `[Deliverable Generation] Roadmap context for "${title}":`,

@@ -101,8 +101,8 @@ export async function submitDeliverable(
     },
   };
 
-  // MM has two route prefixes: /api/generate/ for generation tasks, /api/intake/ for newer task types
-  const GENERATE_ROUTE_TYPES = new Set(['roadmap', 'research']);
+  // MM route prefixes: /api/generate/ for roadmap, /api/intake/ for everything else
+  const GENERATE_ROUTE_TYPES = new Set(['roadmap']);
   const prefix = GENERATE_ROUTE_TYPES.has(data.deliverable_type) ? '/api/generate' : '/api/intake';
   const endpoint = `${prefix}/${encodeURIComponent(data.deliverable_type)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {

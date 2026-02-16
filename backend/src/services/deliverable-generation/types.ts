@@ -40,6 +40,10 @@ export interface DeliverableSubmission {
   transcripts?: string[];
   /** Content plan: prior content plan for quarterly iteration */
   previous_content_plan?: Record<string, unknown>;
+  /** Roadmap: process library items (MM expects task/description/stage/points) */
+  process_library?: Array<{ task: string; description: string; stage: string; points: number }>;
+  /** Roadmap: monthly points budget from contract */
+  points_budget?: number;
 }
 
 /** Shared shape for client and each competitor */

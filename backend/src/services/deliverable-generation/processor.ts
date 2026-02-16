@@ -281,6 +281,97 @@ export async function generateDeliverableInBackground(
       return;
     }
 
+    // Roadmaps: resolve research, transcripts, process library, points budget
+    if (deliverableType === 'roadmap') {
+      const [researchData, previousRoadmap, context] = await Promise.all([
+        resolvePriorResearch(contractId, deliverableId),
+        resolvePreviousRoadmap(contractId, deliverableId, previousRoadmapId),
+        assembleContext(contractId, title, primaryMeetingIds),
+      ]);
+
+      // Fetch contract's points budget
+      let pointsBudget = 0;
+      try {
+        const contractResult = await select<Array<{ monthly_points_allotment: number | null }>>(
+          'contracts',
+          { select: 'monthly_points_allotment', filters: { contract_id: contractId }, single: true }
+        );
+        pointsBudget = (contractResult as unknown as { monthly_points_allotment: number | null })?.monthly_points_allotment || 0;
+      } catch (err) {
+        console.warn('[Deliverable Generation] Failed to fetch points budget (non-blocking):', err);
+      }
+
+      // Extract transcripts from primary meetings
+      const transcripts = context.primary_meetings.map(m => m.transcript);
+
+      // Map process library to MM's expected shape (name→task, phase→stage)
+      const processLibrary = context.processes
+        .filter(p => p.points != null && p.points > 0)
+        .map(p => ({
+          task: p.name,
+          description: p.description || '',
+          stage: p.phase,
+          points: p.points!,
+        }));
+
+      // Auto-extract client from prior research/SEO audit if not provided
+      let client = researchInputs?.client;
+      if (!client) {
+        const seoAuditData = await resolvePriorDeliverable(contractId, 'seo_audit', deliverableId);
+        if (seoAuditData) {
+          const cs = seoAuditData.competitive_search as Record<string, unknown> | undefined;
+          const cp = cs?.client_profile as Record<string, unknown> | undefined;
+          if (cp?.company_name && cp?.domain) {
+            client = { company_name: cp.company_name as string, domain: cp.domain as string };
+          }
+        }
+      }
+
+      console.log(
+        `[Deliverable Generation] Roadmap context for "${title}":`,
+        {
+          has_client: !!client,
+          has_research: !!researchData,
+          has_previous_roadmap: !!previousRoadmap,
+          transcript_count: transcripts.length,
+          process_library_count: processLibrary.length,
+          points_budget: pointsBudget,
+        }
+      );
+
+      const { jobId: rmJobId, triggerRunId: rmRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client,
+        metadata: { deliverable_id: deliverableId },
+        ...(researchData && { research: researchData }),
+        transcripts,
+        process_library: processLibrary,
+        points_budget: pointsBudget,
+        ...(previousRoadmap && { previous_roadmap: previousRoadmap }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: rmJobId,
+        trigger_run_id: rmRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: context.processes.length,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted roadmap "${title}" (job ${rmJobId}, run ${rmRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
+    // Default path: research and other types using knowledge_base
     const context = await assembleContext(contractId, title, primaryMeetingIds);
 
     const contextSummary = {
@@ -294,13 +385,6 @@ export async function generateDeliverableInBackground(
       contextSummary
     );
 
-    // 2. For roadmaps, resolve previous roadmap for evolutionary generation
-    let previousRoadmap: Record<string, unknown> | undefined;
-    if (deliverableType === 'roadmap') {
-      previousRoadmap = await resolvePreviousRoadmap(contractId, deliverableId, previousRoadmapId);
-    }
-
-    // 3. Submit to Master Marketer (includes callback_url for webhook delivery)
     const { jobId, triggerRunId } = await submitDeliverable({
       deliverable_type: deliverableType,
       contract_id: contractId,
@@ -311,10 +395,8 @@ export async function generateDeliverableInBackground(
       context: {},
       knowledge_base: context,
       metadata: { deliverable_id: deliverableId },
-      ...(previousRoadmap && { previous_roadmap: previousRoadmap }),
     });
 
-    // 4. Record submitted state — webhook handles the rest
     await updateGenerationState(deliverableId, {
       status: 'submitted',
       job_id: jobId,

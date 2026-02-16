@@ -16,7 +16,8 @@ import type {
 import { insert, update, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
 import { generateDeliverableInBackground } from '../../services/deliverable-generation/processor.js';
-import type { GenerateDeliverableRequest, GenerationState } from '../../services/deliverable-generation/types.js';
+import { submitConvert } from '../../services/master-marketer/client.js';
+import type { GenerateDeliverableRequest, ConvertDeliverableRequest, GenerationState } from '../../services/deliverable-generation/types.js';
 
 const router = Router();
 
@@ -488,6 +489,128 @@ router.post(
     ).catch(() => {
       // Already handled inside generateDeliverableInBackground
     });
+  }
+);
+
+/**
+ * POST /api/compass/deliverables/:id/convert
+ * Reformat an existing document into structured format.
+ * Supported types: roadmap, plan, brief.
+ * Returns 202 immediately; conversion runs in the background.
+ */
+router.post(
+  '/:id/convert',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!process.env.MASTER_MARKETER_URL || !process.env.MASTER_MARKETER_API_KEY) {
+      res.status(503).json({
+        error: 'Master Marketer integration not configured',
+        details: 'MASTER_MARKETER_URL and MASTER_MARKETER_API_KEY environment variables are required.',
+      });
+      return;
+    }
+
+    const deliverableId = req.params.id;
+    const { content, context } = req.body as ConvertDeliverableRequest;
+
+    if (!content || typeof content !== 'string') {
+      res.status(400).json({ error: 'content is required (the full text of the existing document)' });
+      return;
+    }
+
+    if (!context?.contract_name || !context?.industry) {
+      res.status(400).json({ error: 'context.contract_name and context.industry are required' });
+      return;
+    }
+
+    const CONVERTIBLE_TYPES = new Set(['roadmap', 'plan', 'brief']);
+
+    const { data: deliverable, error: fetchError } = await req.supabase
+      .from('compass_deliverables')
+      .select('*')
+      .eq('deliverable_id', deliverableId)
+      .maybeSingle();
+
+    if (fetchError) {
+      res.status(500).json({ error: fetchError.message });
+      return;
+    }
+
+    if (!deliverable) {
+      res.status(404).json({ error: 'Deliverable not found' });
+      return;
+    }
+
+    if (!CONVERTIBLE_TYPES.has(deliverable.deliverable_type)) {
+      res.status(400).json({
+        error: `Convert is not supported for type "${deliverable.deliverable_type}". Supported: ${[...CONVERTIBLE_TYPES].join(', ')}`,
+      });
+      return;
+    }
+
+    // Check not already processing
+    const metadata = deliverable.metadata as GenerationState | null;
+    const currentStatus = metadata?.generation?.status;
+    if (currentStatus === 'assembling_context' || currentStatus === 'submitted') {
+      res.status(409).json({
+        error: 'Processing is already in progress',
+        generation: metadata?.generation,
+      });
+      return;
+    }
+
+    // Return 202 immediately
+    res.status(202).json({
+      message: 'Conversion started',
+      deliverable_id: deliverableId,
+      processing: { status: 'pending' },
+    });
+
+    // Fire-and-forget: update state and submit to MM
+    (async () => {
+      try {
+        await update(
+          'compass_deliverables',
+          { status: 'working', metadata: { generation: { status: 'submitted', submitted_at: new Date().toISOString() } } },
+          { deliverable_id: deliverableId }
+        );
+
+        const { jobId, triggerRunId } = await submitConvert(deliverable.deliverable_type, {
+          content,
+          context,
+          metadata: {
+            deliverable_id: deliverableId,
+            contract_id: deliverable.contract_id,
+            title: deliverable.title,
+          },
+        });
+
+        await update(
+          'compass_deliverables',
+          { metadata: { generation: { status: 'submitted', job_id: jobId, trigger_run_id: triggerRunId, submitted_at: new Date().toISOString() } } },
+          { deliverable_id: deliverableId }
+        );
+
+        console.log(`[Deliverables] Submitted convert for "${deliverable.title}" (job ${jobId}, run ${triggerRunId})`);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error(`[Deliverables] Convert failed for ${deliverableId}:`, errorMessage);
+        try {
+          await update(
+            'compass_deliverables',
+            { status: 'planned', metadata: { generation: { status: 'failed', error: errorMessage, completed_at: new Date().toISOString() } } },
+            { deliverable_id: deliverableId }
+          );
+        } catch (updateErr) {
+          console.error(`[Deliverables] Failed to update failure state for ${deliverableId}:`, updateErr);
+        }
+      }
+    })();
   }
 );
 

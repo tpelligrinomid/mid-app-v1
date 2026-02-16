@@ -14,7 +14,7 @@ import type {
   SubmitJobResponse,
   JobStatusResponse,
 } from './types.js';
-import type { DeliverableSubmission } from '../deliverable-generation/types.js';
+import type { DeliverableSubmission, DeliverableConvertSubmission } from '../deliverable-generation/types.js';
 
 interface MasterMarketerConfig {
   baseUrl: string;
@@ -105,6 +105,32 @@ export async function submitDeliverable(
   const GENERATE_ROUTE_TYPES = new Set(['roadmap']);
   const prefix = GENERATE_ROUTE_TYPES.has(data.deliverable_type) ? '/api/generate' : '/api/intake';
   const endpoint = `${prefix}/${encodeURIComponent(data.deliverable_type)}`;
+  return masterMarketerFetch<SubmitJobResponse>(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Submit an existing document for reformatting/conversion.
+ * Always routes to /api/intake/{type} (the reformat endpoints).
+ * Supported types: roadmap, plan, brief.
+ */
+export async function submitConvert(
+  deliverableType: string,
+  data: DeliverableConvertSubmission
+): Promise<SubmitJobResponse> {
+  const backendUrl = process.env.BACKEND_URL;
+  const callbackUrl = backendUrl
+    ? `${backendUrl.replace(/\/+$/, '')}/api/webhooks/master-marketer/job-complete`
+    : undefined;
+
+  const payload = {
+    ...data,
+    ...(callbackUrl && { callback_url: callbackUrl }),
+  };
+
+  const endpoint = `/api/intake/${encodeURIComponent(deliverableType)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload),

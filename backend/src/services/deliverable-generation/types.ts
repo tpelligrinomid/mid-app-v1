@@ -101,6 +101,28 @@ export interface GenerateDeliverableRequest {
   max_crawl_pages?: number;
 }
 
+/** Request body for POST /deliverables/:id/convert */
+export interface ConvertDeliverableRequest {
+  content: string;
+  context: {
+    contract_name: string;
+    industry: string;
+    additional_notes?: string;
+  };
+}
+
+/** Payload sent to Master Marketer /api/intake/{type} for reformatting */
+export interface DeliverableConvertSubmission {
+  content: string;
+  context: {
+    contract_name: string;
+    industry: string;
+    additional_notes?: string;
+  };
+  callback_url?: string;
+  metadata?: Record<string, unknown>;
+}
+
 // ============================================================================
 // AI Output Shapes
 // ============================================================================

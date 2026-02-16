@@ -304,13 +304,25 @@ export async function generateDeliverableInBackground(
       // Extract transcripts from primary meetings
       const transcripts = context.primary_meetings.map(m => m.transcript);
 
-      // Map process library to MM's expected shape (name→task, phase→stage)
+      // Only Foundation/Execution/Analysis phases belong in roadmaps.
+      // AGE/Launch/Research/Roadmap are pre-work phases — exclude them.
+      const ROADMAP_STAGES = new Set(['foundation', 'execution', 'analysis']);
+      const STAGE_LABEL: Record<string, string> = {
+        foundation: 'Foundation',
+        execution: 'Execution',
+        analysis: 'Analysis',
+      };
+
       const processLibrary = context.processes
-        .filter(p => p.points != null && p.points > 0)
+        .filter(p =>
+          p.points != null && p.points > 0
+          && p.name?.trim()
+          && ROADMAP_STAGES.has(p.phase.toLowerCase())
+        )
         .map(p => ({
           task: p.name,
-          description: p.description || '',
-          stage: p.phase,
+          description: p.description || p.name,
+          stage: STAGE_LABEL[p.phase.toLowerCase()]!,
           points: p.points!,
         }));
 

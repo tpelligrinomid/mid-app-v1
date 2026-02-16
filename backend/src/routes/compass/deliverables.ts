@@ -516,10 +516,10 @@ router.post(
     }
 
     const deliverableId = req.params.id;
-    const { content, context } = req.body as ConvertDeliverableRequest;
+    const { content, file_url, context } = req.body as ConvertDeliverableRequest;
 
-    if (!content || typeof content !== 'string') {
-      res.status(400).json({ error: 'content is required (the full text of the existing document)' });
+    if (!content && !file_url) {
+      res.status(400).json({ error: 'Either content (document text) or file_url (Supabase storage URL to PDF/DOCX) is required' });
       return;
     }
 
@@ -581,7 +581,8 @@ router.post(
         );
 
         const { jobId, triggerRunId } = await submitConvert(deliverable.deliverable_type, {
-          content,
+          ...(content && { content }),
+          ...(file_url && { file_url }),
           context,
           metadata: {
             deliverable_id: deliverableId,

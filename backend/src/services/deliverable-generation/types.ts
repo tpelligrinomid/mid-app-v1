@@ -103,7 +103,8 @@ export interface GenerateDeliverableRequest {
 
 /** Request body for POST /deliverables/:id/convert */
 export interface ConvertDeliverableRequest {
-  content: string;
+  content?: string;
+  file_url?: string;
   context: {
     contract_name: string;
     industry: string;
@@ -113,7 +114,8 @@ export interface ConvertDeliverableRequest {
 
 /** Payload sent to Master Marketer /api/intake/{type} for reformatting */
 export interface DeliverableConvertSubmission {
-  content: string;
+  content?: string;
+  file_url?: string;
   context: {
     contract_name: string;
     industry: string;

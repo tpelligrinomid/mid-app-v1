@@ -762,50 +762,45 @@ export class ClickUpCronSyncService {
    * Sets parent_task_id based on clickup_parent_id
    */
   async resolveParentRelationships(): Promise<number> {
-    // Get all tasks that have no parent_task_id set yet
-    // We filter for clickup_parent_id in application code since db-proxy doesn't support NOT NULL filters
-    const { data: orphanedTasks, error: selectError } = await dbProxy.select<Array<{
-      task_id: string;
-      clickup_parent_id: string | null;
-    }>>('pulse_tasks', {
-      columns: 'task_id, clickup_parent_id',
-      filters: {
-        parent_task_id: null
-      }
-    });
-
-    if (selectError) {
-      console.error('[ClickUp Cron Sync] Error fetching orphaned tasks:', selectError);
-      return 0;
-    }
-
-    if (!orphanedTasks || orphanedTasks.length === 0) {
-      return 0;
-    }
-
-    // Filter to only tasks that have a clickup_parent_id (subtasks)
-    const tasksToResolve = orphanedTasks.filter(t => t.clickup_parent_id);
-
+    // Query per-folder to stay under PostgREST's default 1000-row limit.
+    // A global query for parent_task_id IS NULL returns 7k+ rows (all top-level tasks),
+    // which gets truncated and misses orphaned subtasks.
+    const folders = await this.getFoldersToSync();
     let resolvedCount = 0;
 
-    for (const task of tasksToResolve) {
-      // Look up the parent task by its clickup_task_id
-      const { data: parentData } = await dbProxy.select<Array<{ task_id: string }>>('pulse_tasks', {
-        columns: 'task_id',
-        filters: { clickup_task_id: task.clickup_parent_id },
-        single: true
+    for (const folder of folders) {
+      const { data: orphanedTasks, error: selectError } = await dbProxy.select<Array<{
+        task_id: string;
+        clickup_parent_id: string | null;
+      }>>('pulse_tasks', {
+        columns: 'task_id, clickup_parent_id',
+        filters: {
+          clickup_folder_id: folder.clickup_folder_id,
+          parent_task_id: null,
+        }
       });
 
-      if (parentData && parentData.length > 0) {
-        const parentTaskId = parentData[0].task_id;
+      if (selectError || !orphanedTasks) continue;
 
-        // Update the child task with the parent's task_id
-        const { error: updateError } = await dbProxy.update('pulse_tasks', {
-          parent_task_id: parentTaskId
-        }, { task_id: task.task_id });
+      // Filter to only tasks that have a clickup_parent_id (subtasks)
+      const tasksToResolve = orphanedTasks.filter(t => t.clickup_parent_id);
 
-        if (!updateError) {
-          resolvedCount++;
+      for (const task of tasksToResolve) {
+        // Look up the parent task by its clickup_task_id
+        const { data: parentData } = await dbProxy.select<Array<{ task_id: string }>>('pulse_tasks', {
+          columns: 'task_id',
+          filters: { clickup_task_id: task.clickup_parent_id },
+          single: true
+        });
+
+        if (parentData && parentData.length > 0) {
+          const { error: updateError } = await dbProxy.update('pulse_tasks', {
+            parent_task_id: parentData[0].task_id
+          }, { task_id: task.task_id });
+
+          if (!updateError) {
+            resolvedCount++;
+          }
         }
       }
     }

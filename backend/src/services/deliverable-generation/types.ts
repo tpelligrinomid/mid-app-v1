@@ -44,6 +44,20 @@ export interface DeliverableSubmission {
   process_library?: Array<{ task: string; description: string; stage: string; points: number }>;
   /** Roadmap: monthly points budget from contract */
   points_budget?: number;
+  /** ABM plan: target account segments */
+  target_segments?: Array<{ segment_name: string; description: string; estimated_account_count: number; tier: string }>;
+  /** ABM plan: offers mapped to funnel stages */
+  offers?: Array<{ offer_name: string; offer_type: string; funnel_stage: string; description?: string }>;
+  /** ABM plan: channel configuration */
+  channels?: Record<string, unknown>;
+  /** ABM plan: marketing/sales tech stack */
+  tech_stack?: Record<string, unknown>;
+  /** ABM plan: monthly advertising budget */
+  monthly_ad_budget?: number;
+  /** ABM plan: sales follow-up SLA in hours */
+  sales_follow_up_sla_hours?: number;
+  /** ABM plan: launch timeline description */
+  launch_timeline?: string;
 }
 
 /** Shared shape for client and each competitor */
@@ -99,6 +113,20 @@ export interface GenerateDeliverableRequest {
   seed_topics?: string[];
   /** SEO audit: max pages to crawl per domain */
   max_crawl_pages?: number;
+  /** ABM plan: target account segments */
+  target_segments?: Array<{ segment_name: string; description: string; estimated_account_count: number; tier: string }>;
+  /** ABM plan: offers mapped to funnel stages */
+  offers?: Array<{ offer_name: string; offer_type: string; funnel_stage: string; description?: string }>;
+  /** ABM plan: channel configuration */
+  channels?: Record<string, unknown>;
+  /** ABM plan: marketing/sales tech stack */
+  tech_stack?: Record<string, unknown>;
+  /** ABM plan: monthly advertising budget */
+  monthly_ad_budget?: number;
+  /** ABM plan: sales follow-up SLA in hours */
+  sales_follow_up_sla_hours?: number;
+  /** ABM plan: launch timeline description */
+  launch_timeline?: string;
 }
 
 /** Request body for POST /deliverables/:id/convert */

@@ -10,7 +10,29 @@
 import { update as edgeFnUpdate, select } from '../../utils/edge-functions.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
-import type { GenerationState, ResearchInputs } from './types.js';
+import type { GenerationState, ResearchInputs, CompanyProfile } from './types.js';
+
+/** Options for generateDeliverableInBackground */
+export interface GenerateOptions {
+  deliverableId: string;
+  contractId: string;
+  title: string;
+  deliverableType: string;
+  instructions?: string;
+  primaryMeetingIds?: string[];
+  researchInputs?: ResearchInputs;
+  previousRoadmapId?: string;
+  seedTopics?: string[];
+  maxCrawlPages?: number;
+  // ABM fields
+  targetSegments?: Array<{ segment_name: string; description: string; estimated_account_count: number; tier: string }>;
+  offers?: Array<{ offer_name: string; offer_type: string; funnel_stage: string; description?: string }>;
+  channels?: Record<string, unknown>;
+  techStack?: Record<string, unknown>;
+  monthlyAdBudget?: number;
+  salesFollowUpSlaHours?: number;
+  launchTimeline?: string;
+}
 
 /** Update the generation state in compass_deliverables.metadata */
 async function updateGenerationState(
@@ -146,18 +168,27 @@ async function resolvePriorResearch(
  *
  * State machine: pending -> assembling_context -> submitted -> (webhook) -> completed | failed
  */
-export async function generateDeliverableInBackground(
-  deliverableId: string,
-  contractId: string,
-  title: string,
-  deliverableType: string,
-  instructions?: string,
-  primaryMeetingIds?: string[],
-  researchInputs?: ResearchInputs,
-  previousRoadmapId?: string,
-  seedTopics?: string[],
-  maxCrawlPages?: number
-): Promise<void> {
+export async function generateDeliverableInBackground(opts: GenerateOptions): Promise<void> {
+  const {
+    deliverableId,
+    contractId,
+    title,
+    deliverableType,
+    instructions,
+    primaryMeetingIds,
+    researchInputs,
+    previousRoadmapId,
+    seedTopics,
+    maxCrawlPages,
+    targetSegments,
+    offers,
+    channels,
+    techStack,
+    monthlyAdBudget,
+    salesFollowUpSlaHours,
+    launchTimeline,
+  } = opts;
+
   try {
     // 1. Assembling context
     await updateGenerationState(deliverableId, {
@@ -369,6 +400,68 @@ export async function generateDeliverableInBackground(
 
       console.log(
         `[Deliverable Generation] Submitted roadmap "${title}" (job ${rmJobId}, run ${rmRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
+    // ABM plans: similar to content_plan — resolve roadmap + research + transcripts, plus ABM-specific fields
+    if (deliverableType === 'abm_plan') {
+      const [roadmapData, researchData, context] = await Promise.all([
+        resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
+        resolvePriorResearch(contractId, deliverableId),
+        assembleContext(contractId, title, primaryMeetingIds),
+      ]);
+
+      const transcripts = context.primary_meetings.map(m => m.transcript);
+      const client = researchInputs?.client;
+
+      console.log(
+        `[Deliverable Generation] ABM plan context for "${title}":`,
+        {
+          has_client: !!client,
+          has_roadmap: !!roadmapData,
+          has_research: !!researchData,
+          transcript_count: transcripts.length,
+          has_target_segments: !!targetSegments?.length,
+          has_offers: !!offers?.length,
+          has_channels: !!channels,
+          has_tech_stack: !!techStack,
+        }
+      );
+
+      const { jobId: abmJobId, triggerRunId: abmRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client,
+        metadata: { deliverable_id: deliverableId },
+        ...(roadmapData && { roadmap: roadmapData }),
+        ...(researchData && { research: researchData }),
+        ...(transcripts.length > 0 && { transcripts }),
+        ...(targetSegments && { target_segments: targetSegments }),
+        ...(offers && { offers }),
+        ...(channels && { channels }),
+        ...(techStack && { tech_stack: techStack }),
+        ...(monthlyAdBudget !== undefined && { monthly_ad_budget: monthlyAdBudget }),
+        ...(salesFollowUpSlaHours !== undefined && { sales_follow_up_sla_hours: salesFollowUpSlaHours }),
+        ...(launchTimeline && { launch_timeline: launchTimeline }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: abmJobId,
+        trigger_run_id: abmRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: context.processes.length,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted ABM plan "${title}" (job ${abmJobId}, run ${abmRunId}), awaiting webhook callback`
       );
       return;
     }

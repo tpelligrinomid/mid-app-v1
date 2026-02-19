@@ -427,7 +427,19 @@ router.post(
     }
 
     const deliverableId = req.params.id;
-    const { instructions, primary_meeting_ids, research_inputs, previous_roadmap_id } = req.body as GenerateDeliverableRequest;
+    const {
+      instructions,
+      primary_meeting_ids,
+      research_inputs,
+      previous_roadmap_id,
+      target_segments,
+      offers,
+      channels,
+      tech_stack,
+      monthly_ad_budget,
+      sales_follow_up_sla_hours,
+      launch_timeline,
+    } = req.body as GenerateDeliverableRequest;
 
     // Frontend nests seed_topics/max_crawl_pages inside research_inputs; accept both locations
     const body = req.body as Record<string, unknown>;
@@ -475,18 +487,25 @@ router.post(
     });
 
     // Fire-and-forget
-    generateDeliverableInBackground(
+    generateDeliverableInBackground({
       deliverableId,
-      deliverable.contract_id,
-      deliverable.title,
-      deliverable.deliverable_type,
+      contractId: deliverable.contract_id,
+      title: deliverable.title,
+      deliverableType: deliverable.deliverable_type,
       instructions,
-      primary_meeting_ids,
-      research_inputs,
-      previous_roadmap_id,
-      seed_topics,
-      max_crawl_pages
-    ).catch(() => {
+      primaryMeetingIds: primary_meeting_ids,
+      researchInputs: research_inputs,
+      previousRoadmapId: previous_roadmap_id,
+      seedTopics: seed_topics,
+      maxCrawlPages: max_crawl_pages,
+      targetSegments: target_segments,
+      offers,
+      channels,
+      techStack: tech_stack,
+      monthlyAdBudget: monthly_ad_budget,
+      salesFollowUpSlaHours: sales_follow_up_sla_hours,
+      launchTimeline: launch_timeline,
+    }).catch(() => {
       // Already handled inside generateDeliverableInBackground
     });
   }

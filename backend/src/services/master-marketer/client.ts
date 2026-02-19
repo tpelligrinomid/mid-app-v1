@@ -77,7 +77,8 @@ export async function submitMeetingNotes(
 /**
  * Submit a deliverable for AI generation.
  * Routes to the correct type-specific endpoint:
- *   /api/intake/research, /api/intake/roadmap, /api/intake/plan, /api/intake/brief
+ *   Generators: /api/generate/research, /api/generate/roadmap, /api/generate/seo-audit, etc.
+ *   Reformatters: /api/intake/plan, /api/intake/brief
  *
  * Includes callback_url so MM can POST results back when the job completes,
  * and metadata (deliverable_id, contract_id, title) for MM to echo back.
@@ -101,10 +102,11 @@ export async function submitDeliverable(
     },
   };
 
-  // MM route prefixes: /api/generate/ for roadmap, /api/intake/ for everything else
-  const GENERATE_ROUTE_TYPES = new Set(['roadmap']);
+  // MM route prefixes: /api/generate/ for generators, /api/intake/ for reformatters (plan, brief)
+  const GENERATE_ROUTE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan']);
   const prefix = GENERATE_ROUTE_TYPES.has(data.deliverable_type) ? '/api/generate' : '/api/intake';
-  const endpoint = `${prefix}/${encodeURIComponent(data.deliverable_type)}`;
+  const slug = data.deliverable_type.replace(/_/g, '-');
+  const endpoint = `${prefix}/${encodeURIComponent(slug)}`;
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload),

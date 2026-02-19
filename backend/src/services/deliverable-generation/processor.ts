@@ -10,7 +10,7 @@
 import { update as edgeFnUpdate, select } from '../../utils/edge-functions.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
-import type { GenerationState, ResearchInputs, CompanyProfile } from './types.js';
+import type { GenerationState, ResearchInputs } from './types.js';
 
 /** Options for generateDeliverableInBackground */
 export interface GenerateOptions {
@@ -406,24 +406,14 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
 
     // ABM plans: similar to content_plan — resolve roadmap + research + transcripts, plus ABM-specific fields
     if (deliverableType === 'abm_plan') {
-      const [roadmapData, seoAuditData, researchData, context] = await Promise.all([
+      const [roadmapData, researchData, context] = await Promise.all([
         resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
-        resolvePriorDeliverable(contractId, 'seo_audit', deliverableId),
         resolvePriorResearch(contractId, deliverableId),
         assembleContext(contractId, title, primaryMeetingIds),
       ]);
 
       const transcripts = context.primary_meetings.map(m => m.transcript);
-
-      // Client from frontend research_inputs, falling back to SEO audit client_profile
-      let client: CompanyProfile | undefined = researchInputs?.client;
-      if (!client && seoAuditData) {
-        const cs = seoAuditData.competitive_search as Record<string, unknown> | undefined;
-        const cp = cs?.client_profile as Record<string, unknown> | undefined;
-        if (cp?.company_name && cp?.domain) {
-          client = { company_name: cp.company_name as string, domain: cp.domain as string };
-        }
-      }
+      const client = researchInputs?.client;
 
       // MM requires `enabled: true` on each channel object — ensure it's set
       let normalizedChannels = channels;
@@ -440,7 +430,6 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         `[Deliverable Generation] ABM plan context for "${title}":`,
         {
           has_client: !!client,
-          client_source: researchInputs?.client ? 'frontend' : (client ? 'seo_audit' : 'none'),
           has_roadmap: !!roadmapData,
           has_research: !!researchData,
           transcript_count: transcripts.length,
@@ -452,7 +441,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       );
 
       if (!client) {
-        throw new Error('ABM plan requires client info — provide research_inputs.client or ensure a prior SEO audit exists');
+        throw new Error('ABM plan requires client info — provide research_inputs.client with company_name and domain');
       }
 
       const { jobId: abmJobId, triggerRunId: abmRunId } = await submitDeliverable({

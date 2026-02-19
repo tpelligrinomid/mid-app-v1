@@ -406,28 +406,54 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
 
     // ABM plans: similar to content_plan — resolve roadmap + research + transcripts, plus ABM-specific fields
     if (deliverableType === 'abm_plan') {
-      const [roadmapData, researchData, context] = await Promise.all([
+      const [roadmapData, seoAuditData, researchData, context] = await Promise.all([
         resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
+        resolvePriorDeliverable(contractId, 'seo_audit', deliverableId),
         resolvePriorResearch(contractId, deliverableId),
         assembleContext(contractId, title, primaryMeetingIds),
       ]);
 
       const transcripts = context.primary_meetings.map(m => m.transcript);
-      const client = researchInputs?.client;
+
+      // Client from frontend research_inputs, falling back to SEO audit client_profile
+      let client: CompanyProfile | undefined = researchInputs?.client;
+      if (!client && seoAuditData) {
+        const cs = seoAuditData.competitive_search as Record<string, unknown> | undefined;
+        const cp = cs?.client_profile as Record<string, unknown> | undefined;
+        if (cp?.company_name && cp?.domain) {
+          client = { company_name: cp.company_name as string, domain: cp.domain as string };
+        }
+      }
+
+      // MM requires `enabled: true` on each channel object — ensure it's set
+      let normalizedChannels = channels;
+      if (channels) {
+        normalizedChannels = Object.fromEntries(
+          Object.entries(channels).map(([key, value]) => [
+            key,
+            typeof value === 'object' && value !== null ? { enabled: true, ...value as Record<string, unknown> } : value,
+          ])
+        );
+      }
 
       console.log(
         `[Deliverable Generation] ABM plan context for "${title}":`,
         {
           has_client: !!client,
+          client_source: researchInputs?.client ? 'frontend' : (client ? 'seo_audit' : 'none'),
           has_roadmap: !!roadmapData,
           has_research: !!researchData,
           transcript_count: transcripts.length,
           has_target_segments: !!targetSegments?.length,
           has_offers: !!offers?.length,
-          has_channels: !!channels,
+          has_channels: !!normalizedChannels,
           has_tech_stack: !!techStack,
         }
       );
+
+      if (!client) {
+        throw new Error('ABM plan requires client info — provide research_inputs.client or ensure a prior SEO audit exists');
+      }
 
       const { jobId: abmJobId, triggerRunId: abmRunId } = await submitDeliverable({
         deliverable_type: deliverableType,
@@ -441,7 +467,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         ...(transcripts.length > 0 && { transcripts }),
         ...(targetSegments && { target_segments: targetSegments }),
         ...(offers && { offers }),
-        ...(channels && { channels }),
+        ...(normalizedChannels && { channels: normalizedChannels }),
         ...(techStack && { tech_stack: techStack }),
         ...(monthlyAdBudget !== undefined && { monthly_ad_budget: monthlyAdBudget }),
         ...(salesFollowUpSlaHours !== undefined && { sales_follow_up_sla_hours: salesFollowUpSlaHours }),

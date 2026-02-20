@@ -290,7 +290,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         ...(roadmapData && { roadmap: roadmapData }),
         ...(seoAuditData && { seo_audit: seoAuditData }),
         ...(researchData && { research: researchData }),
-        ...(transcripts.length > 0 && { transcripts }),
+        transcripts,
         ...(previousContentPlan && { previous_content_plan: previousContentPlan }),
       });
 

@@ -4,9 +4,9 @@
 // Source types
 // ============================================================================
 
-export type SourceType = 'note' | 'deliverable' | 'meeting' | 'document' | 'process';
+export type SourceType = 'note' | 'deliverable' | 'meeting' | 'content' | 'process' | 'competitive_intel';
 
-export const SOURCE_TYPE_VALUES: SourceType[] = ['note', 'deliverable', 'meeting', 'document', 'process'];
+export const SOURCE_TYPE_VALUES: SourceType[] = ['note', 'deliverable', 'meeting', 'content', 'process', 'competitive_intel'];
 
 // ============================================================================
 // Embeddings

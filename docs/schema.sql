@@ -483,80 +483,97 @@ CREATE TABLE compass_reports (
 );
 
 -- ============================================================================
--- CONTENT MODULE TABLES (Future - Content Hub App)
+-- CONTENT MODULE TABLES (Compass Content Module)
 -- ============================================================================
 
--- Content assets (client-facing content)
-CREATE TABLE content_assets (
-    asset_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    contract_id uuid REFERENCES contracts(contract_id),
-    asset_type text NOT NULL, -- 'blog', 'ebook', 'whitepaper', 'video', 'podcast', 'webinar'
-    title text NOT NULL,
-    description text,
-    file_path text,
-    external_url text,
-    status text DEFAULT 'active',
-    published_date date,
-    tags text[],
-    metadata jsonb,
-    created_by uuid REFERENCES users(user_id),
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now()
-);
-
--- Competitor tracking configuration
-CREATE TABLE content_competitors (
-    competitor_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    contract_id uuid REFERENCES contracts(contract_id),
+-- Content types — What kind of content (blog, newsletter, video, etc.)
+CREATE TABLE content_types (
+    type_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id uuid REFERENCES contracts(contract_id),  -- NULL = global default
     name text NOT NULL,
-    domain text,
-    blog_url text,
-    social_urls jsonb,
+    slug text NOT NULL,
+    description text,
+    icon text,
     is_active boolean DEFAULT true,
-    created_at timestamptz DEFAULT now()
+    sort_order integer DEFAULT 0,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    UNIQUE(contract_id, slug)
 );
 
--- Crawled competitor content
-CREATE TABLE content_crawl_results (
-    crawl_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    competitor_id uuid REFERENCES content_competitors(competitor_id),
-    url text NOT NULL,
-    title text,
-    content_preview text,
-    content_full text,
-    published_date date,
-    crawled_at timestamptz DEFAULT now(),
-    metadata jsonb
+-- Content categories — Organizational grouping (client-specific taxonomy)
+CREATE TABLE content_categories (
+    category_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id uuid REFERENCES contracts(contract_id),  -- NULL = global default
+    name text NOT NULL,
+    slug text NOT NULL,
+    description text,
+    color text,
+    is_active boolean DEFAULT true,
+    sort_order integer DEFAULT 0,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    UNIQUE(contract_id, slug)
 );
 
--- Content ideas
+-- Content attribute definitions — Custom metadata fields per contract
+CREATE TABLE content_attribute_definitions (
+    attribute_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id uuid NOT NULL REFERENCES contracts(contract_id),
+    name text NOT NULL,
+    slug text NOT NULL,
+    field_type text NOT NULL,  -- 'single_select' | 'multi_select' | 'boolean' | 'text'
+    options jsonb,
+    is_required boolean DEFAULT false,
+    applies_to text DEFAULT 'both',  -- 'ideas' | 'assets' | 'both'
+    sort_order integer DEFAULT 0,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    UNIQUE(contract_id, slug)
+);
+
+-- Content ideas — Lightweight ideation items
 CREATE TABLE content_ideas (
     idea_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    contract_id uuid REFERENCES contracts(contract_id),
+    contract_id uuid NOT NULL REFERENCES contracts(contract_id),
     title text NOT NULL,
     description text,
-    content_type text, -- 'blog', 'social', 'email', 'whitepaper', etc.
-    source text, -- 'ai_generated', 'competitor_inspired', 'manual'
-    source_reference uuid, -- Link to crawl_result or other source
-    status text DEFAULT 'idea', -- 'idea', 'approved', 'in_progress', 'published', 'rejected'
-    priority integer,
+    content_type_id uuid REFERENCES content_types(type_id),
+    category_id uuid REFERENCES content_categories(category_id),
+    source text DEFAULT 'manual',    -- 'manual' | 'ai_generated'
+    status text DEFAULT 'idea',      -- 'idea' | 'approved' | 'rejected'
+    priority integer,                -- 1-5 or null
     target_date date,
+    custom_attributes jsonb,
+    tags text[],
     created_by uuid REFERENCES users(user_id),
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
 );
 
--- Content calendar
-CREATE TABLE content_calendar (
-    entry_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    contract_id uuid REFERENCES contracts(contract_id),
+-- Content assets — Full content items in production/published
+CREATE TABLE content_assets (
+    asset_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id uuid NOT NULL REFERENCES contracts(contract_id),
     idea_id uuid REFERENCES content_ideas(idea_id),
     title text NOT NULL,
-    content_type text,
-    scheduled_date date,
-    status text DEFAULT 'scheduled',
-    assignee uuid REFERENCES users(user_id),
-    notes text,
+    description text,
+    content_type_id uuid REFERENCES content_types(type_id),
+    category_id uuid REFERENCES content_categories(category_id),
+    content_body text,
+    content_structured jsonb,
+    status text DEFAULT 'draft',     -- 'draft' | 'in_production' | 'review' | 'approved' | 'published'
+    file_path text,
+    file_name text,
+    file_size_bytes bigint,
+    mime_type text,
+    external_url text,
+    clickup_task_id text,
+    tags text[],
+    custom_attributes jsonb,
+    published_date date,
+    metadata jsonb,
+    created_by uuid REFERENCES users(user_id),
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
 );
@@ -800,6 +817,18 @@ CREATE INDEX idx_compass_meetings_contract_id ON compass_meetings(contract_id);
 CREATE INDEX idx_compass_meetings_date ON compass_meetings(meeting_date DESC);
 CREATE INDEX idx_compass_knowledge_contract_id ON compass_knowledge(contract_id);
 CREATE INDEX idx_compass_reports_contract_id ON compass_reports(contract_id);
+
+-- Content module indexes
+CREATE INDEX idx_content_types_contract ON content_types(contract_id);
+CREATE INDEX idx_content_categories_contract ON content_categories(contract_id);
+CREATE INDEX idx_content_attr_defs_contract ON content_attribute_definitions(contract_id);
+CREATE INDEX idx_content_ideas_contract ON content_ideas(contract_id);
+CREATE INDEX idx_content_ideas_status ON content_ideas(status);
+CREATE INDEX idx_content_ideas_target_date ON content_ideas(target_date);
+CREATE INDEX idx_content_assets_contract ON content_assets(contract_id);
+CREATE INDEX idx_content_assets_status ON content_assets(status);
+CREATE INDEX idx_content_assets_idea ON content_assets(idea_id);
+CREATE INDEX idx_content_assets_published ON content_assets(published_date);
 
 -- Audit indexes
 CREATE INDEX idx_audit_logs_table_record ON audit_logs(table_name, record_id);

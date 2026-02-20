@@ -272,6 +272,64 @@ export interface UpdateContentAssetDTO {
 }
 
 // ============================================================================
+// Prompt Sequences
+// ============================================================================
+
+export interface PromptStep {
+  step_order: number;
+  name: string;
+  system_prompt: string;
+  user_prompt: string;
+  output_key: string;
+}
+
+export interface PromptVariable {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  default_value?: string;
+}
+
+export interface ContentPromptSequence {
+  sequence_id: string;
+  contract_id: string | null;
+  content_type_slug: string;
+  name: string;
+  description: string | null;
+  steps: PromptStep[];
+  variables: PromptVariable[];
+  is_default: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateContentPromptSequenceDTO {
+  contract_id: string;
+  content_type_slug: string;
+  name: string;
+  description?: string;
+  steps: PromptStep[];
+  variables?: PromptVariable[];
+  is_default?: boolean;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
+export interface UpdateContentPromptSequenceDTO {
+  content_type_slug?: string;
+  name?: string;
+  description?: string;
+  steps?: PromptStep[];
+  variables?: PromptVariable[];
+  is_default?: boolean;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
+// ============================================================================
 // Validation functions
 // ============================================================================
 
@@ -322,6 +380,46 @@ export function validateAttributeDefinitionInput(data: Partial<CreateAttributeDe
 
   if (data.applies_to && !isValidAttributeAppliesTo(data.applies_to)) {
     errors.push(`Invalid applies_to: ${data.applies_to}. Valid values: ${ATTRIBUTE_APPLIES_TO_VALUES.join(', ')}`);
+  }
+
+  return errors;
+}
+
+export function validatePromptSequenceInput(data: Partial<CreateContentPromptSequenceDTO> | UpdateContentPromptSequenceDTO): string[] {
+  const errors: string[] = [];
+
+  if (data.steps !== undefined) {
+    if (!Array.isArray(data.steps)) {
+      errors.push('steps must be an array');
+    } else {
+      for (let i = 0; i < data.steps.length; i++) {
+        const step = data.steps[i];
+        if (!step.name) errors.push(`Step ${i + 1}: name is required`);
+        if (!step.system_prompt) errors.push(`Step ${i + 1}: system_prompt is required`);
+        if (!step.user_prompt) errors.push(`Step ${i + 1}: user_prompt is required`);
+        if (!step.output_key) errors.push(`Step ${i + 1}: output_key is required`);
+        if (step.step_order === undefined) errors.push(`Step ${i + 1}: step_order is required`);
+      }
+
+      // Check for duplicate output_keys
+      const outputKeys = data.steps.map((s) => s.output_key).filter(Boolean);
+      const duplicateKeys = outputKeys.filter((key, idx) => outputKeys.indexOf(key) !== idx);
+      if (duplicateKeys.length > 0) {
+        errors.push(`Duplicate output_key values: ${duplicateKeys.join(', ')}`);
+      }
+    }
+  }
+
+  if (data.variables !== undefined) {
+    if (!Array.isArray(data.variables)) {
+      errors.push('variables must be an array');
+    } else {
+      for (let i = 0; i < data.variables.length; i++) {
+        const v = data.variables[i];
+        if (!v.name) errors.push(`Variable ${i + 1}: name is required`);
+        if (!v.label) errors.push(`Variable ${i + 1}: label is required`);
+      }
+    }
   }
 
   return errors;

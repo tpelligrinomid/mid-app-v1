@@ -13,11 +13,14 @@ import {
   UpdateContentIdeaDTO,
   CreateContentAssetDTO,
   UpdateContentAssetDTO,
+  CreateContentPromptSequenceDTO,
+  UpdateContentPromptSequenceDTO,
   ContentType,
   ContentCategory,
   ContentAttributeDefinition,
   ContentIdea,
   ContentAsset,
+  ContentPromptSequence,
   isValidContentIdeaStatus,
   isValidContentAssetStatus,
   CONTENT_IDEA_STATUS_VALUES,
@@ -25,6 +28,7 @@ import {
   validateContentIdeaInput,
   validateContentAssetInput,
   validateAttributeDefinitionInput,
+  validatePromptSequenceInput,
 } from '../../types/content.js';
 
 const router = Router();
@@ -164,10 +168,26 @@ router.post(
         await req.supabase.from('content_categories').insert(contractCategories);
       }
 
+      // Fetch and clone global default prompt sequences
+      const { data: globalSequences } = await req.supabase
+        .from('content_prompt_sequences')
+        .select('content_type_slug, name, description, steps, variables, is_default, sort_order')
+        .is('contract_id', null)
+        .eq('is_active', true);
+
+      if (globalSequences && globalSequences.length > 0) {
+        const contractSequences = globalSequences.map((s) => ({
+          ...s,
+          contract_id,
+        }));
+        await req.supabase.from('content_prompt_sequences').insert(contractSequences);
+      }
+
       res.status(201).json({
         message: 'Content config initialized',
         types_created: globalTypes?.length || 0,
         categories_created: globalCategories?.length || 0,
+        sequences_created: globalSequences?.length || 0,
       });
     } catch (err) {
       console.error('Error initializing content config:', err);
@@ -1613,6 +1633,339 @@ router.post(
       console.error('[Content] Ingestion failed:', err);
       res.status(500).json({ error: 'Failed to ingest content' });
     }
+  }
+);
+
+// ============================================================================
+// PROMPT SEQUENCES CRUD
+// ============================================================================
+
+/**
+ * GET /api/compass/content/prompt-sequences
+ * List prompt sequences (contract-specific + global defaults)
+ */
+router.get(
+  '/prompt-sequences',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { contract_id, content_type_slug } = req.query;
+    if (!contract_id || typeof contract_id !== 'string') {
+      res.status(400).json({ error: 'contract_id query parameter is required' });
+      return;
+    }
+
+    let query = req.supabase
+      .from('content_prompt_sequences')
+      .select('*')
+      .or(`contract_id.eq.${contract_id},contract_id.is.null`)
+      .eq('is_active', true)
+      .order('content_type_slug', { ascending: true })
+      .order('sort_order', { ascending: true });
+
+    if (content_type_slug && typeof content_type_slug === 'string') {
+      query = query.eq('content_type_slug', content_type_slug);
+    }
+
+    const { data: sequences, error } = await query;
+
+    if (error) {
+      console.error('Error fetching prompt sequences:', error);
+      res.status(500).json({ error: 'Failed to fetch prompt sequences' });
+      return;
+    }
+
+    res.json({ sequences: sequences || [] });
+  }
+);
+
+/**
+ * GET /api/compass/content/prompt-sequences/:id
+ * Get a single prompt sequence
+ */
+router.get(
+  '/prompt-sequences/:id',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const { data: sequence, error } = await req.supabase
+      .from('content_prompt_sequences')
+      .select('*')
+      .eq('sequence_id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        res.status(404).json({ error: 'Prompt sequence not found' });
+        return;
+      }
+      console.error('Error fetching prompt sequence:', error);
+      res.status(500).json({ error: 'Failed to fetch prompt sequence' });
+      return;
+    }
+
+    res.json({ sequence });
+  }
+);
+
+/**
+ * POST /api/compass/content/prompt-sequences
+ * Create a prompt sequence for a contract
+ */
+router.post(
+  '/prompt-sequences',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const input: CreateContentPromptSequenceDTO = req.body;
+
+    if (!input.contract_id) {
+      res.status(400).json({ error: 'contract_id is required' });
+      return;
+    }
+    if (!input.content_type_slug) {
+      res.status(400).json({ error: 'content_type_slug is required' });
+      return;
+    }
+    if (!input.name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    if (!input.steps || input.steps.length === 0) {
+      res.status(400).json({ error: 'At least one step is required' });
+      return;
+    }
+
+    const validationErrors = validatePromptSequenceInput(input);
+    if (validationErrors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', details: validationErrors });
+      return;
+    }
+
+    // If marking as default, unset other defaults for this content type + contract
+    if (input.is_default) {
+      await req.supabase
+        .from('content_prompt_sequences')
+        .update({ is_default: false })
+        .eq('contract_id', input.contract_id)
+        .eq('content_type_slug', input.content_type_slug)
+        .eq('is_default', true);
+    }
+
+    const { data: sequence, error } = await req.supabase
+      .from('content_prompt_sequences')
+      .insert({
+        contract_id: input.contract_id,
+        content_type_slug: input.content_type_slug,
+        name: input.name,
+        description: input.description || null,
+        steps: input.steps,
+        variables: input.variables || [],
+        is_default: input.is_default || false,
+        is_active: input.is_active !== undefined ? input.is_active : true,
+        sort_order: input.sort_order || 0,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating prompt sequence:', error);
+      res.status(500).json({ error: 'Failed to create prompt sequence' });
+      return;
+    }
+
+    res.status(201).json({ sequence });
+  }
+);
+
+/**
+ * PUT /api/compass/content/prompt-sequences/:id
+ * Update a prompt sequence
+ */
+router.put(
+  '/prompt-sequences/:id',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { id } = req.params;
+    const updates: UpdateContentPromptSequenceDTO = req.body;
+
+    const validationErrors = validatePromptSequenceInput(updates);
+    if (validationErrors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', details: validationErrors });
+      return;
+    }
+
+    // Fetch existing to get contract_id and content_type_slug for default handling
+    const { data: existing, error: fetchError } = await req.supabase
+      .from('content_prompt_sequences')
+      .select('sequence_id, contract_id, content_type_slug')
+      .eq('sequence_id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        res.status(404).json({ error: 'Prompt sequence not found' });
+        return;
+      }
+      console.error('Error fetching prompt sequence:', fetchError);
+      res.status(500).json({ error: 'Failed to fetch prompt sequence' });
+      return;
+    }
+
+    // If marking as default, unset other defaults for this content type + contract
+    if (updates.is_default === true && existing.contract_id) {
+      const typeSlug = updates.content_type_slug || existing.content_type_slug;
+      await req.supabase
+        .from('content_prompt_sequences')
+        .update({ is_default: false })
+        .eq('contract_id', existing.contract_id)
+        .eq('content_type_slug', typeSlug)
+        .eq('is_default', true)
+        .neq('sequence_id', id);
+    }
+
+    const updateFields: Record<string, unknown> = {};
+    if (updates.content_type_slug !== undefined) updateFields.content_type_slug = updates.content_type_slug;
+    if (updates.name !== undefined) updateFields.name = updates.name;
+    if (updates.description !== undefined) updateFields.description = updates.description;
+    if (updates.steps !== undefined) updateFields.steps = updates.steps;
+    if (updates.variables !== undefined) updateFields.variables = updates.variables;
+    if (updates.is_default !== undefined) updateFields.is_default = updates.is_default;
+    if (updates.is_active !== undefined) updateFields.is_active = updates.is_active;
+    if (updates.sort_order !== undefined) updateFields.sort_order = updates.sort_order;
+
+    if (Object.keys(updateFields).length === 0) {
+      res.status(400).json({ error: 'No fields to update' });
+      return;
+    }
+
+    const { data: sequence, error } = await req.supabase
+      .from('content_prompt_sequences')
+      .update(updateFields)
+      .eq('sequence_id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating prompt sequence:', error);
+      res.status(500).json({ error: 'Failed to update prompt sequence' });
+      return;
+    }
+
+    res.json({ sequence });
+  }
+);
+
+/**
+ * DELETE /api/compass/content/prompt-sequences/:id
+ * Soft-delete a prompt sequence (set is_active = false)
+ */
+router.delete(
+  '/prompt-sequences/:id',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const { error } = await req.supabase
+      .from('content_prompt_sequences')
+      .update({ is_active: false })
+      .eq('sequence_id', id);
+
+    if (error) {
+      console.error('Error deactivating prompt sequence:', error);
+      res.status(500).json({ error: 'Failed to deactivate prompt sequence' });
+      return;
+    }
+
+    res.status(204).send();
+  }
+);
+
+/**
+ * POST /api/compass/content/prompt-sequences/:id/duplicate
+ * Duplicate a prompt sequence (global or contract-level) into a contract
+ */
+router.post(
+  '/prompt-sequences/:id/duplicate',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { contract_id, name } = req.body;
+
+    if (!contract_id) {
+      res.status(400).json({ error: 'contract_id is required' });
+      return;
+    }
+
+    // Fetch the source sequence
+    const { data: source, error: fetchError } = await req.supabase
+      .from('content_prompt_sequences')
+      .select('*')
+      .eq('sequence_id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        res.status(404).json({ error: 'Source prompt sequence not found' });
+        return;
+      }
+      console.error('Error fetching prompt sequence:', fetchError);
+      res.status(500).json({ error: 'Failed to fetch prompt sequence' });
+      return;
+    }
+
+    const { data: duplicate, error } = await req.supabase
+      .from('content_prompt_sequences')
+      .insert({
+        contract_id,
+        content_type_slug: source.content_type_slug,
+        name: name || `${source.name} (Copy)`,
+        description: source.description,
+        steps: source.steps,
+        variables: source.variables,
+        is_default: false,
+        is_active: true,
+        sort_order: source.sort_order,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error duplicating prompt sequence:', error);
+      res.status(500).json({ error: 'Failed to duplicate prompt sequence' });
+      return;
+    }
+
+    res.status(201).json({ sequence: duplicate });
   }
 );
 

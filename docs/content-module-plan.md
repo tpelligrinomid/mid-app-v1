@@ -267,54 +267,103 @@ Supported source types for existing content:
 
 ---
 
-## Phase 2: AI Generation + Prompt Templates + Competitive Intelligence
+## Phase 2: AI Generation + Prompt Sequences + Competitive Intelligence
 
-### Prompt Templates (3-Layer System)
+### Prompt Sequences (Multi-Step Pipelines) — COMPLETE
 
-#### Database: `content_prompt_templates`
+Instead of single-shot prompts, content generation uses **prompt sequences** — ordered multi-step pipelines tied to each content type. Each step's output feeds into the next, enabling workflows like: draft → review → enrich.
+
+#### Database: `content_prompt_sequences`
 
 | Column | Type | Description |
 |--------|------|-------------|
-| template_id | uuid PK | |
+| sequence_id | uuid PK | |
 | contract_id | uuid FK (nullable) | NULL = global default |
 | content_type_slug | text | Links to content type (e.g. 'blog_post') |
-| name | text | "Blog Post - Standard" |
+| name | text | "Standard Blog Post" |
 | description | text | |
-| system_prompt | text | System message for AI |
-| user_prompt_template | text | User message with `{{variables}}` |
-| variables | jsonb | `[{name, label, type, required}]` |
-| is_active | boolean | |
+| steps | jsonb | Ordered array of prompt steps |
+| variables | jsonb | Template variables shared across all steps |
+| is_default | boolean | Default sequence for this content type |
+| is_active | boolean | Soft delete flag |
 | sort_order | integer | |
 
-**3-layer resolution:**
+#### Steps Array Structure
 
-1. **Global defaults** (contract_id = NULL) — shipped with the system, work out of the box. Seeded for common content types (blog post standard, thought leadership, how-to guide, etc.)
-2. **Contract overrides** (contract_id set) — strategist creates contract-specific templates that replace or supplement defaults
-3. **One-off customization** — when generating, strategist can copy any template and edit the prompts inline before submitting
+Each step in the `steps` JSONB array:
 
-#### Prompt Template Routes
+```json
+{
+    "step_order": 1,
+    "name": "draft",
+    "system_prompt": "You are an expert content writer for {{company_name}}...",
+    "user_prompt": "Write a blog post about {{topic}}...",
+    "output_key": "draft"
+}
+```
+
+**Step references**: Later steps can reference earlier step outputs using `{{step:output_key}}` syntax. For example, a review step's user_prompt can include `{{step:draft}}` to receive the draft step's full output.
+
+#### Variables Array Structure
+
+Variables defined at the sequence level, available in all steps:
+
+```json
+[
+    {"name": "topic", "label": "Topic", "type": "text", "required": true},
+    {"name": "angle", "label": "Angle", "type": "text", "required": true},
+    {"name": "audience", "label": "Target Audience", "type": "text", "required": true}
+]
+```
+
+**Two types of variables in prompts:**
+1. **Strategist variables** (defined in `variables` array) — require strategist input (topic, angle, audience)
+2. **Client variables** (auto-populated) — `{{company_name}}`, `{{industry}}`, `{{brand_voice}}` are resolved from the contract config automatically
+
+#### 3-Layer System
+
+1. **Global defaults** (contract_id = NULL) — shipped with the system. Seeded for blog_post, newsletter, case_study, social_media, video_script.
+2. **Contract overrides** (contract_id set) — cloned from globals on config initialize, then customizable per contract. Strategists can add, edit, reorder steps, or create entirely new sequences.
+3. **One-off customization** — when generating, strategist can duplicate any sequence and edit prompts inline before submitting.
+
+#### Default Sequences Seeded
+
+| Content Type | Sequence Name | Steps | Description |
+|--------------|--------------|-------|-------------|
+| blog_post | Standard Blog Post | draft → review | Comprehensive blog post with editorial review |
+| blog_post | Thought Leadership | draft → review | Authoritative opinion piece with argument strengthening |
+| newsletter | Standard Newsletter | draft → review | Email newsletter with readability optimization |
+| case_study | Standard Case Study | draft → review | Challenge-solution-results format with credibility check |
+| social_media | Social Post | generate | Single-step, 3 variations per platform |
+| video_script | Standard Video Script | draft → review | Script with speaker notes and visual cues |
+
+#### Prompt Sequence Routes
 
 ```
-GET    /prompt-templates?contract_id=X&content_type_slug=Y
-POST   /prompt-templates
-PUT    /prompt-templates/:id
-DELETE /prompt-templates/:id
+GET    /prompt-sequences?contract_id=X&content_type_slug=Y  -- List (contract + global)
+GET    /prompt-sequences/:id                                 -- Get single
+POST   /prompt-sequences                                     -- Create for contract
+PUT    /prompt-sequences/:id                                 -- Update
+DELETE /prompt-sequences/:id                                 -- Soft delete
+POST   /prompt-sequences/:id/duplicate                       -- Copy into contract
 ```
 
 ### AI Content Generation
 
 **Route**: `POST /api/compass/content/assets/:id/generate`
 
-Generates content for an existing asset using a prompt template + context from the content library.
+Generates content for an existing asset using a prompt sequence + context from the content library.
 
 #### Request
 
 ```typescript
 {
-  template_id: string;                // which prompt template to use
-  prompt_overrides?: {                // optional one-off customization (layer 3)
-    system_prompt?: string;
-    user_prompt?: string;
+  sequence_id: string;                // which prompt sequence to use
+  step_overrides?: {                  // optional one-off customization (layer 3)
+    [output_key: string]: {
+      system_prompt?: string;
+      user_prompt?: string;
+    }
   };
   variables: Record<string, string>;  // template variable values (topic, angle, etc.)
   reference_asset_ids?: string[];     // MANUAL SELECT: hand-picked library assets as inputs
@@ -334,15 +383,16 @@ Both can be used in the same request — hand-pick some assets AND let the syste
 
 #### Backend Processing
 
-1. Resolve template (contract-specific > global default)
-2. Apply prompt_overrides if provided
+1. Resolve sequence (look up by sequence_id)
+2. Apply step_overrides if provided (merge into the sequence's steps)
 3. If `reference_asset_ids`: fetch those assets' content directly from `content_assets`
 4. If `auto_retrieve`: similarity search `compass_knowledge` for relevant chunks
 5. Assemble context: brand voice (from contract config), referenced assets, retrieved chunks, meeting transcripts, competitive intelligence
-6. Fill template variables into the prompt
-7. Submit to Master Marketer `/api/generate/content-piece`
-8. Store result in asset's `content_body` + `content_structured`
-9. Asset remains in current status (strategist reviews and publishes when ready)
+6. Fill template variables into all step prompts
+7. Submit to Master Marketer `/api/generate/content-piece` with the `steps` array
+8. MM executes steps sequentially, piping each step's output into the next via `{{step:output_key}}` references
+9. Store final result in asset's `content_body` + `content_structured`
+10. Asset remains in current status (strategist reviews and publishes when ready)
 
 ### AI Idea Generation
 
@@ -580,7 +630,7 @@ When an idea is promoted to an asset:
 | `backend/src/routes/compass/content.ts` | Complete (Phase 1) | All content routes |
 | `backend/src/index.ts` | Modified | Mounts `/api/compass/content` |
 | `docs/schema.sql` | Updated | Content tables added |
-| `backend/migrations/011_content_prompt_templates.sql` | Planned | Phase 2 |
+| `backend/migrations/011_content_prompt_sequences.sql` | Complete | Phase 2 — prompt sequences table + seeds |
 | `backend/migrations/012_competitive_intelligence.sql` | Planned | Phase 2 |
 | `backend/src/services/content-generation/processor.ts` | Planned | Phase 2 |
 | `backend/src/services/content-generation/idea-generator.ts` | Planned | Phase 2 |

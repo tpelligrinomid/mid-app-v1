@@ -16,7 +16,9 @@ All three follow the existing async job pattern: POST returns 202 with jobId, MM
 
 ### `POST /api/generate/content-piece`
 
-Generates a full content piece (blog post, newsletter, video script, etc.) using a prompt template, client context, and their content library.
+Generates a full content piece (blog post, newsletter, video script, etc.) using a **multi-step prompt sequence**, client context, and their content library.
+
+**Key change from original spec:** Instead of a single `template` with one system_prompt + user_prompt, MiD now sends a `steps` array. MM executes each step sequentially within a single Trigger task, piping each step's output into the next. This is the same pattern as the existing content-plan task (multiple sequential Claude calls in one job).
 
 ### Request Payload
 
@@ -29,15 +31,22 @@ Generates a full content piece (blog post, newsletter, video script, etc.) using
     "brand_voice": "Professional but approachable. Data-driven. Thought leadership tone."
   },
   "content_type": "blog_post",
-  "template": {
-    "system_prompt": "You are an expert B2B content strategist writing for {{company_name}}...",
-    "user_prompt": "Write a blog post about {{topic}}. Angle: {{angle}}. Target audience: {{audience}}.",
-    "variables": {
-      "topic": "How AI is transforming B2B marketing",
-      "angle": "Practical applications, not hype",
-      "audience": "VP Marketing and CMOs at mid-market SaaS companies"
+  "steps": [
+    {
+      "step_order": 1,
+      "name": "draft",
+      "system_prompt": "You are an expert content writer for Acme Corp, a B2B SaaS company. Brand voice: Professional but approachable. Data-driven. Thought leadership tone. Write in markdown format with clear structure.",
+      "user_prompt": "Write a comprehensive blog post.\n\nTopic: How AI is transforming B2B marketing\nAngle: Practical applications, not hype\nTarget Audience: VP Marketing and CMOs at mid-market SaaS companies\n\nRequirements:\n- Compelling introduction that hooks the reader\n- Well-structured body with clear H2 and H3 headings\n- Data-driven arguments grounded in the provided reference materials\n- Practical takeaways the reader can act on\n- Strong conclusion with a call to action\n\nAt the end, include a JSON metadata block with:\n- meta_description (under 160 characters)\n- social_snippets: { linkedin, twitter }\n- tags_suggested: string[]",
+      "output_key": "draft"
+    },
+    {
+      "step_order": 2,
+      "name": "review",
+      "system_prompt": "You are a senior content editor. Review and improve content for clarity, engagement, accuracy, and brand alignment. Maintain the author's voice while elevating quality.",
+      "user_prompt": "Review and improve this blog post draft:\n\n{{step:draft}}\n\nEdit for:\n1. Clarity and readability — simplify complex sentences, improve flow between sections\n2. Engagement — strengthen the hook, add compelling transitions\n3. Accuracy — flag or remove any unsupported claims\n4. SEO — ensure natural keyword usage and good heading structure\n5. Brand voice — ensure it matches the company's tone\n\nReturn the complete improved blog post in the same format (markdown body + JSON metadata block).",
+      "output_key": "final"
     }
-  },
+  ],
   "context": {
     "reference_content": [
       {
@@ -76,16 +85,26 @@ Generates a full content piece (blog post, newsletter, video script, etc.) using
 }
 ```
 
+### How Steps Work
+
+MM iterates through the `steps` array in `step_order`:
+
+1. **Step 1 (draft):** Run Claude with the step's system_prompt + user_prompt. Context (reference_content, library_context, additional_instructions) is included in the first step. Store the output as `draft`.
+2. **Step 2 (review):** Replace `{{step:draft}}` in the user_prompt with the full output from step 1. Run Claude with the new prompt. Store the output as `final`.
+3. The **last step's output** becomes the job's result (content_body + content_structured).
+
+The `{{step:output_key}}` syntax allows any step to reference any previous step's output. MiD resolves all template variables (topic, angle, etc.) and client variables (company_name, industry, brand_voice) **before** sending to MM — so MM receives fully resolved prompts except for `{{step:*}}` references which MM resolves during execution.
+
 ### Key Fields Explained
 
 | Field | Description |
 |-------|-------------|
 | `client` | Client context — company, industry, brand voice. Pulled from contract config. |
 | `content_type` | What type of content to generate (blog_post, newsletter, video_script, social_media, case_study, etc.) |
-| `template.system_prompt` | The system prompt with `{{variables}}` already resolved by MiD backend |
-| `template.user_prompt` | The user prompt with `{{variables}}` already resolved |
-| `context.reference_content` | **Manually selected** assets from the client's library — full content, hand-picked by the strategist |
-| `context.library_context` | **Auto-retrieved** content chunks from RAG similarity search — relevant snippets found automatically |
+| `steps` | **Ordered array of prompt steps.** Each has system_prompt, user_prompt, and output_key. Steps are executed sequentially. Later steps can reference earlier outputs via `{{step:output_key}}`. MiD resolves all template variables before sending — MM only needs to handle `{{step:*}}` references. |
+| `steps[].output_key` | Identifier for this step's output. Used by later steps in `{{step:key}}` references. The last step's output becomes the job result. |
+| `context.reference_content` | **Manually selected** assets from the client's library — full content, hand-picked by the strategist. Include in the first step's context. |
+| `context.library_context` | **Auto-retrieved** content chunks from RAG similarity search — relevant snippets found automatically. Include in the first step's context. |
 | `context.additional_instructions` | Free-text instructions from the strategist |
 | `output_format` | Desired output structure |
 | `callback_url` | Standard MM callback — POST results here when done |

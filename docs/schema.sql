@@ -578,6 +578,22 @@ CREATE TABLE content_assets (
     updated_at timestamptz DEFAULT now()
 );
 
+-- Content prompt sequences — multi-step prompt pipelines per content type
+CREATE TABLE content_prompt_sequences (
+    sequence_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id uuid REFERENCES contracts(contract_id),  -- NULL = global default
+    content_type_slug text NOT NULL,
+    name text NOT NULL,
+    description text,
+    steps jsonb NOT NULL DEFAULT '[]',
+    variables jsonb NOT NULL DEFAULT '[]',
+    is_default boolean DEFAULT false,
+    is_active boolean DEFAULT true,
+    sort_order integer DEFAULT 0,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now()
+);
+
 -- ============================================================================
 -- SEO MODULE TABLES (Future - SEO Agent App)
 -- ============================================================================
@@ -829,6 +845,11 @@ CREATE INDEX idx_content_assets_contract ON content_assets(contract_id);
 CREATE INDEX idx_content_assets_status ON content_assets(status);
 CREATE INDEX idx_content_assets_idea ON content_assets(idea_id);
 CREATE INDEX idx_content_assets_published ON content_assets(published_date);
+
+-- Content prompt sequence indexes
+CREATE INDEX idx_prompt_seq_contract ON content_prompt_sequences(contract_id);
+CREATE INDEX idx_prompt_seq_type_slug ON content_prompt_sequences(content_type_slug);
+CREATE INDEX idx_prompt_seq_contract_type ON content_prompt_sequences(contract_id, content_type_slug);
 
 -- Audit indexes
 CREATE INDEX idx_audit_logs_table_record ON audit_logs(table_name, record_id);

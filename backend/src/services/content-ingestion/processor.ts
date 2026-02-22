@@ -204,7 +204,7 @@ export async function processScrapeResult(
 
   // Fetch current item for idempotency check
   const items = await select<IngestionItem[]>('content_ingestion_items', {
-    select: 'item_id, status, url',
+    select: 'item_id, status, url, batch_id',
     filters: { item_id },
     limit: 1,
   });
@@ -261,6 +261,19 @@ export async function processScrapeResult(
       { item_id }
     );
 
+    // Fetch batch to get created_by for the asset
+    let createdBy: string | null = null;
+    try {
+      const batches = await select<IngestionBatch[]>('content_ingestion_batches', {
+        select: 'created_by',
+        filters: { batch_id },
+        limit: 1,
+      });
+      createdBy = batches?.[0]?.created_by || null;
+    } catch {
+      // Non-blocking — created_by is optional
+    }
+
     // Create content asset
     const assetData: Record<string, unknown> = {
       contract_id,
@@ -276,6 +289,7 @@ export async function processScrapeResult(
         ...(output.word_count && { word_count: output.word_count }),
       },
       ...(output.published_date && { published_date: output.published_date }),
+      ...(createdBy && { created_by: createdBy }),
     };
 
     const assets = await insert<Array<{ asset_id: string }>>(

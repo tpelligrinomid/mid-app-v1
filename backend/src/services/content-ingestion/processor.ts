@@ -277,6 +277,7 @@ export async function processScrapeResult(
     // Create content asset
     const assetData: Record<string, unknown> = {
       contract_id,
+      asset_type: 'content',
       title: output.title || item.url,
       content_body: output.content_markdown,
       external_url: output.url || item.url,

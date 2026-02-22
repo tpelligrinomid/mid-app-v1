@@ -46,9 +46,15 @@ function countWords(text: string): number {
 }
 
 function buildAttributePromptSection(attrs: AttributeDefinitionRow[]): string {
-  if (attrs.length === 0) return '';
+  // Only include structured fields the AI can reliably fill from constrained options.
+  // Text fields are excluded — they're often references (e.g. "Pillar Page") or
+  // domain-specific values the AI can't determine from content alone.
+  const fillable = attrs.filter((a) =>
+    ['single_select', 'multi_select', 'boolean', 'number'].includes(a.field_type)
+  );
+  if (fillable.length === 0) return '';
 
-  const lines = attrs.map((attr, i) => {
+  const lines = fillable.map((attr, i) => {
     let instruction = '';
     switch (attr.field_type) {
       case 'multi_select':
@@ -64,7 +70,6 @@ function buildAttributePromptSection(attrs: AttributeDefinitionRow[]): string {
         instruction = 'Return: true or false';
         break;
       default:
-        instruction = 'Return: string value';
         break;
     }
     return `${i + 1}. "${attr.slug}" (${attr.field_type}): ${attr.name}\n   ${instruction}`;
@@ -136,8 +141,12 @@ export async function categorizeWithAttributes(
 
     const attributeSection = buildAttributePromptSection(attributes);
 
-    const customAttrsJsonShape = attributes.length > 0
-      ? `,\n  "custom_attributes": { ${attributes.map((a) => `"${a.slug}": <value>`).join(', ')} }`
+    // Only include structured fields in JSON shape (matching the filter in buildAttributePromptSection)
+    const fillableAttrs = attributes.filter((a) =>
+      ['single_select', 'multi_select', 'boolean', 'number'].includes(a.field_type)
+    );
+    const customAttrsJsonShape = fillableAttrs.length > 0
+      ? `,\n  "custom_attributes": { ${fillableAttrs.map((a) => `"${a.slug}": <value>`).join(', ')} }`
       : '';
 
     const systemPrompt = `You are a content classification engine. Analyze the given content and return a JSON object with categorization data.

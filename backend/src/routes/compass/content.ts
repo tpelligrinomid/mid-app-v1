@@ -1540,6 +1540,16 @@ router.delete(
       return;
     }
 
+    // Nullify asset_id on any ingestion items referencing this asset
+    try {
+      await req.supabase
+        .from('content_ingestion_items')
+        .update({ asset_id: null })
+        .eq('asset_id', id);
+    } catch (ingestionErr) {
+      console.warn('[Content] Ingestion item cleanup warning:', ingestionErr);
+    }
+
     // Delete knowledge chunks
     try {
       await del('compass_knowledge', { source_id: id });

@@ -1364,6 +1364,26 @@ router.post(
       return;
     }
 
+    // Fire-and-forget: auto-categorize content if body is present and no API key issues
+    if (asset.content_body && process.env.ANTHROPIC_API_KEY) {
+      (async () => {
+        try {
+          const { categorizeContent } = await import('../../services/claude/categorize.js');
+          const { applyCategorization } = await import('../../services/claude/apply-categorization.js');
+          const result = await categorizeContent(asset.content_body, asset.title);
+          if (result && req.supabase) {
+            await applyCategorization(req.supabase, asset.asset_id, asset.contract_id, {
+              content_type_id: asset.content_type_id,
+              category_id: asset.category_id,
+              metadata: asset.metadata,
+            }, result);
+          }
+        } catch (err) {
+          console.error('[Categorization] Auto-categorize failed (non-blocking):', err);
+        }
+      })();
+    }
+
     // If created directly as published, auto-ingest into knowledge base
     if (asset.status === 'published') {
       const contentToEmbed = asset.content_body ||

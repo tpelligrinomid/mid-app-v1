@@ -10,6 +10,7 @@
 
 import { insert, select, update } from '../../utils/edge-functions.js';
 import { submitBlogScrape } from '../master-marketer/client.js';
+import { ingestContent } from '../rag/ingestion.js';
 import type {
   IngestionBatch,
   IngestionItem,
@@ -279,6 +280,7 @@ export async function processScrapeResult(
       contract_id,
       asset_type: 'content',
       title: output.title || item.url,
+      description: output.meta_description || null,
       content_body: output.content_markdown,
       external_url: output.url || item.url,
       status: 'published',
@@ -310,6 +312,22 @@ export async function processScrapeResult(
       },
       { item_id }
     );
+
+    // Ingest content for RAG embeddings (non-blocking)
+    if (output.content_markdown && process.env.OPENAI_API_KEY) {
+      try {
+        await ingestContent({
+          contract_id,
+          source_type: 'content',
+          source_id: assetId,
+          title: output.title || item.url,
+          content: output.content_markdown,
+        });
+        console.log(`[Ingestion] Embeddings created for asset ${assetId}`);
+      } catch (embedErr) {
+        console.error(`[Ingestion] Embedding failed for asset ${assetId} (non-blocking):`, embedErr);
+      }
+    }
 
     // Fire-and-forget: categorize with attributes using edge functions
     (async () => {

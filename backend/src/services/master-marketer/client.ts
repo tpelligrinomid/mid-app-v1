@@ -15,6 +15,7 @@ import type {
   JobStatusResponse,
 } from './types.js';
 import type { DeliverableSubmission, DeliverableConvertSubmission } from '../deliverable-generation/types.js';
+import type { BlogScrapeSubmission } from '../content-ingestion/types.js';
 
 interface MasterMarketerConfig {
   baseUrl: string;
@@ -136,6 +137,25 @@ export async function submitConvert(
   return masterMarketerFetch<SubmitJobResponse>(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Submit a blog URL for scraping.
+ * MM fetches the HTML, converts to markdown, extracts metadata,
+ * and calls back to our webhook when done.
+ */
+export async function submitBlogScrape(
+  data: BlogScrapeSubmission
+): Promise<SubmitJobResponse> {
+  const backendUrl = process.env.BACKEND_URL;
+  const callbackUrl = backendUrl
+    ? `${backendUrl.replace(/\/+$/, '')}/api/webhooks/master-marketer/blog-scrape-complete`
+    : undefined;
+
+  return masterMarketerFetch<SubmitJobResponse>('/api/intake/blog-scrape', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, ...(callbackUrl && { callback_url: callbackUrl }) }),
   });
 }
 

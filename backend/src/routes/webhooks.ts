@@ -8,8 +8,10 @@ import { Router, Request, Response } from 'express';
 import { update as edgeFnUpdate } from '../utils/edge-functions.js';
 import { ingestContent } from '../services/rag/ingestion.js';
 import type { WebhookCallbackPayload, GenerationState } from '../services/deliverable-generation/types.js';
+import type { BlogScrapeCallbackPayload } from '../services/content-ingestion/types.js';
 import { select } from '../utils/edge-functions.js';
 import { getJobByRunId } from '../services/master-marketer/client.js';
+import { processScrapeResult } from '../services/content-ingestion/processor.js';
 
 interface DeliverableRow {
   metadata: GenerationState | null;
@@ -312,6 +314,36 @@ router.post(
     } catch (err) {
       console.error(`[Webhooks] Recovery failed for deliverable ${deliverableId}:`, err);
       res.status(500).json({ error: 'Recovery failed' });
+    }
+  }
+);
+
+// ============================================================================
+// POST /master-marketer/blog-scrape-complete
+// Callback from MM when a blog URL has been scraped
+// ============================================================================
+
+router.post(
+  '/master-marketer/blog-scrape-complete',
+  verifyApiKey,
+  async (req: Request, res: Response): Promise<void> => {
+    const payload = req.body as BlogScrapeCallbackPayload;
+
+    if (!payload.job_id || !payload.status || !payload.metadata?.item_id) {
+      res.status(400).json({ error: 'Missing required fields: job_id, status, metadata.item_id' });
+      return;
+    }
+
+    console.log(
+      `[Webhooks] Blog scrape complete: job=${payload.job_id} status=${payload.status} item=${payload.metadata.item_id}`
+    );
+
+    try {
+      await processScrapeResult(payload);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error(`[Webhooks] Error processing blog-scrape-complete:`, err);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 );

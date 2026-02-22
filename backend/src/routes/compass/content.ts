@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { select, insert, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
+import { submitBulkScrape, getBatchStatus } from '../../services/content-ingestion/processor.js';
 import {
   CreateContentTypeDTO,
   UpdateContentTypeDTO,
@@ -1559,6 +1560,124 @@ router.delete(
     }
 
     res.status(204).send();
+  }
+);
+
+// ============================================================================
+// BULK INGESTION ENDPOINTS
+// (Must be registered before /assets/:id routes to avoid collision)
+// ============================================================================
+
+/**
+ * POST /api/compass/content/assets/bulk-ingest
+ * Submit a batch of blog URLs for scraping, asset creation, and AI categorization
+ */
+router.post(
+  '/assets/bulk-ingest',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { contract_id, urls, options } = req.body;
+
+    if (!contract_id || typeof contract_id !== 'string') {
+      res.status(400).json({ error: 'contract_id is required' });
+      return;
+    }
+
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      res.status(400).json({ error: 'urls must be a non-empty array' });
+      return;
+    }
+
+    if (urls.length > 100) {
+      res.status(400).json({ error: 'Maximum 100 URLs per batch' });
+      return;
+    }
+
+    // Validate URLs
+    const invalidUrls: string[] = [];
+    for (const url of urls) {
+      if (typeof url !== 'string') {
+        invalidUrls.push(String(url));
+        continue;
+      }
+      try {
+        const parsed = new URL(url.trim());
+        if (!parsed.protocol.startsWith('http')) {
+          invalidUrls.push(url);
+        }
+      } catch {
+        invalidUrls.push(url);
+      }
+    }
+
+    if (invalidUrls.length > 0) {
+      res.status(400).json({
+        error: `Invalid URLs: ${invalidUrls.slice(0, 5).join(', ')}${invalidUrls.length > 5 ? ` and ${invalidUrls.length - 5} more` : ''}`,
+      });
+      return;
+    }
+
+    // Verify contract exists
+    const { data: contract, error: contractError } = await req.supabase
+      .from('contracts')
+      .select('contract_id')
+      .eq('contract_id', contract_id)
+      .single();
+
+    if (contractError || !contract) {
+      res.status(400).json({ error: 'Invalid contract_id: contract not found' });
+      return;
+    }
+
+    try {
+      const result = await submitBulkScrape(contract_id, urls, options || {}, req.user.id);
+
+      res.status(202).json({
+        batch_id: result.batch_id,
+        total: result.total,
+        submitted: result.submitted,
+        skipped_duplicates: result.skipped_duplicates,
+      });
+    } catch (err) {
+      console.error('[Content] Bulk ingest submission failed:', err);
+      res.status(500).json({ error: 'Failed to submit bulk ingestion' });
+    }
+  }
+);
+
+/**
+ * GET /api/compass/content/assets/bulk-ingest/:batchId
+ * Get batch progress with item statuses
+ */
+router.get(
+  '/assets/bulk-ingest/:batchId',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { batchId } = req.params;
+
+    try {
+      const status = await getBatchStatus(batchId);
+
+      if (!status) {
+        res.status(404).json({ error: 'Batch not found' });
+        return;
+      }
+
+      res.json(status);
+    } catch (err) {
+      console.error('[Content] Batch status fetch failed:', err);
+      res.status(500).json({ error: 'Failed to fetch batch status' });
+    }
   }
 );
 

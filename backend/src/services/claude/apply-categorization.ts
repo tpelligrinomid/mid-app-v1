@@ -8,11 +8,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CategorizationResult } from './categorize.js';
+import type { ExtendedCategorizationResult } from './categorize-with-attributes.js';
 
 interface CurrentFields {
   content_type_id: string | null;
   category_id: string | null;
   metadata: Record<string, unknown> | null;
+  custom_attributes?: Record<string, unknown> | null;
 }
 
 export async function applyCategorization(
@@ -20,7 +22,7 @@ export async function applyCategorization(
   assetId: string,
   contractId: string,
   currentFields: CurrentFields,
-  result: CategorizationResult
+  result: CategorizationResult | ExtendedCategorizationResult
 ): Promise<void> {
   const updates: Record<string, unknown> = {};
 
@@ -64,6 +66,20 @@ export async function applyCategorization(
     ...existingMetadata,
     ...result.metadata,
   };
+
+  // Custom attributes: merge AI-filled values into existing (don't overwrite user-set values)
+  const extResult = result as ExtendedCategorizationResult;
+  if (extResult.custom_attributes && Object.keys(extResult.custom_attributes).length > 0) {
+    const existingAttrs = currentFields.custom_attributes || {};
+    const merged: Record<string, unknown> = { ...existingAttrs };
+    for (const [key, value] of Object.entries(extResult.custom_attributes)) {
+      // Only fill if not already set by user
+      if (merged[key] === undefined || merged[key] === null) {
+        merged[key] = value;
+      }
+    }
+    updates.custom_attributes = merged;
+  }
 
   // Only update if there's something to write
   if (Object.keys(updates).length === 0) {

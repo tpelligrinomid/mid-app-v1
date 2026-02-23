@@ -15,6 +15,7 @@ import type {
   IngestionBatch,
   IngestionItem,
   BlogScrapeCallbackPayload,
+  FileExtractCallbackPayload,
 } from './types.js';
 
 // ============================================================================
@@ -417,6 +418,159 @@ export async function getBatchStatus(batchId: string): Promise<BatchStatus | nul
 }
 
 // ============================================================================
+// processFileExtractResult (webhook callback handler for file uploads)
+// ============================================================================
+
+/**
+ * Process a file extraction result from Master Marketer.
+ * Updates the asset with extracted content, runs AI categorization + embeddings.
+ */
+export async function processFileExtractResult(
+  payload: FileExtractCallbackPayload
+): Promise<void> {
+  const { job_id, status, metadata, output, error } = payload;
+  const { asset_id, contract_id, content_type_slug } = metadata;
+
+  console.log(
+    `[FileIngest] Callback: job=${job_id} status=${status} asset=${asset_id}`
+  );
+
+  // Handle failure
+  if (status === 'failed') {
+    await update(
+      'content_assets',
+      {
+        metadata: {
+          source: 'file_upload',
+          file_extraction: {
+            status: 'failed',
+            job_id,
+            error: error || 'Extraction failed (unknown error)',
+            completed_at: new Date().toISOString(),
+          },
+        },
+      },
+      { asset_id }
+    );
+    console.error(`[FileIngest] Extraction failed for asset ${asset_id}: ${error}`);
+    return;
+  }
+
+  // Handle success
+  if (status !== 'completed' || !output) {
+    await update(
+      'content_assets',
+      {
+        metadata: {
+          source: 'file_upload',
+          file_extraction: {
+            status: 'failed',
+            job_id,
+            error: `Unexpected callback: status=${status}, hasOutput=${!!output}`,
+            completed_at: new Date().toISOString(),
+          },
+        },
+      },
+      { asset_id }
+    );
+    return;
+  }
+
+  try {
+    // Update asset with extracted content
+    const assetUpdates: Record<string, unknown> = {
+      content_body: output.content_markdown,
+      metadata: {
+        source: 'file_upload',
+        file_extraction: {
+          status: 'completed',
+          job_id,
+          extraction_method: output.extraction_method,
+          word_count: output.word_count,
+          page_count: output.page_count,
+          completed_at: new Date().toISOString(),
+        },
+      },
+    };
+
+    if (output.title) {
+      assetUpdates.title = output.title;
+    }
+
+    await update('content_assets', assetUpdates, { asset_id });
+    console.log(`[FileIngest] Content extracted for asset ${asset_id}`);
+
+    // Ingest content for RAG embeddings (non-blocking)
+    if (output.content_markdown && process.env.OPENAI_API_KEY) {
+      try {
+        await ingestContent({
+          contract_id,
+          source_type: 'content',
+          source_id: asset_id,
+          title: output.title || asset_id,
+          content: output.content_markdown,
+        });
+        console.log(`[FileIngest] Embeddings created for asset ${asset_id}`);
+      } catch (embedErr) {
+        console.error(`[FileIngest] Embedding failed for asset ${asset_id} (non-blocking):`, embedErr);
+      }
+    }
+
+    // Fire-and-forget: categorize with attributes
+    (async () => {
+      try {
+        const { categorizeWithAttributes } = await import('../claude/categorize-with-attributes.js');
+
+        const catResult = await categorizeWithAttributes(
+          output.content_markdown,
+          output.title || asset_id,
+          contract_id,
+          content_type_slug
+        );
+
+        if (catResult) {
+          await applyCategorizationViaEdgeFn(
+            asset_id,
+            contract_id,
+            {
+              source: 'file_upload',
+              file_extraction: {
+                status: 'completed',
+                job_id,
+                extraction_method: output.extraction_method,
+                completed_at: new Date().toISOString(),
+              },
+            },
+            catResult
+          );
+        }
+      } catch (catErr) {
+        console.error(`[FileIngest] Categorization failed for asset ${asset_id} (non-blocking):`, catErr);
+      }
+    })();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error(`[FileIngest] Failed to process extract result for asset ${asset_id}:`, errorMessage);
+
+    await update(
+      'content_assets',
+      {
+        metadata: {
+          source: 'file_upload',
+          file_extraction: {
+            status: 'failed',
+            job_id,
+            error: errorMessage,
+            completed_at: new Date().toISOString(),
+          },
+        },
+      },
+      { asset_id }
+    ).catch(() => {});
+  }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -424,7 +578,7 @@ export async function getBatchStatus(batchId: string): Promise<BatchStatus | nul
  * Apply categorization results via edge functions (service role).
  * Mirrors apply-categorization.ts logic but uses edge functions instead of supabase client.
  */
-async function applyCategorizationViaEdgeFn(
+export async function applyCategorizationViaEdgeFn(
   assetId: string,
   contractId: string,
   existingMetadata: Record<string, unknown> | null,

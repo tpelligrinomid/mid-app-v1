@@ -1,7 +1,7 @@
 /**
- * Types for Blog URL Bulk Ingestion Pipeline
+ * Types for Content Ingestion Pipelines
  *
- * Batch tracking rows, MM submission/callback payloads.
+ * Blog URL bulk ingestion, file upload extraction, and shared batch tracking.
  */
 
 export interface IngestionBatch {
@@ -57,6 +57,40 @@ export interface BlogScrapeCallbackPayload {
     author?: string;
     meta_description?: string;
     word_count?: number;
+  };
+  error?: string;
+}
+
+// ============================================================================
+// File Upload Extraction Types
+// ============================================================================
+
+export interface FileExtractSubmission {
+  file_url: string;
+  file_name: string;
+  mime_type: string;
+  callback_url?: string;
+  metadata: {
+    asset_id: string;
+    contract_id: string;
+    content_type_slug?: string;
+  };
+}
+
+export interface FileExtractCallbackPayload {
+  job_id: string;
+  status: 'completed' | 'failed';
+  metadata: {
+    asset_id: string;
+    contract_id: string;
+    content_type_slug?: string;
+  };
+  output?: {
+    content_markdown: string;
+    title?: string;
+    word_count?: number;
+    page_count?: number;
+    extraction_method?: string;
   };
   error?: string;
 }

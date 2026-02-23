@@ -8,10 +8,10 @@ import { Router, Request, Response } from 'express';
 import { update as edgeFnUpdate } from '../utils/edge-functions.js';
 import { ingestContent } from '../services/rag/ingestion.js';
 import type { WebhookCallbackPayload, GenerationState } from '../services/deliverable-generation/types.js';
-import type { BlogScrapeCallbackPayload } from '../services/content-ingestion/types.js';
+import type { BlogScrapeCallbackPayload, FileExtractCallbackPayload } from '../services/content-ingestion/types.js';
 import { select } from '../utils/edge-functions.js';
 import { getJobByRunId } from '../services/master-marketer/client.js';
-import { processScrapeResult } from '../services/content-ingestion/processor.js';
+import { processScrapeResult, processFileExtractResult } from '../services/content-ingestion/processor.js';
 
 interface DeliverableRow {
   metadata: GenerationState | null;
@@ -343,6 +343,36 @@ router.post(
       res.status(200).json({ ok: true });
     } catch (err) {
       console.error(`[Webhooks] Error processing blog-scrape-complete:`, err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+// ============================================================================
+// POST /master-marketer/file-extract-complete
+// Callback from MM when a file has been text-extracted
+// ============================================================================
+
+router.post(
+  '/master-marketer/file-extract-complete',
+  verifyApiKey,
+  async (req: Request, res: Response): Promise<void> => {
+    const payload = req.body as FileExtractCallbackPayload;
+
+    if (!payload.job_id || !payload.status || !payload.metadata?.asset_id) {
+      res.status(400).json({ error: 'Missing required fields: job_id, status, metadata.asset_id' });
+      return;
+    }
+
+    console.log(
+      `[Webhooks] File extract complete: job=${payload.job_id} status=${payload.status} asset=${payload.metadata.asset_id}`
+    );
+
+    try {
+      await processFileExtractResult(payload);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error(`[Webhooks] Error processing file-extract-complete:`, err);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

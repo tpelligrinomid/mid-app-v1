@@ -15,7 +15,7 @@ import type {
   JobStatusResponse,
 } from './types.js';
 import type { DeliverableSubmission, DeliverableConvertSubmission } from '../deliverable-generation/types.js';
-import type { BlogScrapeSubmission } from '../content-ingestion/types.js';
+import type { BlogScrapeSubmission, FileExtractSubmission } from '../content-ingestion/types.js';
 
 interface MasterMarketerConfig {
   baseUrl: string;
@@ -154,6 +154,25 @@ export async function submitBlogScrape(
     : undefined;
 
   return masterMarketerFetch<SubmitJobResponse>('/api/intake/blog-scrape', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, ...(callbackUrl && { callback_url: callbackUrl }) }),
+  });
+}
+
+/**
+ * Submit a file for text extraction.
+ * MM downloads the file via signed URL, extracts text (PDF/DOCX/PPTX),
+ * and calls back to our webhook when done.
+ */
+export async function submitFileExtract(
+  data: FileExtractSubmission
+): Promise<SubmitJobResponse> {
+  const backendUrl = process.env.BACKEND_URL;
+  const callbackUrl = backendUrl
+    ? `${backendUrl.replace(/\/+$/, '')}/api/webhooks/master-marketer/file-extract-complete`
+    : undefined;
+
+  return masterMarketerFetch<SubmitJobResponse>('/api/intake/file-extract', {
     method: 'POST',
     body: JSON.stringify({ ...data, ...(callbackUrl && { callback_url: callbackUrl }) }),
   });

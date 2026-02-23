@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { select, insert, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
-import { submitBulkScrape, getBatchStatus } from '../../services/content-ingestion/processor.js';
+import { submitBulkScrape, getBatchStatus, applyCategorizationViaEdgeFn } from '../../services/content-ingestion/processor.js';
+import { submitFileExtract } from '../../services/master-marketer/client.js';
+import { insert as edgeFnInsert, select as edgeFnSelect, update as edgeFnUpdate } from '../../utils/edge-functions.js';
 import {
   CreateContentTypeDTO,
   UpdateContentTypeDTO,
@@ -1687,6 +1689,281 @@ router.get(
     } catch (err) {
       console.error('[Content] Batch status fetch failed:', err);
       res.status(500).json({ error: 'Failed to fetch batch status' });
+    }
+  }
+);
+
+// ============================================================================
+// FILE UPLOAD INGESTION
+// ============================================================================
+
+const ALLOWED_FILE_MIME_TYPES: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+};
+
+const TEXT_MIME_TYPES = new Set(['text/plain', 'text/markdown']);
+
+/**
+ * POST /api/compass/content/assets/file-ingest
+ * Upload a file for text extraction and content asset creation.
+ * TXT/MD: text read directly, returns 201.
+ * PDF/DOCX/PPTX: submitted to MM for extraction, returns 202.
+ */
+router.post(
+  '/assets/file-ingest',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { contract_id, storage_path, file_name, mime_type, content_type_id, category_id, title } = req.body;
+
+    // Validate required fields
+    if (!contract_id || typeof contract_id !== 'string') {
+      res.status(400).json({ error: 'contract_id is required' });
+      return;
+    }
+    if (!storage_path || typeof storage_path !== 'string') {
+      res.status(400).json({ error: 'storage_path is required' });
+      return;
+    }
+    if (!file_name || typeof file_name !== 'string') {
+      res.status(400).json({ error: 'file_name is required' });
+      return;
+    }
+    if (!mime_type || typeof mime_type !== 'string') {
+      res.status(400).json({ error: 'mime_type is required' });
+      return;
+    }
+    if (!content_type_id || typeof content_type_id !== 'string') {
+      res.status(400).json({ error: 'content_type_id is required — select a content type before uploading' });
+      return;
+    }
+
+    // Validate MIME type
+    if (!ALLOWED_FILE_MIME_TYPES[mime_type]) {
+      res.status(400).json({
+        error: `Unsupported file type: ${mime_type}. Allowed: PDF, DOCX, PPTX, TXT, MD`,
+      });
+      return;
+    }
+
+    // Verify contract exists
+    const { data: contract, error: contractError } = await req.supabase
+      .from('contracts')
+      .select('contract_id')
+      .eq('contract_id', contract_id)
+      .single();
+
+    if (contractError || !contract) {
+      res.status(400).json({ error: 'Invalid contract_id: contract not found' });
+      return;
+    }
+
+    // Resolve content_type_id → slug for categorization hint
+    let contentTypeSlug: string | undefined;
+    try {
+      const typeRows = await edgeFnSelect<Array<{ slug: string }>>(
+        'content_types',
+        {
+          select: 'slug',
+          filters: { type_id: content_type_id, is_active: true },
+          limit: 1,
+        }
+      );
+      contentTypeSlug = typeRows?.[0]?.slug;
+    } catch {
+      // Non-blocking — slug is optional for categorization
+    }
+
+    try {
+      // Create asset immediately as draft
+      const assetData: Record<string, unknown> = {
+        contract_id,
+        asset_type: 'content',
+        title: title || file_name,
+        content_type_id,
+        ...(category_id && { category_id }),
+        status: 'draft',
+        file_path: storage_path,
+        file_name,
+        mime_type,
+        metadata: {
+          source: 'file_upload',
+          file_extraction: { status: 'pending' },
+        },
+        created_by: req.user.id,
+      };
+
+      const assets = await edgeFnInsert<Array<{ asset_id: string }>>(
+        'content_assets',
+        assetData,
+        { select: 'asset_id' }
+      );
+      const assetId = assets[0].asset_id;
+
+      // TXT/MD: read text directly from Supabase Storage
+      if (TEXT_MIME_TYPES.has(mime_type)) {
+        const { data: fileData, error: downloadError } = await req.supabase
+          .storage
+          .from('content-assets')
+          .download(storage_path);
+
+        if (downloadError || !fileData) {
+          await edgeFnUpdate(
+            'content_assets',
+            {
+              metadata: {
+                source: 'file_upload',
+                file_extraction: {
+                  status: 'failed',
+                  error: `Failed to download file: ${downloadError?.message || 'no data'}`,
+                },
+              },
+            },
+            { asset_id: assetId }
+          );
+          res.status(500).json({ error: 'Failed to download file from storage' });
+          return;
+        }
+
+        const textContent = await fileData.text();
+
+        // Update asset with content
+        await edgeFnUpdate(
+          'content_assets',
+          {
+            content_body: textContent,
+            metadata: {
+              source: 'file_upload',
+              file_extraction: {
+                status: 'completed',
+                extraction_method: 'direct_read',
+                word_count: textContent.split(/\s+/).filter(Boolean).length,
+                completed_at: new Date().toISOString(),
+              },
+            },
+          },
+          { asset_id: assetId }
+        );
+
+        // Fire-and-forget: embeddings + categorization
+        (async () => {
+          // RAG embeddings
+          if (textContent && process.env.OPENAI_API_KEY) {
+            try {
+              await ingestContent({
+                contract_id,
+                source_type: 'content',
+                source_id: assetId,
+                title: title || file_name,
+                content: textContent,
+              });
+            } catch (embedErr) {
+              console.error(`[FileIngest] Embedding failed for asset ${assetId} (non-blocking):`, embedErr);
+            }
+          }
+
+          // AI categorization
+          try {
+            const { categorizeWithAttributes } = await import('../../services/claude/categorize-with-attributes.js');
+            const catResult = await categorizeWithAttributes(
+              textContent,
+              title || file_name,
+              contract_id,
+              contentTypeSlug
+            );
+
+            if (catResult) {
+              await applyCategorizationViaEdgeFn(
+                assetId,
+                contract_id,
+                {
+                  source: 'file_upload',
+                  file_extraction: {
+                    status: 'completed',
+                    extraction_method: 'direct_read',
+                    completed_at: new Date().toISOString(),
+                  },
+                },
+                catResult
+              );
+            }
+          } catch (catErr) {
+            console.error(`[FileIngest] Categorization failed for asset ${assetId} (non-blocking):`, catErr);
+          }
+        })();
+
+        res.status(201).json({ asset_id: assetId, extraction: 'direct' });
+        return;
+      }
+
+      // PDF/DOCX/PPTX: generate signed URL and submit to MM
+      const { data: signedUrlData, error: signedUrlError } = await req.supabase
+        .storage
+        .from('content-assets')
+        .createSignedUrl(storage_path, 86400); // 24hr expiry
+
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        await edgeFnUpdate(
+          'content_assets',
+          {
+            metadata: {
+              source: 'file_upload',
+              file_extraction: {
+                status: 'failed',
+                error: `Failed to generate signed URL: ${signedUrlError?.message || 'no URL'}`,
+              },
+            },
+          },
+          { asset_id: assetId }
+        );
+        res.status(500).json({ error: 'Failed to generate signed URL for file' });
+        return;
+      }
+
+      // Submit to MM
+      const mmResult = await submitFileExtract({
+        file_url: signedUrlData.signedUrl,
+        file_name,
+        mime_type,
+        metadata: {
+          asset_id: assetId,
+          contract_id,
+          content_type_slug: contentTypeSlug,
+        },
+      });
+
+      // Update asset with job info
+      await edgeFnUpdate(
+        'content_assets',
+        {
+          metadata: {
+            source: 'file_upload',
+            file_extraction: {
+              status: 'processing',
+              job_id: mmResult.jobId,
+              submitted_at: new Date().toISOString(),
+            },
+          },
+        },
+        { asset_id: assetId }
+      );
+
+      res.status(202).json({
+        asset_id: assetId,
+        extraction: 'submitted',
+        job_id: mmResult.jobId,
+      });
+    } catch (err) {
+      console.error('[FileIngest] File ingest failed:', err);
+      res.status(500).json({ error: 'Failed to process file upload' });
     }
   }
 );

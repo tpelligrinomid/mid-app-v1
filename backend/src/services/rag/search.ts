@@ -48,6 +48,9 @@ export async function searchKnowledge(
 
   // 3. Filter by source_type if specified
   if (source_types && source_types.length > 0) {
+    const allTypes = (results || []).map(r => r.source_type);
+    const uniqueTypes = [...new Set(allTypes)];
+    console.log('[searchKnowledge] RPC returned', (results || []).length, 'results with source_types:', uniqueTypes, '— filtering to:', source_types);
     return (results || []).filter((r) =>
       source_types.includes(r.source_type as SourceType)
     );

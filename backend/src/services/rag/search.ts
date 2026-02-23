@@ -37,27 +37,20 @@ export async function searchKnowledge(
 
   // 1. Embed the query
   const { embedding } = await getEmbedding(query);
-
-  // DEBUG: Check if compass_knowledge has ANY rows for this contract
-  try {
-    const rows = await select<{ source_type: string; title: string }[]>('compass_knowledge', {
-      select: 'source_type, title',
-      filters: { contract_id },
-      limit: 5,
-    });
-    console.log('[searchKnowledge] compass_knowledge has', rows?.length ?? 0, 'rows (showing up to 5) for contract', contract_id,
-      rows?.map(r => `${r.source_type}: "${r.title}"`));
-  } catch (dbErr) {
-    console.error('[searchKnowledge] Direct DB check failed:', dbErr);
-  }
+  const embeddingStr = JSON.stringify(embedding);
+  console.log('[searchKnowledge] Embedding: dimensions =', embedding.length,
+    ', first 3 values =', embedding.slice(0, 3),
+    ', string length =', embeddingStr.length);
 
   // 2. Call RPC
+  console.log('[searchKnowledge] Calling match_knowledge with threshold =', match_threshold, ', count =', match_count);
   const results = await rpc<SimilarityResult[]>('match_knowledge', {
-    query_embedding: JSON.stringify(embedding),
+    query_embedding: embeddingStr,
     match_contract_id: contract_id,
     match_count,
     match_threshold,
   });
+  console.log('[searchKnowledge] RPC raw response:', results === null ? 'null' : results === undefined ? 'undefined' : `array of ${results.length}`);
 
   // 3. Filter by source_type if specified
   if (source_types && source_types.length > 0) {

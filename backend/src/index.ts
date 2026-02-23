@@ -19,6 +19,7 @@ import statusReportsRouter from './routes/compass/status-reports.js';
 import deliverablesRouter from './routes/compass/deliverables.js';
 import processLibraryRouter from './routes/compass/process-library.js';
 import contentRouter from './routes/compass/content.js';
+import chatRouter from './routes/compass/chat.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -104,6 +105,9 @@ app.use('/api/compass/process-library', authMiddleware, processLibraryRouter);
 
 // Compass content module (require authentication)
 app.use('/api/compass/content', authMiddleware, contentRouter);
+
+// Compass RAG chat (require authentication)
+app.use('/api/compass/chat', authMiddleware, chatRouter);
 
 // Pulse reports (require authentication)
 app.use('/api/pulse/reports', authMiddleware, reportsRouter);

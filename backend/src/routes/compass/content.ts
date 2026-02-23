@@ -1595,9 +1595,6 @@ router.post(
 
     const { contract_id, urls, options, content_type_id, category_id } = req.body;
 
-    console.log(`[BulkIngest] Request body keys: ${Object.keys(req.body).join(', ')}`);
-    console.log(`[BulkIngest] content_type_id=${content_type_id || 'not provided'}, category_id=${category_id || 'not provided'}, options=${JSON.stringify(options)}`);
-
     if (!contract_id || typeof contract_id !== 'string') {
       res.status(400).json({ error: 'contract_id is required' });
       return;

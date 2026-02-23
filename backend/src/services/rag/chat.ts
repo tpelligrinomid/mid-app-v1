@@ -93,18 +93,15 @@ export async function streamChatResponse(
   }
 
   // 1. Search for relevant context
-  console.log('[RAG Chat] Searching:', { contract_id, source_types, message: message.substring(0, 80) });
   let results: SimilarityResult[];
   try {
     results = await searchKnowledge({
       query: message,
       contract_id,
-      match_count: 8,
+      match_count: 20,
       match_threshold: 0.5,
       source_types,
     });
-    console.log('[RAG Chat] Search returned', results.length, 'results',
-      results.length > 0 ? results.map(r => ({ title: r.title, source_type: r.source_type, similarity: r.similarity })) : '(empty)');
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown search error';
     console.error('[RAG Chat] Knowledge search failed:', errMsg);

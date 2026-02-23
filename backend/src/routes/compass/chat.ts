@@ -90,8 +90,6 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     }
   }
 
-  console.log('[RAG Chat Route] Request:', { contract_id, source_types: validatedSourceTypes, message: message.substring(0, 80) });
-
   // ── Set SSE headers ─────────────────────────────────────────────────
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',

@@ -6,7 +6,7 @@
 
 import type { SourceType, SimilarityResult } from '../../types/rag.js';
 import { getEmbedding } from './embeddings.js';
-import { rpc, select } from '../../utils/edge-functions.js';
+import { rpc } from '../../utils/edge-functions.js';
 
 export interface SearchParams {
   query: string;
@@ -37,26 +37,18 @@ export async function searchKnowledge(
 
   // 1. Embed the query
   const { embedding } = await getEmbedding(query);
-  const embeddingStr = JSON.stringify(embedding);
-  console.log('[searchKnowledge] Embedding: dimensions =', embedding.length,
-    ', first 3 values =', embedding.slice(0, 3),
-    ', string length =', embeddingStr.length);
 
-  // 2. Call RPC
-  console.log('[searchKnowledge] Calling match_knowledge with threshold =', match_threshold, ', count =', match_count);
+  // 2. Call RPC — embedding is passed as a JSON string "[0.1,0.2,...]"
+  //    which PostgreSQL casts to vector(1536) inside the function.
   const results = await rpc<SimilarityResult[]>('match_knowledge', {
-    query_embedding: embeddingStr,
+    query_embedding: JSON.stringify(embedding),
     match_contract_id: contract_id,
     match_count,
     match_threshold,
   });
-  console.log('[searchKnowledge] RPC raw response:', results === null ? 'null' : results === undefined ? 'undefined' : `array of ${results.length}`);
 
   // 3. Filter by source_type if specified
   if (source_types && source_types.length > 0) {
-    const allTypes = (results || []).map(r => r.source_type);
-    const uniqueTypes = [...new Set(allTypes)];
-    console.log('[searchKnowledge] RPC returned', (results || []).length, 'results with source_types:', uniqueTypes, '— filtering to:', source_types);
     return (results || []).filter((r) =>
       source_types.includes(r.source_type as SourceType)
     );

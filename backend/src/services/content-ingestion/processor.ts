@@ -282,6 +282,9 @@ export async function processScrapeResult(
     const userContentTypeId = batchOptions.content_type_id as string | undefined;
     const userCategoryId = batchOptions.category_id as string | undefined;
 
+    console.log(`[Ingestion] Batch options for ${item_id}:`, JSON.stringify(batchOptions));
+    console.log(`[Ingestion] User overrides: content_type_id=${userContentTypeId || 'none'}, category_id=${userCategoryId || 'none'}`);
+
     const assetData: Record<string, unknown> = {
       contract_id,
       asset_type: 'content',

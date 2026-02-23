@@ -8,7 +8,7 @@
  */
 
 import { searchKnowledge } from './search.js';
-import type { SimilarityResult } from '../../types/rag.js';
+import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config (mirrors client.ts)
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -28,12 +28,14 @@ export interface ChatParams {
   message: string;
   contract_id: string;
   conversation_history?: ChatMessage[];
+  source_types?: SourceType[];
 }
 
 export interface ContextSource {
   title: string;
   source_type: string;
   source_id: string;
+  chunk_index: number;
   similarity: number;
 }
 
@@ -82,7 +84,7 @@ export async function streamChatResponse(
   params: ChatParams,
   onChunk: (chunk: SSEChunk) => void
 ): Promise<void> {
-  const { message, contract_id, conversation_history = [] } = params;
+  const { message, contract_id, conversation_history = [], source_types } = params;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -98,6 +100,7 @@ export async function streamChatResponse(
       contract_id,
       match_count: 8,
       match_threshold: 0.5,
+      source_types,
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown search error';
@@ -107,10 +110,19 @@ export async function streamChatResponse(
   }
 
   // 2. Emit context sources
-  const sources: ContextSource[] = results.map((r) => ({
+  // Deduplicate by source_id — keep the highest-similarity chunk per source
+  const bestBySource = new Map<string, SimilarityResult>();
+  for (const r of results) {
+    const existing = bestBySource.get(r.source_id);
+    if (!existing || r.similarity > existing.similarity) {
+      bestBySource.set(r.source_id, r);
+    }
+  }
+  const sources: ContextSource[] = Array.from(bestBySource.values()).map((r) => ({
     title: r.title,
     source_type: r.source_type,
     source_id: r.source_id,
+    chunk_index: r.chunk_index,
     similarity: r.similarity,
   }));
   onChunk({ type: 'context', sources });

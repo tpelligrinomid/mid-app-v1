@@ -11,6 +11,8 @@
 import { Router, Request, Response } from 'express';
 import { streamChatResponse } from '../../services/rag/chat.js';
 import type { ChatMessage, SSEChunk } from '../../services/rag/chat.js';
+import { SOURCE_TYPE_VALUES } from '../../types/rag.js';
+import type { SourceType } from '../../types/rag.js';
 
 const router = Router();
 
@@ -24,7 +26,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 
   // ── Validate input ──────────────────────────────────────────────────
-  const { message, contract_id, conversation_history } = req.body;
+  const { message, contract_id, conversation_history, source_types } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     res.status(400).json({ error: 'message is required and must be a non-empty string' });
@@ -54,6 +56,22 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       }
     }
     history = conversation_history;
+  }
+
+  // Validate source_types if provided
+  let validatedSourceTypes: SourceType[] | undefined;
+  if (source_types !== undefined) {
+    if (!Array.isArray(source_types) || source_types.length === 0) {
+      res.status(400).json({ error: 'source_types must be a non-empty array' });
+      return;
+    }
+    for (const st of source_types) {
+      if (!SOURCE_TYPE_VALUES.includes(st as SourceType)) {
+        res.status(400).json({ error: `Invalid source_type: "${st}". Valid values: ${SOURCE_TYPE_VALUES.join(', ')}` });
+        return;
+      }
+    }
+    validatedSourceTypes = source_types as SourceType[];
   }
 
   // ── Contract access check ───────────────────────────────────────────
@@ -93,7 +111,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 
   try {
     await streamChatResponse(
-      { message: message.trim(), contract_id, conversation_history: history },
+      { message: message.trim(), contract_id, conversation_history: history, source_types: validatedSourceTypes },
       (chunk) => {
         if (!clientDisconnected) {
           sendEvent(chunk);

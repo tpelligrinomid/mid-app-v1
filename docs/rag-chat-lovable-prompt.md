@@ -21,6 +21,7 @@ The backend API is fully built and deployed. It streams responses via Server-Sen
 {
   "message": "What topics do we write about most?",
   "contract_id": "uuid",
+  "source_types": ["content"],
   "conversation_history": [
     { "role": "user", "content": "What are our top blog posts?" },
     { "role": "assistant", "content": "Based on your content library, your top posts cover..." }
@@ -32,6 +33,7 @@ The backend API is fully built and deployed. It streams responses via Server-Sen
 |-------|------|----------|-------|
 | `message` | string | Yes | The user's current question |
 | `contract_id` | UUID string | Yes | Which contract's content to search |
+| `source_types` | string[] | No | Filter which knowledge types to search. Values: `content`, `meeting`, `note`, `deliverable`, `process`, `competitive_intel`. Omit to search all. |
 | `conversation_history` | array | No | Prior messages for multi-turn context. Max 20 entries. |
 
 **Response:** Server-Sent Events (SSE) stream — not a regular JSON response. The response is a stream of newline-delimited JSON events.
@@ -43,8 +45,9 @@ The backend API is fully built and deployed. It streams responses via Server-Sen
 The endpoint returns `Content-Type: text/event-stream`. Each event is a line starting with `data: ` followed by JSON:
 
 ### Event 1: Context (sources used)
+Sources are deduplicated by `source_id` (only the highest-similarity chunk per source is included):
 ```
-data: {"type":"context","sources":[{"title":"10 Ways AI is Changing B2B","source_type":"content","source_id":"uuid","similarity":0.82},{"title":"Q4 Strategy Meeting","source_type":"meeting","source_id":"uuid","similarity":0.71}]}
+data: {"type":"context","sources":[{"title":"10 Ways AI is Changing B2B","source_type":"content","source_id":"uuid","chunk_index":0,"similarity":0.82},{"title":"Q4 Strategy Meeting","source_type":"meeting","source_id":"uuid","chunk_index":2,"similarity":0.71}]}
 ```
 
 ### Events 2–N: Delta (streaming text chunks)
@@ -126,6 +129,52 @@ Show the example questions as clickable chips/buttons that populate the message 
 
 ---
 
+## Source Type Filter
+
+Above the message input (or in a toolbar area), add a **source type filter** so users can scope what kinds of knowledge the chat searches.
+
+### Filter UI
+
+Show a row of toggle chips/pills. Each chip represents a source type. The user can toggle them on/off:
+
+```
+Search in:  [Content ✓]  [Meetings]  [Notes]  [Deliverables]  [Processes]  [Competitive Intel]
+```
+
+**Behavior:**
+- **Default:** All chips are OFF (no filter) — searches everything. Show this as "All sources" or just leave all chips unselected.
+- When one or more chips are selected, only those source types are searched. Send the selected types as `source_types` in the request body.
+- If no chips are selected, omit `source_types` from the request (searches everything).
+- The filter state persists within the session (doesn't reset between messages). It resets when the user clicks "New Chat".
+
+**Chip labels and values:**
+
+| Label | `source_types` value |
+|-------|---------------------|
+| Content | `content` |
+| Meetings | `meeting` |
+| Notes | `note` |
+| Deliverables | `deliverable` |
+| Processes | `process` |
+| Competitive Intel | `competitive_intel` |
+
+### Passing to API
+
+```typescript
+const body: Record<string, unknown> = {
+  message: userMessage,
+  contract_id: selectedContractId,
+  conversation_history: conversationHistory,
+};
+
+// Only include source_types if user has selected specific filters
+if (selectedSourceTypes.length > 0) {
+  body.source_types = selectedSourceTypes;
+}
+```
+
+---
+
 ## Message Components
 
 ### User Message Bubble
@@ -143,28 +192,38 @@ Show the example questions as clickable chips/buttons that populate the message 
 
 ### Sources Display
 
-When the `context` event arrives (before the text starts streaming), store the sources. After the assistant message is complete, show them below the response:
+When the `context` event arrives (before the text starts streaming), store the sources. After the assistant message is complete, show them below the response. Sources are already deduplicated by the backend — each source_id appears only once.
 
 ```
 Sources (5 matched):
-┌──────────────────────────────────┐
-│ 📄 10 Ways AI is Changing B2B   │  82% match
-│ 📄 Q4 Content Strategy Meeting  │  71% match
-│ 📄 Email Marketing Best Practic │  68% match
-│ 📝 Weekly Strategy Notes - Jan  │  62% match
-│ 📹 YouTube: Content Marketing   │  55% match
-└──────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 📄 Content  │  10 Ways AI is Changing B2B       │ 82% │
+│ 🤝 Meeting  │  Q4 Content Strategy Meeting      │ 71% │
+│ 📄 Content  │  Email Marketing Best Practices   │ 68% │
+│ 📝 Note     │  Weekly Strategy Notes - Jan 15   │ 62% │
+│ 📄 Content  │  YouTube: Content Marketing Tips  │ 55% │
+└────────────────────────────────────────────────────────┘
 ```
 
-**Source icons by `source_type`:**
-- `content` → 📄 or a document icon
-- `meeting` → 🤝 or a calendar/people icon
-- `note` → 📝 or a notepad icon
-- `deliverable` → 📋 or a clipboard icon
-- `process` → ⚙️ or a gear icon
-- `competitive_intel` → 🔍 or a search icon
+**Each source row must show THREE things:**
+1. **Type icon + type label** — so users can immediately tell what kind of source it is
+2. **Title** — the content title
+3. **Similarity badge** — percentage with color
 
-**Similarity score:** Show as a percentage (multiply by 100, round to nearest integer). Use a subtle color indicator: green for >75%, yellow for 50-75%.
+**Source type labels and icons:**
+
+| `source_type` value | Icon | Label |
+|---------------------|------|-------|
+| `content` | FileText icon | Content |
+| `meeting` | Users icon | Meeting |
+| `note` | StickyNote icon | Note |
+| `deliverable` | ClipboardList icon | Deliverable |
+| `process` | Settings icon | Process |
+| `competitive_intel` | Search icon | Intel |
+
+**Important:** The type label text (e.g., "Content", "Meeting", "Note") must be visible — don't rely on icons alone. Users couldn't tell sources apart when only icons were shown.
+
+**Similarity score:** Show as a percentage (multiply by 100, round to nearest integer). Use a subtle color indicator: green for >=75%, yellow for 50-74%.
 
 **Clicking a source:** If possible, navigate to the corresponding item:
 - `content` sources → navigate to `/compass/content/assets/{source_id}`
@@ -191,6 +250,7 @@ const response = await fetch(`${API_BASE}/api/compass/chat`, {
     message: userMessage,
     contract_id: selectedContractId,
     conversation_history: conversationHistory,
+    ...(selectedSourceTypes.length > 0 && { source_types: selectedSourceTypes }),
   }),
 });
 

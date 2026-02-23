@@ -263,20 +263,25 @@ export async function processScrapeResult(
       { item_id }
     );
 
-    // Fetch batch to get created_by for the asset
+    // Fetch batch to get created_by and options (content_type_id, category_id)
     let createdBy: string | null = null;
+    let batchOptions: Record<string, unknown> = {};
     try {
       const batches = await select<IngestionBatch[]>('content_ingestion_batches', {
-        select: 'created_by',
+        select: 'created_by, options',
         filters: { batch_id },
         limit: 1,
       });
       createdBy = batches?.[0]?.created_by || null;
+      batchOptions = (batches?.[0]?.options as Record<string, unknown>) || {};
     } catch {
       // Non-blocking — created_by is optional
     }
 
-    // Create content asset
+    // Create content asset (respect user-provided content_type_id / category_id from batch options)
+    const userContentTypeId = batchOptions.content_type_id as string | undefined;
+    const userCategoryId = batchOptions.category_id as string | undefined;
+
     const assetData: Record<string, unknown> = {
       contract_id,
       asset_type: 'content',
@@ -285,6 +290,8 @@ export async function processScrapeResult(
       content_body: output.content_markdown,
       external_url: output.url || item.url,
       status: 'published',
+      ...(userContentTypeId && { content_type_id: userContentTypeId }),
+      ...(userCategoryId && { category_id: userCategoryId }),
       metadata: {
         source: 'bulk_ingestion',
         batch_id,
@@ -335,11 +342,26 @@ export async function processScrapeResult(
       try {
         const { categorizeWithAttributes } = await import('../claude/categorize-with-attributes.js');
 
+        // Resolve user-provided content_type_id to slug for categorization hint
+        let typeHint: string | undefined = 'blog_post';
+        if (userContentTypeId) {
+          try {
+            const typeRows = await select<Array<{ slug: string }>>(
+              'content_types',
+              { select: 'slug', filters: { type_id: userContentTypeId }, limit: 1 }
+            );
+            typeHint = typeRows?.[0]?.slug || undefined;
+          } catch {
+            // Fall back to no hint
+            typeHint = undefined;
+          }
+        }
+
         const catResult = await categorizeWithAttributes(
           output.content_markdown,
           output.title || item.url,
           contract_id,
-          'blog_post' // Known type for bulk blog ingestion
+          typeHint
         );
 
         if (catResult) {
@@ -347,7 +369,8 @@ export async function processScrapeResult(
             assetId,
             contract_id,
             assetData.metadata as Record<string, unknown>,
-            catResult
+            catResult,
+            { skipContentType: !!userContentTypeId, skipCategory: !!userCategoryId }
           );
         }
 
@@ -582,42 +605,47 @@ export async function applyCategorizationViaEdgeFn(
   assetId: string,
   contractId: string,
   existingMetadata: Record<string, unknown> | null,
-  result: import('../claude/categorize-with-attributes.js').ExtendedCategorizationResult
+  result: import('../claude/categorize-with-attributes.js').ExtendedCategorizationResult,
+  options?: { skipContentType?: boolean; skipCategory?: boolean }
 ): Promise<void> {
   const updates: Record<string, unknown> = {};
 
-  // Resolve content_type_slug → UUID
-  try {
-    const typeRows = await select<Array<{ type_id: string }>>(
-      'content_types',
-      {
-        select: 'type_id',
-        filters: { slug: result.content_type_slug, is_active: true },
-        limit: 1,
+  // Resolve content_type_slug → UUID (skip if user already set one)
+  if (!options?.skipContentType) {
+    try {
+      const typeRows = await select<Array<{ type_id: string }>>(
+        'content_types',
+        {
+          select: 'type_id',
+          filters: { slug: result.content_type_slug, is_active: true },
+          limit: 1,
+        }
+      );
+      if (typeRows?.[0]) {
+        updates.content_type_id = typeRows[0].type_id;
       }
-    );
-    if (typeRows?.[0]) {
-      updates.content_type_id = typeRows[0].type_id;
+    } catch (err) {
+      console.warn('[Ingestion] Failed to resolve content type slug:', err);
     }
-  } catch (err) {
-    console.warn('[Ingestion] Failed to resolve content type slug:', err);
   }
 
-  // Resolve category_slug → UUID
-  try {
-    const catRows = await select<Array<{ category_id: string }>>(
-      'content_categories',
-      {
-        select: 'category_id',
-        filters: { slug: result.category_slug, is_active: true },
-        limit: 1,
+  // Resolve category_slug → UUID (skip if user already set one)
+  if (!options?.skipCategory) {
+    try {
+      const catRows = await select<Array<{ category_id: string }>>(
+        'content_categories',
+        {
+          select: 'category_id',
+          filters: { slug: result.category_slug, is_active: true },
+          limit: 1,
+        }
+      );
+      if (catRows?.[0]) {
+        updates.category_id = catRows[0].category_id;
       }
-    );
-    if (catRows?.[0]) {
-      updates.category_id = catRows[0].category_id;
+    } catch (err) {
+      console.warn('[Ingestion] Failed to resolve category slug:', err);
     }
-  } catch (err) {
-    console.warn('[Ingestion] Failed to resolve category slug:', err);
   }
 
   // Merge AI metadata

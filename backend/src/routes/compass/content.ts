@@ -1593,7 +1593,7 @@ router.post(
       return;
     }
 
-    const { contract_id, urls, options } = req.body;
+    const { contract_id, urls, options, content_type_id, category_id } = req.body;
 
     if (!contract_id || typeof contract_id !== 'string') {
       res.status(400).json({ error: 'contract_id is required' });
@@ -1647,7 +1647,12 @@ router.post(
     }
 
     try {
-      const result = await submitBulkScrape(contract_id, urls, options || {}, req.user.id);
+      const batchOptions = {
+        ...(options || {}),
+        ...(content_type_id && { content_type_id }),
+        ...(category_id && { category_id }),
+      };
+      const result = await submitBulkScrape(contract_id, urls, batchOptions, req.user.id);
 
       res.status(202).json({
         batch_id: result.batch_id,

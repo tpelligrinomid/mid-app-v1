@@ -1,10 +1,15 @@
-# RAG Chat — Content Library Q&A (Lovable Prompt)
+# RAG Chat — Context-Aware Q&A (Lovable Prompt)
 
 ## Overview
 
-Add a **Chat** feature to the Compass section that lets users ask questions about their content library and get AI-powered answers grounded in their actual ingested content (blog posts, meeting notes, uploaded files, etc.).
+Update the **Chat** feature so it appears in **two locations** in the Compass sidebar, each automatically scoped to the relevant knowledge types based on where the user is in the app:
 
-The backend API is fully built and deployed. It streams responses via Server-Sent Events (SSE) — the user sees the AI response appear word-by-word in real time, along with source citations showing which content pieces were used to answer.
+1. **Management > Chat** — searches notes, meetings, and deliverables
+2. **Content Ops > Chat** — searches only content (blog posts, podcasts, YouTube transcripts, uploaded files)
+
+Both use the same backend endpoint (`POST /api/compass/chat`) and the same chat UI component — the only difference is the `source_types` filter sent with each request and the page header/placeholder text.
+
+**This replaces the current single Chat page.** Remove the existing Chat nav item from the Management section and add the two new ones as described below.
 
 ---
 
@@ -69,11 +74,158 @@ data: {"type":"error","message":"Knowledge search failed: ..."}
 
 ---
 
-## Navigation
+## Navigation — Two Chat Locations
 
-Add a **"Chat"** navigation item to the Compass sidebar, alongside the existing modules (Notes, Meetings, Content, etc.). Use a chat/message bubble icon.
+### 1. Management > Chat
 
-When a user selects a contract and navigates to Chat, they see the chat interface.
+Add a **"Chat"** nav item at the bottom of the **Management** section in the sidebar (below Status Reports). Use the MessageSquare icon.
+
+```
+MANAGEMENT
+  Notes
+  Meetings
+  Deliverables
+  Status Reports
+  Chat              ← here
+```
+
+**Route:** `/compass/:contractId/chat` (keep existing route)
+
+**`source_types` sent with every request:** `["note", "meeting", "deliverable"]`
+
+**Page header:**
+- Title: "Chat"
+- Subtitle: "Ask questions about your notes, meetings, and deliverables"
+
+**Empty state:**
+```
+Ask anything about your notes, meetings, and deliverables
+
+Your management documents have been analyzed and embedded.
+Ask questions about discussions, decisions, deliverable details,
+or patterns across your meetings and notes.
+
+Example questions:
+• "What did we decide about the Q1 campaign?"
+• "Summarize our last 3 meetings"
+• "What deliverables are related to SEO?"
+• "What themes keep coming up in our notes?"
+```
+
+**Input placeholder:** `"Ask about your notes, meetings, and deliverables..."`
+
+### 2. Content Ops > Chat
+
+Add a **"Chat"** nav item to the **Content Ops** section in the sidebar (between Ingestion and Config, or at the bottom). Use the MessageSquare icon.
+
+```
+CONTENT OPS
+  Dashboard
+  Ideas
+  Assets
+  Ingestion
+  Chat              ← here
+  Config
+```
+
+**Route:** `/compass/:contractId/content/chat`
+
+**`source_types` sent with every request:** `["content"]`
+
+**Page header:**
+- Title: "Chat"
+- Subtitle: "Ask questions about your content library"
+
+**Empty state:**
+```
+Ask anything about your content library
+
+Your published content has been analyzed and embedded.
+Ask questions about themes, topics, specific posts, or
+patterns across your blog posts, podcasts, and videos.
+
+Example questions:
+• "What topics do we write about most?"
+• "Summarize our recent blog posts about AI"
+• "Do we have any content about email marketing?"
+• "What are our most popular podcast topics?"
+```
+
+**Input placeholder:** `"Ask about your content library..."`
+
+---
+
+## Shared Chat Component
+
+Both chat locations should use the **same underlying chat component** — just configured with different props:
+
+```typescript
+interface ChatPageProps {
+  sourceTypes: string[];        // e.g., ["content"] or ["note", "meeting", "deliverable"]
+  title: string;                // Page header title
+  subtitle: string;             // Page header subtitle
+  placeholder: string;          // Input placeholder text
+  emptyStateHeading: string;    // Empty state title
+  emptyStateDescription: string;// Empty state body text
+  exampleQuestions: string[];   // Clickable example chips
+}
+```
+
+The chat component handles all the streaming, message display, sources, history, etc. The two pages are just thin wrappers that pass the right config:
+
+```typescript
+// Management Chat page
+<ChatPage
+  sourceTypes={["note", "meeting", "deliverable"]}
+  title="Chat"
+  subtitle="Ask questions about your notes, meetings, and deliverables"
+  placeholder="Ask about your notes, meetings, and deliverables..."
+  emptyStateHeading="Ask anything about your notes, meetings, and deliverables"
+  emptyStateDescription="Your management documents have been analyzed and embedded. Ask questions about discussions, decisions, deliverable details, or patterns across your meetings and notes."
+  exampleQuestions={[
+    "What did we decide about the Q1 campaign?",
+    "Summarize our last 3 meetings",
+    "What deliverables are related to SEO?",
+    "What themes keep coming up in our notes?",
+  ]}
+/>
+
+// Content Ops Chat page
+<ChatPage
+  sourceTypes={["content"]}
+  title="Chat"
+  subtitle="Ask questions about your content library"
+  placeholder="Ask about your content library..."
+  emptyStateHeading="Ask anything about your content library"
+  emptyStateDescription="Your published content has been analyzed and embedded. Ask questions about themes, topics, specific posts, or patterns across your blog posts, podcasts, and videos."
+  exampleQuestions={[
+    "What topics do we write about most?",
+    "Summarize our recent blog posts about AI",
+    "Do we have any content about email marketing?",
+    "What are our most popular podcast topics?",
+  ]}
+/>
+```
+
+### Passing source_types to the API
+
+The `source_types` prop is always sent with the request — it is NOT optional for these pages. Do not show a source type filter UI. The scoping is automatic based on which chat the user is in.
+
+```typescript
+const response = await fetch(`${API_BASE}/api/compass/chat`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${session.access_token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    message: userMessage,
+    contract_id: selectedContractId,
+    conversation_history: conversationHistory,
+    source_types: sourceTypes,  // Always included — set by the page, not the user
+  }),
+});
+```
 
 ---
 
@@ -89,19 +241,20 @@ Build the chat as a **full page** within the Compass layout (same area where Not
 ├──────────┬──────────────────────────────────────────┤
 │          │                                          │
 │ Sidebar  │  ┌────────────────────────────────────┐  │
-│          │  │         Chat Messages Area          │  │
-│ Notes    │  │                                     │  │
-│ Meetings │  │  (scrollable, grows upward)         │  │
-│ Content  │  │                                     │  │
-│ Chat ●   │  │  User: What topics do we cover?     │  │
-│ ...      │  │                                     │  │
-│          │  │  Assistant: Based on your content    │  │
-│          │  │  library, you write most about...    │  │
+│          │  │  Chat                               │  │
+│ MGMT     │  │  Ask questions about your...        │  │
+│  Notes   │  │                                     │  │
+│  ...     │  │  (messages area)                    │  │
+│  Chat    │  │                                     │  │
+│          │  │  User: What topics do we cover?     │  │
+│ CONTENT  │  │                                     │  │
+│  ...     │  │  Assistant: Based on your content   │  │
+│  Chat    │  │  library, you write most about...   │  │
 │          │  │                                     │  │
-│          │  │  Sources: [Blog Post A] [Meeting B] │  │
+│          │  │  Sources: [Blog Post A] [Video B]   │  │
 │          │  │                                     │  │
 │          │  ├────────────────────────────────────┤  │
-│          │  │ [Type your question...]     [Send]  │  │
+│          │  │ [Ask about your...]         [Send]  │  │
 │          │  └────────────────────────────────────┘  │
 │          │                                          │
 └──────────┴──────────────────────────────────────────┘
@@ -109,69 +262,7 @@ Build the chat as a **full page** within the Compass layout (same area where Not
 
 ### Empty State
 
-When the user first visits Chat (no messages yet), show a centered welcome state:
-
-```
-💬  Ask anything about your content library
-
-Your content has been analyzed and embedded. Ask questions
-about themes, topics, specific posts, or patterns across
-your content.
-
-Example questions:
-• "What topics do we write about most?"
-• "Summarize our recent blog posts about AI"
-• "What themes came up in our last few meetings?"
-• "Do we have any content about email marketing?"
-```
-
-Show the example questions as clickable chips/buttons that populate the message input when clicked.
-
----
-
-## Source Type Filter
-
-Above the message input (or in a toolbar area), add a **source type filter** so users can scope what kinds of knowledge the chat searches.
-
-### Filter UI
-
-Show a row of toggle chips/pills. Each chip represents a source type. The user can toggle them on/off:
-
-```
-Search in:  [Content ✓]  [Meetings]  [Notes]  [Deliverables]  [Processes]  [Competitive Intel]
-```
-
-**Behavior:**
-- **Default:** All chips are OFF (no filter) — searches everything. Show this as "All sources" or just leave all chips unselected.
-- When one or more chips are selected, only those source types are searched. Send the selected types as `source_types` in the request body.
-- If no chips are selected, omit `source_types` from the request (searches everything).
-- The filter state persists within the session (doesn't reset between messages). It resets when the user clicks "New Chat".
-
-**Chip labels and values:**
-
-| Label | `source_types` value |
-|-------|---------------------|
-| Content | `content` |
-| Meetings | `meeting` |
-| Notes | `note` |
-| Deliverables | `deliverable` |
-| Processes | `process` |
-| Competitive Intel | `competitive_intel` |
-
-### Passing to API
-
-```typescript
-const body: Record<string, unknown> = {
-  message: userMessage,
-  contract_id: selectedContractId,
-  conversation_history: conversationHistory,
-};
-
-// Only include source_types if user has selected specific filters
-if (selectedSourceTypes.length > 0) {
-  body.source_types = selectedSourceTypes;
-}
-```
+When the user first visits Chat (no messages yet), show a centered welcome state with the heading, description, and example questions from the page props. Show the example questions as clickable chips/buttons that populate the message input when clicked.
 
 ---
 
@@ -250,7 +341,7 @@ const response = await fetch(`${API_BASE}/api/compass/chat`, {
     message: userMessage,
     contract_id: selectedContractId,
     conversation_history: conversationHistory,
-    ...(selectedSourceTypes.length > 0 && { source_types: selectedSourceTypes }),
+    source_types: sourceTypes,  // From page props — always included
   }),
 });
 
@@ -311,6 +402,8 @@ while (true) {
 
 Maintain conversation history in React state. Do **not** persist it to a database — it resets when the user navigates away or refreshes.
 
+Each chat location maintains its own independent history. Navigating from Management Chat to Content Chat does not carry over messages.
+
 ```typescript
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -347,7 +440,7 @@ Add a **"New Chat"** button (top of chat area or near the header) that clears th
 ### Message Input
 
 - Multi-line text input (textarea) that grows with content (up to ~4 lines, then scroll)
-- Placeholder text: `"Ask a question about your content library..."`
+- Placeholder text: set by page props (e.g., `"Ask about your content library..."` or `"Ask about your notes, meetings, and deliverables..."`)
 - **Send button** — icon button (paper plane or arrow) to the right of the input
 - **Enter to send** — pressing Enter sends the message. Shift+Enter inserts a newline.
 - Disable the send button and input while a response is streaming
@@ -402,6 +495,7 @@ No role-based UI differences needed — the chat is the same experience for all 
 - Sources should be informative but not overwhelming — collapsed by default with an expand toggle if there are more than 3 sources, or shown inline if 3 or fewer
 - On mobile/narrow screens, the chat should take the full width (no sidebar visible — rely on the existing responsive nav pattern)
 - Light/dark mode: follow the existing app theme
+- Both chat pages should look identical — only the header text, placeholder, empty state, and scoping differ
 
 ---
 

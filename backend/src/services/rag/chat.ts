@@ -150,20 +150,37 @@ async function fetchStructuredData(
         case 'content_by_category': {
           if (isManagementScope && !isContentScope) break;
           const assets = await select<Record<string, unknown>[]>('content_assets', {
-            select: 'category_id, title, status, published_date',
+            select: 'category_id, title, status, published_date, custom_attributes, metadata',
             filters: { contract_id: contractId },
             limit: 500,
           });
           if (assets && assets.length > 0) {
-            // Also fetch category names
-            const categories = await select<Record<string, unknown>[]>('content_categories', {
-              select: 'category_id, name',
-              filters: { contract_id: contractId },
-            });
-            const catMap = new Map((categories || []).map(c => [c.category_id, c.name]));
+            // Fetch category names — contract-specific + global (null contract_id)
+            const [contractCats, globalCats] = await Promise.all([
+              select<Record<string, unknown>[]>('content_categories', {
+                select: 'category_id, name',
+                filters: { contract_id: contractId },
+              }),
+              select<Record<string, unknown>[]>('content_categories', {
+                select: 'category_id, name',
+                filters: { contract_id: { is: null } },
+              }),
+            ]);
+            const catMap = new Map([
+              ...(globalCats || []).map(c => [c.category_id, c.name] as [unknown, unknown]),
+              ...(contractCats || []).map(c => [c.category_id, c.name] as [unknown, unknown]),
+            ]);
             const grouped: Record<string, number> = {};
             for (const a of assets) {
-              const catName = (a.category_id ? catMap.get(a.category_id) : 'Uncategorized') as string || 'Uncategorized';
+              // Try category_id first, then AI-assigned category from metadata
+              let catName = 'Uncategorized';
+              if (a.category_id && catMap.has(a.category_id)) {
+                catName = catMap.get(a.category_id) as string;
+              } else if (a.metadata && typeof a.metadata === 'object') {
+                const meta = a.metadata as Record<string, unknown>;
+                if (meta.ai_category_slug) catName = meta.ai_category_slug as string;
+                else if (meta.ai_category) catName = meta.ai_category as string;
+              }
               grouped[catName] = (grouped[catName] || 0) + 1;
             }
             const sorted = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
@@ -178,18 +195,26 @@ async function fetchStructuredData(
         case 'content_by_type': {
           if (isManagementScope && !isContentScope) break;
           const assets = await select<Record<string, unknown>[]>('content_assets', {
-            select: 'content_type_id, title, status',
+            select: 'content_type_id, title, status, metadata',
             filters: { contract_id: contractId },
             limit: 500,
           });
           if (assets && assets.length > 0) {
             const types = await select<Record<string, unknown>[]>('content_types', {
               select: 'type_id, name',
+              limit: 100,
             });
             const typeMap = new Map((types || []).map(t => [t.type_id, t.name]));
             const grouped: Record<string, number> = {};
             for (const a of assets) {
-              const typeName = (a.content_type_id ? typeMap.get(a.content_type_id) : 'Untyped') as string || 'Untyped';
+              let typeName = 'Untyped';
+              if (a.content_type_id && typeMap.has(a.content_type_id)) {
+                typeName = typeMap.get(a.content_type_id) as string;
+              } else if (a.metadata && typeof a.metadata === 'object') {
+                const meta = a.metadata as Record<string, unknown>;
+                if (meta.ai_content_type_slug) typeName = meta.ai_content_type_slug as string;
+                else if (meta.ai_content_type) typeName = meta.ai_content_type as string;
+              }
               grouped[typeName] = (grouped[typeName] || 0) + 1;
             }
             const sorted = Object.entries(grouped).sort((a, b) => b[1] - a[1]);

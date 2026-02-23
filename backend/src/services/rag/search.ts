@@ -6,7 +6,7 @@
 
 import type { SourceType, SimilarityResult } from '../../types/rag.js';
 import { getEmbedding } from './embeddings.js';
-import { rpc } from '../../utils/edge-functions.js';
+import { rpc, select } from '../../utils/edge-functions.js';
 
 export interface SearchParams {
   query: string;
@@ -37,6 +37,19 @@ export async function searchKnowledge(
 
   // 1. Embed the query
   const { embedding } = await getEmbedding(query);
+
+  // DEBUG: Check if compass_knowledge has ANY rows for this contract
+  try {
+    const rows = await select<{ source_type: string; title: string }[]>('compass_knowledge', {
+      select: 'source_type, title',
+      filters: { contract_id },
+      limit: 5,
+    });
+    console.log('[searchKnowledge] compass_knowledge has', rows?.length ?? 0, 'rows (showing up to 5) for contract', contract_id,
+      rows?.map(r => `${r.source_type}: "${r.title}"`));
+  } catch (dbErr) {
+    console.error('[searchKnowledge] Direct DB check failed:', dbErr);
+  }
 
   // 2. Call RPC
   const results = await rpc<SimilarityResult[]>('match_knowledge', {

@@ -522,7 +522,7 @@ export async function streamChatResponse(
         query: message,
         contract_id,
         match_count: 50,
-        match_threshold: 0.5,
+        match_threshold: 0.3,
         source_types,
       });
     } catch (err) {
@@ -543,7 +543,7 @@ export async function streamChatResponse(
         query: message,
         contract_id,
         match_count: 50,
-        match_threshold: 0.5,
+        match_threshold: 0.3,
         source_types,
       });
     } catch {

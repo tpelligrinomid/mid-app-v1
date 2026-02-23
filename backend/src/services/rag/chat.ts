@@ -98,7 +98,7 @@ export async function streamChatResponse(
     results = await searchKnowledge({
       query: message,
       contract_id,
-      match_count: 20,
+      match_count: 50,
       match_threshold: 0.5,
       source_types,
     });

@@ -228,12 +228,17 @@ function parseGeneratedOutput(output: string): {
 // Note Date Helpers
 // ============================================================================
 
-function getUpcomingMonday(): string {
+/**
+ * Get the Monday of the week that this note covers.
+ * If today is Mon-Sat, return this week's Monday.
+ * If today is Sunday (generating the night before), return tomorrow (Monday).
+ */
+function getMondayOfWeek(): string {
   const now = new Date();
   const day = now.getUTCDay(); // 0=Sun, 1=Mon, ...
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
+  const offset = day === 0 ? 1 : -(day - 1); // Sun → +1 (tomorrow), Mon → 0, Tue → -1, etc.
   const monday = new Date(now);
-  monday.setUTCDate(monday.getUTCDate() + daysUntilMonday);
+  monday.setUTCDate(monday.getUTCDate() + offset);
   return monday.toISOString().split('T')[0];
 }
 
@@ -267,9 +272,10 @@ export async function generateStrategyNote(config: NoteConfig): Promise<Generate
   if (config.additional_instructions) {
     systemPrompt += `\n\n## Per-Contract Instructions\n${config.additional_instructions}`;
   }
-  // Compute the note date first so we can pass it to Claude
-  const noteDate = getUpcomingMonday();
-  const userPrompt = buildUserPrompt(data, noteDate, config.additional_instructions);
+  // Compute dates: note_date is today, "Week of" is this week's Monday
+  const noteDate = new Date().toISOString().split('T')[0];
+  const weekOfDate = getMondayOfWeek();
+  const userPrompt = buildUserPrompt(data, weekOfDate, config.additional_instructions);
 
   // 3. Call Claude
   const output = await sendMessage(systemPrompt, userPrompt, {

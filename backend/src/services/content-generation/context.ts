@@ -47,6 +47,12 @@ interface AssetRow {
   status: string;
 }
 
+interface PublishedAssetRow {
+  asset_id: string;
+  title: string;
+  external_url: string;
+}
+
 // ============================================================================
 // Brand Voice Formatting
 // ============================================================================
@@ -125,6 +131,85 @@ function formatReferenceBlock(
   }
 
   return sections.join('\n');
+}
+
+// ============================================================================
+// Internal Linking — RAG-filtered published URLs
+// ============================================================================
+
+/**
+ * Find the most relevant published content with URLs for internal linking.
+ * Uses RAG to semantically match, then looks up the actual URLs from content_assets.
+ */
+async function fetchRelevantPublishedUrls(
+  query: string,
+  contractId: string,
+  excludeAssetId: string
+): Promise<string> {
+  try {
+    // RAG search for relevant content
+    const ragResults = await searchKnowledge({
+      query,
+      contract_id: contractId,
+      match_count: 30,
+      match_threshold: 0.35,
+      source_types: ['content'],
+    });
+
+    if (ragResults.length === 0) return 'No published content with URLs available for internal linking.';
+
+    // Get unique source_ids (excluding the asset being generated)
+    const uniqueSourceIds = [...new Set(
+      ragResults
+        .map(r => r.source_id)
+        .filter(id => id !== excludeAssetId)
+    )];
+
+    if (uniqueSourceIds.length === 0) return 'No published content with URLs available for internal linking.';
+
+    // Fetch the actual URLs from content_assets
+    // Query in batches since we can't use an IN filter through the edge function proxy
+    const publishedAssets: PublishedAssetRow[] = [];
+    for (const sourceId of uniqueSourceIds.slice(0, 30)) {
+      try {
+        const rows = await select<PublishedAssetRow[]>('content_assets', {
+          select: 'asset_id, title, external_url',
+          filters: { asset_id: sourceId, status: 'published' },
+          limit: 1,
+        });
+        if (rows?.[0]?.external_url) {
+          publishedAssets.push(rows[0]);
+        }
+      } catch {
+        // Skip individual failures
+      }
+    }
+
+    if (publishedAssets.length === 0) return 'No published content with URLs available for internal linking.';
+
+    // Build the similarity map for sorting
+    const similarityMap = new Map<string, number>();
+    for (const r of ragResults) {
+      const existing = similarityMap.get(r.source_id);
+      if (!existing || r.similarity > existing) {
+        similarityMap.set(r.source_id, r.similarity);
+      }
+    }
+
+    // Sort by relevance and format
+    const sorted = publishedAssets
+      .map(a => ({ ...a, similarity: similarityMap.get(a.asset_id) || 0 }))
+      .sort((a, b) => b.similarity - a.similarity);
+
+    const lines = sorted.map(a =>
+      `- "${a.title}" → ${a.external_url}`
+    );
+
+    return `Available pages for internal linking (${sorted.length} most relevant):\n${lines.join('\n')}`;
+  } catch (err) {
+    console.error('[ContentGen] Failed to fetch published URLs for internal linking:', err);
+    return 'Internal linking data unavailable.';
+  }
 }
 
 // ============================================================================
@@ -241,6 +326,14 @@ export async function gatherGenerationContext(params: {
   }
 
   const referenceBlock = formatReferenceBlock(ragResults, manualAssets, additional_instructions);
+
+  // Fetch relevant published URLs for internal linking (non-blocking — if it fails, we just skip it)
+  const publishedUrls = await fetchRelevantPublishedUrls(
+    asset.title + (asset.description ? ` ${asset.description}` : ''),
+    contract_id,
+    asset_id
+  );
+  variables.published_urls = publishedUrls;
 
   return { variables, referenceBlock, sources };
 }

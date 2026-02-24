@@ -36,21 +36,30 @@ function normalizeOutput(raw: Record<string, unknown>): {
   content_raw: string | null;
   content_structured: Record<string, unknown> | null;
 } {
+  let contentRaw: string | null = null;
+  let contentStructured: Record<string, unknown> | null = null;
+
   // If MM already mapped to our field names (webhook callback)
   if (typeof raw.content_raw === 'string' || raw.content_structured) {
-    return {
-      content_raw: (raw.content_raw as string) || null,
-      content_structured: (raw.content_structured as Record<string, unknown>) || null,
-    };
+    contentRaw = (raw.content_raw as string) || null;
+    contentStructured = (raw.content_structured as Record<string, unknown>) || null;
+  } else {
+    // Raw Trigger.dev output: full_document_markdown + structured object
+    contentRaw = (raw.full_document_markdown as string) || null;
+    const { full_document_markdown: _, ...structured } = raw;
+    contentStructured = Object.keys(structured).length > 0 ? structured : null;
   }
 
-  // Raw Trigger.dev output: full_document_markdown + structured object
-  const contentRaw = (raw.full_document_markdown as string) || null;
-  const { full_document_markdown: _, ...structured } = raw;
-  return {
-    content_raw: contentRaw,
-    content_structured: Object.keys(structured).length > 0 ? structured : null,
-  };
+  // If content_structured itself contains a nested content_structured key
+  // (MM convert endpoints return this shape), unwrap it and merge top-level
+  // fields (summary, title, metadata) alongside the inner structured data.
+  if (contentStructured && typeof contentStructured.content_structured === 'object' && contentStructured.content_structured !== null) {
+    const inner = contentStructured.content_structured as Record<string, unknown>;
+    const { content_structured: _, ...outerFields } = contentStructured;
+    contentStructured = { ...inner, ...outerFields };
+  }
+
+  return { content_raw: contentRaw, content_structured: contentStructured };
 }
 
 // ============================================================================

@@ -111,7 +111,7 @@ function formatReferenceBlock(
     for (const asset of manualAssets) {
       sections.push(`[${idx}] "${asset.title}" (selected reference)`);
       sections.push('---');
-      sections.push(asset.content_body?.substring(0, 3000) || '(no content)');
+      sections.push(asset.content_body?.substring(0, 10000) || '(no content)');
       sections.push('');
       idx++;
     }

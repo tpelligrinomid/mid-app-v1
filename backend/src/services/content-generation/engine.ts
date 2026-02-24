@@ -318,6 +318,43 @@ export async function executeGeneration(
 
     console.log(`[ContentGen] Generation complete: asset=${asset_id} tokens=${totalInputTokens}+${totalOutputTokens}`);
 
+    // Fire-and-forget: auto-categorize and tag the generated content
+    // Same pattern as the ingest pipeline — reuses existing categorization logic
+    (async () => {
+      try {
+        const { categorizeWithAttributes } = await import('../claude/categorize-with-attributes.js');
+        const { applyCategorizationViaEdgeFn } = await import('../content-ingestion/processor.js');
+
+        const catResult = await categorizeWithAttributes(
+          contentBody,
+          context.variables.topic,
+          contract_id,
+          sequence.content_type_slug
+        );
+
+        if (catResult) {
+          await applyCategorizationViaEdgeFn(
+            asset_id,
+            contract_id,
+            {
+              generation: {
+                sequence_id: sequence.sequence_id,
+                sequence_name: sequence.name,
+                steps_completed: steps.length,
+                total_tokens: { input: totalInputTokens, output: totalOutputTokens },
+                generated_at: new Date().toISOString(),
+              },
+            },
+            catResult,
+            { skipContentType: true } // content type already set on the asset
+          );
+          console.log(`[ContentGen] Auto-categorization applied to asset ${asset_id}`);
+        }
+      } catch (catErr) {
+        console.error(`[ContentGen] Auto-categorization failed for asset ${asset_id} (non-blocking):`, catErr);
+      }
+    })();
+
     onChunk({
       type: 'done',
       total_tokens: { input: totalInputTokens, output: totalOutputTokens },

@@ -174,15 +174,16 @@ export async function gatherStrategyNoteData(
       return [] as MeetingInfo[];
     }),
 
-    // 7. Recent notes for context
+    // 7. Recent notes for context (exclude auto-generated strategy notes)
     select<RecentNote[]>('compass_notes', {
       select: 'note_id, title, note_type, note_date, content_raw',
       filters: {
         contract_id: contractId,
         note_date: { gte: lookbackDate.toISOString().split('T')[0] },
+        note_type: { neq: 'strategy' },
       },
       order: [{ column: 'note_date', ascending: false }],
-      limit: 5,
+      limit: 10,
     }).catch((err) => {
       console.error(`[StrategyNotes] Notes query failed:`, err);
       return [] as RecentNote[];
@@ -192,7 +193,7 @@ export async function gatherStrategyNoteData(
   // Truncate note content to avoid sending too much to Claude
   const truncatedNotes = (recentNotes || []).map((n) => ({
     ...n,
-    content_raw: n.content_raw ? n.content_raw.substring(0, 500) : null,
+    content_raw: n.content_raw ? n.content_raw.substring(0, 1500) : null,
   }));
 
   console.log(`[StrategyNotes] Data gathered for ${contract.contract_name}: points=${points ? 'yes' : 'no'}, working=${workingTasks?.length || 0}, completed=${completedTasks?.length || 0}, blocked=${blockedTasks?.length || 0}, meetings=${meetings?.length || 0}`);

@@ -5,6 +5,7 @@ import { QuickBooksCronSyncService } from '../services/quickbooks/cron-sync.js';
 import { ManagementReportService } from '../services/reports/management-report.js';
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
 import { backfillEmbeddings } from '../services/rag/backfill.js';
+import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -529,6 +530,65 @@ router.post('/sync-process-library', verifyCronSecret, async (req: Request, res:
     const message = error instanceof Error ? error.message : 'Unknown error';
 
     console.error(`[Cron] Process Library sync failed after ${duration}ms:`, error);
+
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/generate-strategy-notes
+// Triggered by Render Cron Job to generate automated strategy notes
+//
+// Render Cron Job Configuration:
+// - Name: generate-strategy-notes
+// - Schedule: 30 * * * * (every hour at :30)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/generate-strategy-notes?secret=$CRON_SECRET"
+router.post('/generate-strategy-notes', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting strategy note generation...');
+
+  try {
+    if (!process.env.BACKEND_API_KEY) {
+      console.error('[Cron] BACKEND_API_KEY not configured');
+      res.status(503).json({
+        error: 'Database proxy not configured',
+        details: 'BACKEND_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.error('[Cron] ANTHROPIC_API_KEY not configured');
+      res.status(503).json({
+        error: 'Claude API not configured',
+        details: 'ANTHROPIC_API_KEY environment variable is not set'
+      });
+      return;
+    }
+
+    const result = await processScheduledNotes();
+
+    const duration = Date.now() - startTime;
+    console.log(`[Cron] Strategy note generation completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      duration: `${duration}ms`,
+      stats: {
+        generated: result.generated,
+        failed: result.failed,
+        skipped: result.skipped,
+      },
+      errors: result.errors.length > 0 ? result.errors : undefined
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Cron] Strategy note generation failed after ${duration}ms:`, error);
 
     res.status(500).json({
       success: false,

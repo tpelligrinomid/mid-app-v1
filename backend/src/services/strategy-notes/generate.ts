@@ -35,9 +35,11 @@ Format the response in two parts:
 1. A markdown strategy note following the standard format below
 2. A JSON block (wrapped in \`\`\`json ... \`\`\`) with structured data
 
+Use the exact "week of" date provided in the user prompt. Do not calculate or guess the date.
+
 Standard format:
 ## Weekly Strategy Note — {Contract Name}
-Week of {date}
+Week of {exact date from prompt}
 
 ### Points Summary
 - Monthly allotment: X
@@ -68,10 +70,10 @@ JSON format:
 }
 \`\`\``;
 
-function buildUserPrompt(data: StrategyNoteData, additionalInstructions?: string | null): string {
+function buildUserPrompt(data: StrategyNoteData, weekOfDate: string, additionalInstructions?: string | null): string {
   const lines: string[] = [];
 
-  lines.push(`Generate a strategy note for **${data.contract.contract_name}** using this data:`);
+  lines.push(`Generate a strategy note for **${data.contract.contract_name}** for the **week of ${weekOfDate}** using this data:`);
   lines.push('');
 
   // Points
@@ -265,7 +267,9 @@ export async function generateStrategyNote(config: NoteConfig): Promise<Generate
   if (config.additional_instructions) {
     systemPrompt += `\n\n## Per-Contract Instructions\n${config.additional_instructions}`;
   }
-  const userPrompt = buildUserPrompt(data, config.additional_instructions);
+  // Compute the note date first so we can pass it to Claude
+  const noteDate = getUpcomingMonday();
+  const userPrompt = buildUserPrompt(data, noteDate, config.additional_instructions);
 
   // 3. Call Claude
   const output = await sendMessage(systemPrompt, userPrompt, {
@@ -276,8 +280,7 @@ export async function generateStrategyNote(config: NoteConfig): Promise<Generate
   // 4. Parse output
   const { content_raw, content_structured } = parseGeneratedOutput(output);
 
-  // 5. Compute note metadata
-  const noteDate = getUpcomingMonday();
+  // 5. Compute note metadata (noteDate already computed above for Claude prompt)
   const { week, year } = getWeekNumber(noteDate);
   const title = `Weekly Strategy Note — ${data.contract.contract_name}`;
 

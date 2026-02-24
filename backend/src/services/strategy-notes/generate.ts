@@ -78,11 +78,11 @@ function buildUserPrompt(data: StrategyNoteData, additionalInstructions?: string
   lines.push('## Points');
   if (data.points) {
     lines.push(`Monthly allotment: ${data.contract.monthly_points_allotment ?? 'N/A'}`);
-    lines.push(`Points purchased: ${data.points.total_purchased}`);
-    lines.push(`Points delivered (all time): ${data.points.total_delivered}`);
-    lines.push(`Points working: ${data.points.total_working}`);
-    lines.push(`Points balance: ${data.points.balance}`);
-    lines.push(`Points burden: ${data.points.burden}`);
+    lines.push(`Points purchased: ${data.points.points_purchased}`);
+    lines.push(`Points delivered (all time): ${data.points.points_delivered}`);
+    lines.push(`Points working: ${data.points.points_working}`);
+    lines.push(`Points balance: ${data.points.points_balance}`);
+    lines.push(`Points burden: ${data.points.points_burden}`);
   } else {
     lines.push('No points data available.');
   }
@@ -126,15 +126,15 @@ function buildUserPrompt(data: StrategyNoteData, additionalInstructions?: string
   }
 
   // Tasks in progress
-  lines.push('## Tasks In Progress');
+  lines.push('## Tasks In Progress (Deliverables)');
   if (data.tasks_in_progress.length > 0) {
     for (const t of data.tasks_in_progress) {
       const pts = t.points ? `${t.points} pts` : 'no pts';
-      const list = t.clickup_list_name ? ` (${t.clickup_list_name})` : '';
-      lines.push(`- ${t.name} — ${pts}${list}`);
+      const due = t.due_date ? ` — due ${t.due_date}` : '';
+      lines.push(`- ${t.name} — ${pts}${due}`);
     }
   } else {
-    lines.push('No tasks currently in progress.');
+    lines.push('No deliverable tasks currently in progress.');
   }
   lines.push('');
 
@@ -148,6 +148,19 @@ function buildUserPrompt(data: StrategyNoteData, additionalInstructions?: string
     }
   } else {
     lines.push('No tasks completed in this period.');
+  }
+  lines.push('');
+
+  // Tasks blocked / waiting on client
+  lines.push('## Tasks Waiting on Client');
+  if (data.tasks_blocked.length > 0) {
+    for (const t of data.tasks_blocked) {
+      const pts = t.points ? `${t.points} pts` : 'no pts';
+      const due = t.due_date ? ` — due ${t.due_date}` : '';
+      lines.push(`- ${t.name} — ${pts}${due}`);
+    }
+  } else {
+    lines.push('No tasks currently waiting on client.');
   }
   lines.push('');
 

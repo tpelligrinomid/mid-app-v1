@@ -21,6 +21,7 @@ import processLibraryRouter from './routes/compass/process-library.js';
 import contentRouter from './routes/compass/content.js';
 import chatRouter from './routes/compass/chat.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
+import brandVoiceRouter from './routes/compass/brand-voice.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -112,6 +113,9 @@ app.use('/api/compass/chat', authMiddleware, chatRouter);
 
 // Compass note configs (require authentication)
 app.use('/api/compass/note-configs', authMiddleware, noteConfigsRouter);
+
+// Compass brand voice (require authentication)
+app.use('/api/compass/brand-voice', authMiddleware, brandVoiceRouter);
 
 // Pulse reports (require authentication)
 app.use('/api/pulse/reports', authMiddleware, reportsRouter);

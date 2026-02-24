@@ -33,6 +33,8 @@ import {
   validateAttributeDefinitionInput,
   validatePromptSequenceInput,
 } from '../../types/content.js';
+import { executeGeneration } from '../../services/content-generation/engine.js';
+import type { GenerationSSEChunk } from '../../services/content-generation/engine.js';
 
 const router = Router();
 
@@ -1572,6 +1574,95 @@ router.delete(
     }
 
     res.status(204).send();
+  }
+);
+
+// ============================================================================
+// CONTENT GENERATION ENDPOINT
+// ============================================================================
+
+/**
+ * POST /api/compass/content/assets/:id/generate
+ * Run a prompt sequence to generate content for an asset.
+ * Streams results via SSE (Server-Sent Events).
+ */
+router.post(
+  '/assets/:id/generate',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      res.status(503).json({ error: 'Claude API not configured' });
+      return;
+    }
+
+    const assetId = req.params.id;
+    const { sequence_id, reference_asset_ids, auto_retrieve, additional_instructions } = req.body;
+
+    // Verify asset exists and get contract_id
+    const { data: asset, error: assetError } = await req.supabase
+      .from('content_assets')
+      .select('asset_id, contract_id, title')
+      .eq('asset_id', assetId)
+      .maybeSingle();
+
+    if (assetError) {
+      res.status(500).json({ error: assetError.message });
+      return;
+    }
+
+    if (!asset) {
+      res.status(404).json({ error: 'Asset not found' });
+      return;
+    }
+
+    // Set SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const sendEvent = (chunk: GenerationSSEChunk) => {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    };
+
+    let clientDisconnected = false;
+    req.on('close', () => {
+      clientDisconnected = true;
+    });
+
+    try {
+      await executeGeneration(
+        {
+          asset_id: assetId,
+          contract_id: asset.contract_id,
+          sequence_id,
+          reference_asset_ids,
+          auto_retrieve: auto_retrieve !== false,
+          additional_instructions,
+        },
+        (chunk) => {
+          if (!clientDisconnected) {
+            sendEvent(chunk);
+          }
+        }
+      );
+    } catch (err) {
+      console.error('[ContentGen] Unhandled generation error:', err);
+      if (!clientDisconnected) {
+        sendEvent({ type: 'error', message: 'An unexpected error occurred' });
+      }
+    } finally {
+      if (!clientDisconnected) {
+        res.end();
+      }
+    }
   }
 );
 

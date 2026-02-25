@@ -109,6 +109,8 @@ export interface GenerateDeliverableRequest {
   research_inputs?: ResearchInputs;
   /** Explicit prior roadmap ID to evolve from. If omitted, auto-detects the latest completed roadmap for the contract. */
   previous_roadmap_id?: string;
+  /** Roadmap: monthly points budget (overrides contract default) */
+  points_budget?: number;
   /** SEO audit: topic seeds for crawl prioritization */
   seed_topics?: string[];
   /** SEO audit: max pages to crawl per domain */

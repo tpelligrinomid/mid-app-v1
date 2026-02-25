@@ -22,6 +22,7 @@ export interface GenerateOptions {
   primaryMeetingIds?: string[];
   researchInputs?: ResearchInputs;
   previousRoadmapId?: string;
+  pointsBudget?: number;
   seedTopics?: string[];
   maxCrawlPages?: number;
   // ABM fields
@@ -178,6 +179,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     primaryMeetingIds,
     researchInputs,
     previousRoadmapId,
+    pointsBudget: pointsBudgetOverride,
     seedTopics,
     maxCrawlPages,
     targetSegments,
@@ -320,16 +322,18 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         assembleContext(contractId, title, primaryMeetingIds),
       ]);
 
-      // Fetch contract's points budget
-      let pointsBudget = 0;
-      try {
-        const contractResult = await select<Array<{ monthly_points_allotment: number | null }>>(
-          'contracts',
-          { select: 'monthly_points_allotment', filters: { contract_id: contractId }, single: true }
-        );
-        pointsBudget = (contractResult as unknown as { monthly_points_allotment: number | null })?.monthly_points_allotment || 0;
-      } catch (err) {
-        console.warn('[Deliverable Generation] Failed to fetch points budget (non-blocking):', err);
+      // Points budget: use frontend-provided value, fall back to contract DB value
+      let pointsBudget = pointsBudgetOverride ?? 0;
+      if (!pointsBudget) {
+        try {
+          const contractResult = await select<Array<{ monthly_points_allotment: number | null }>>(
+            'contracts',
+            { select: 'monthly_points_allotment', filters: { contract_id: contractId }, single: true }
+          );
+          pointsBudget = (contractResult as unknown as { monthly_points_allotment: number | null })?.monthly_points_allotment || 0;
+        } catch (err) {
+          console.warn('[Deliverable Generation] Failed to fetch points budget (non-blocking):', err);
+        }
       }
 
       // Extract transcripts from primary meetings

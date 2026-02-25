@@ -151,17 +151,50 @@ async function resolvePriorDeliverable(
 /**
  * Resolve the latest completed research deliverable for a contract.
  * Extracts the specific fields MM expects for research context.
+ * Falls back to content_raw (manually pasted markdown) when content_structured is absent.
  */
 async function resolvePriorResearch(
   contractId: string,
   currentDeliverableId: string
 ): Promise<{ full_document_markdown: string; competitive_scores: Record<string, unknown> } | undefined> {
+  // First try structured data
   const data = await resolvePriorDeliverable(contractId, 'research', currentDeliverableId);
-  if (!data) return undefined;
-  return {
-    full_document_markdown: (data.full_document_markdown as string) || '',
-    competitive_scores: (data.competitive_scores as Record<string, unknown>) || {},
-  };
+  if (data) {
+    return {
+      full_document_markdown: (data.full_document_markdown as string) || '',
+      competitive_scores: (data.competitive_scores as Record<string, unknown>) || {},
+    };
+  }
+
+  // Fallback: check for manually added research with content_raw
+  try {
+    const results = await select<Array<{ deliverable_id: string; content_raw: string | null }>>(
+      'compass_deliverables',
+      {
+        select: 'deliverable_id, content_raw',
+        filters: {
+          contract_id: contractId,
+          deliverable_type: 'research',
+          deliverable_id: { neq: currentDeliverableId },
+        },
+        order: [{ column: 'created_at', ascending: false }],
+        limit: 1,
+      }
+    );
+
+    const prev = results?.[0];
+    if (prev?.content_raw) {
+      console.log(`[Deliverable Generation] Using content_raw from manually added research: ${prev.deliverable_id}`);
+      return {
+        full_document_markdown: prev.content_raw,
+        competitive_scores: {},
+      };
+    }
+  } catch (err) {
+    console.warn('[Deliverable Generation] Failed to resolve raw research fallback (non-blocking):', err);
+  }
+
+  return undefined;
 }
 
 /**

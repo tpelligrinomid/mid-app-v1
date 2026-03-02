@@ -466,6 +466,15 @@ router.post(
       return;
     }
 
+    // Reject generation for manually-created types
+    const GENERATABLE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan']);
+    if (!GENERATABLE_TYPES.has(deliverable.deliverable_type)) {
+      res.status(400).json({
+        error: `AI generation is not supported for type "${deliverable.deliverable_type}".`,
+      });
+      return;
+    }
+
     // Check not already generating (prevent duplicate runs)
     const metadata = deliverable.metadata as GenerationState | null;
     const currentStatus = metadata?.generation?.status;

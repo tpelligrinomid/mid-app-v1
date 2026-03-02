@@ -94,15 +94,13 @@ export async function categorizeWithAttributes(
     // Fetch contract's content types
     const types = await select<ContentTypeRow[]>('content_types', {
       select: 'type_id, slug, name, description',
-      filters: { is_active: true },
+      filters: { contract_id: contractId, is_active: true },
     });
-    // Filter to contract-specific + global (null contract_id handled by RLS/service role)
-    // The edge function returns all rows visible to service role, so we accept all
 
     // Fetch contract's categories
     const categories = await select<ContentCategoryRow[]>('content_categories', {
       select: 'category_id, slug, name, description',
-      filters: { is_active: true },
+      filters: { contract_id: contractId, is_active: true },
     });
 
     // Build content types section for prompt

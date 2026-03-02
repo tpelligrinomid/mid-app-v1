@@ -618,7 +618,7 @@ export async function applyCategorizationViaEdgeFn(
         'content_types',
         {
           select: 'type_id',
-          filters: { slug: result.content_type_slug, is_active: true },
+          filters: { contract_id: contractId, slug: result.content_type_slug, is_active: true },
           limit: 1,
         }
       );
@@ -637,7 +637,7 @@ export async function applyCategorizationViaEdgeFn(
         'content_categories',
         {
           select: 'category_id',
-          filters: { slug: result.category_slug, is_active: true },
+          filters: { contract_id: contractId, slug: result.category_slug, is_active: true },
           limit: 1,
         }
       );

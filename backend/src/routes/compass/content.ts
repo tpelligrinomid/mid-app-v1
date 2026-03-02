@@ -1373,19 +1373,28 @@ router.post(
       return;
     }
 
-    // Fire-and-forget: auto-categorize content if body is present and no API key issues
+    // Fire-and-forget: auto-categorize content + fill custom attributes if body is present
     if (asset.content_body && process.env.ANTHROPIC_API_KEY) {
       (async () => {
         try {
-          const { categorizeContent } = await import('../../services/claude/categorize.js');
-          const { applyCategorization } = await import('../../services/claude/apply-categorization.js');
-          const result = await categorizeContent(asset.content_body, asset.title);
-          if (result && req.supabase) {
-            await applyCategorization(req.supabase, asset.asset_id, asset.contract_id, {
-              content_type_id: asset.content_type_id,
-              category_id: asset.category_id,
-              metadata: asset.metadata,
-            }, result);
+          const { categorizeWithAttributes } = await import('../../services/claude/categorize-with-attributes.js');
+          const { applyCategorizationViaEdgeFn } = await import('../../services/content-ingestion/processor.js');
+          const result = await categorizeWithAttributes(
+            asset.content_body,
+            asset.title,
+            asset.contract_id
+          );
+          if (result) {
+            await applyCategorizationViaEdgeFn(
+              asset.asset_id,
+              asset.contract_id,
+              asset.metadata,
+              result,
+              {
+                skipContentType: !!asset.content_type_id,
+                skipCategory: !!asset.category_id,
+              }
+            );
           }
         } catch (err) {
           console.error('[Categorization] Auto-categorize failed (non-blocking):', err);

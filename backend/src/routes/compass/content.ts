@@ -227,7 +227,7 @@ router.get(
     const { data: types, error } = await req.supabase
       .from('content_types')
       .select('*')
-      .or(`contract_id.eq.${contract_id},contract_id.is.null`)
+      .eq('contract_id', contract_id)
       .eq('is_active', true)
       .order('sort_order', { ascending: true });
 
@@ -330,6 +330,7 @@ router.put(
       .from('content_types')
       .update(updateFields)
       .eq('type_id', id)
+      .not('contract_id', 'is', null)
       .select()
       .single();
 
@@ -365,7 +366,8 @@ router.delete(
     const { error } = await req.supabase
       .from('content_types')
       .update({ is_active: false })
-      .eq('type_id', id);
+      .eq('type_id', id)
+      .not('contract_id', 'is', null);
 
     if (error) {
       console.error('Error deactivating content type:', error);
@@ -403,7 +405,7 @@ router.get(
     const { data: categories, error } = await req.supabase
       .from('content_categories')
       .select('*')
-      .or(`contract_id.eq.${contract_id},contract_id.is.null`)
+      .eq('contract_id', contract_id)
       .eq('is_active', true)
       .order('sort_order', { ascending: true });
 
@@ -506,6 +508,7 @@ router.put(
       .from('content_categories')
       .update(updateFields)
       .eq('category_id', id)
+      .not('contract_id', 'is', null)
       .select()
       .single();
 
@@ -541,7 +544,8 @@ router.delete(
     const { error } = await req.supabase
       .from('content_categories')
       .update({ is_active: false })
-      .eq('category_id', id);
+      .eq('category_id', id)
+      .not('contract_id', 'is', null);
 
     if (error) {
       console.error('Error deactivating category:', error);

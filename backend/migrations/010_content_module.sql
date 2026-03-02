@@ -146,10 +146,6 @@ ON CONFLICT (contract_id, slug) DO NOTHING;
 -- ============================================================================
 
 INSERT INTO content_categories (contract_id, name, slug, description, sort_order) VALUES
-    (NULL, 'Thought Leadership', 'thought_leadership', 'Expert opinions and industry insights',     1),
-    (NULL, 'Product Marketing',  'product_marketing',  'Product features, launches, and updates',   2),
-    (NULL, 'Customer Stories',   'customer_stories',   'Case studies and testimonials',              3),
-    (NULL, 'Industry News',      'industry_news',      'Industry trends and news commentary',       4),
-    (NULL, 'How-To',             'how_to',             'Tutorials and instructional content',        5),
-    (NULL, 'Company Culture',    'company_culture',    'Brand culture and team stories',             6)
+    (NULL, 'Innovation & Technology', 'innovation_technology', 'New tools, digital transformation, and tech-driven change', 1),
+    (NULL, 'Executive Leadership',    'executive_leadership',  'Strategic thinking, executive perspectives, and business direction', 2)
 ON CONFLICT (contract_id, slug) DO NOTHING;

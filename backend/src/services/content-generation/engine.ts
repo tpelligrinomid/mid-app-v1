@@ -13,7 +13,7 @@ import type { PromptStep } from '../../types/content.js';
 
 // Claude API config (matches chat.ts)
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-opus-4-20250514';
 const API_VERSION = '2023-06-01';
 
 // ============================================================================
@@ -123,7 +123,7 @@ async function streamClaudeStep(
     },
     body: JSON.stringify({
       model: DEFAULT_MODEL,
-      max_tokens: 8192,
+      max_tokens: 16384,
       temperature: 0.6,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],

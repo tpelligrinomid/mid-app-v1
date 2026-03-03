@@ -146,8 +146,10 @@ async function fetchRelevantPublishedUrls(
   contractId: string,
   excludeAssetId: string
 ): Promise<string> {
+  const publishedAssets: PublishedAssetRow[] = [];
+
   try {
-    // RAG search for relevant content
+    // Try RAG search first for relevance-ranked results
     const ragResults = await searchKnowledge({
       query,
       contract_id: contractId,
@@ -156,60 +158,79 @@ async function fetchRelevantPublishedUrls(
       source_types: ['content'],
     });
 
-    if (ragResults.length === 0) return 'No published content with URLs available for internal linking.';
+    if (ragResults.length > 0) {
+      // Get unique source_ids (excluding the asset being generated)
+      const uniqueSourceIds = [...new Set(
+        ragResults
+          .map(r => r.source_id)
+          .filter(id => id !== excludeAssetId)
+      )];
 
-    // Get unique source_ids (excluding the asset being generated)
-    const uniqueSourceIds = [...new Set(
-      ragResults
-        .map(r => r.source_id)
-        .filter(id => id !== excludeAssetId)
-    )];
-
-    if (uniqueSourceIds.length === 0) return 'No published content with URLs available for internal linking.';
-
-    // Fetch the actual URLs from content_assets
-    // Query in batches since we can't use an IN filter through the edge function proxy
-    const publishedAssets: PublishedAssetRow[] = [];
-    for (const sourceId of uniqueSourceIds.slice(0, 30)) {
-      try {
-        const rows = await select<PublishedAssetRow[]>('content_assets', {
-          select: 'asset_id, title, external_url',
-          filters: { asset_id: sourceId, status: 'published' },
-          limit: 1,
-        });
-        if (rows?.[0]?.external_url) {
-          publishedAssets.push(rows[0]);
+      // Fetch the actual URLs from content_assets
+      for (const sourceId of uniqueSourceIds.slice(0, 30)) {
+        try {
+          const rows = await select<PublishedAssetRow[]>('content_assets', {
+            select: 'asset_id, title, external_url',
+            filters: { asset_id: sourceId, status: 'published' },
+            limit: 1,
+          });
+          if (rows?.[0]?.external_url) {
+            publishedAssets.push(rows[0]);
+          }
+        } catch {
+          // Skip individual failures
         }
-      } catch {
-        // Skip individual failures
+      }
+
+      if (publishedAssets.length > 0) {
+        // Build the similarity map for sorting
+        const similarityMap = new Map<string, number>();
+        for (const r of ragResults) {
+          const existing = similarityMap.get(r.source_id);
+          if (!existing || r.similarity > existing) {
+            similarityMap.set(r.source_id, r.similarity);
+          }
+        }
+
+        const sorted = publishedAssets
+          .map(a => ({ ...a, similarity: similarityMap.get(a.asset_id) || 0 }))
+          .sort((a, b) => b.similarity - a.similarity);
+
+        const lines = sorted.map(a =>
+          `- "${a.title}" → ${a.external_url}`
+        );
+
+        return `Available pages for internal linking (${sorted.length} most relevant):\n${lines.join('\n')}`;
       }
     }
+  } catch (err) {
+    console.warn('[ContentGen] RAG search for internal links failed, falling back to direct query:', err);
+  }
 
-    if (publishedAssets.length === 0) return 'No published content with URLs available for internal linking.';
+  // Fallback: direct query for published assets with URLs (not RAG-ranked, but still useful)
+  try {
+    const rows = await select<PublishedAssetRow[]>('content_assets', {
+      select: 'asset_id, title, external_url',
+      filters: { contract_id: contractId, status: 'published' },
+      order: [{ column: 'published_date', ascending: false }],
+      limit: 30,
+    });
 
-    // Build the similarity map for sorting
-    const similarityMap = new Map<string, number>();
-    for (const r of ragResults) {
-      const existing = similarityMap.get(r.source_id);
-      if (!existing || r.similarity > existing) {
-        similarityMap.set(r.source_id, r.similarity);
-      }
-    }
-
-    // Sort by relevance and format
-    const sorted = publishedAssets
-      .map(a => ({ ...a, similarity: similarityMap.get(a.asset_id) || 0 }))
-      .sort((a, b) => b.similarity - a.similarity);
-
-    const lines = sorted.map(a =>
-      `- "${a.title}" → ${a.external_url}`
+    const withUrls = (rows || []).filter(
+      r => r.external_url && r.asset_id !== excludeAssetId
     );
 
-    return `Available pages for internal linking (${sorted.length} most relevant):\n${lines.join('\n')}`;
+    if (withUrls.length > 0) {
+      const lines = withUrls.map(a =>
+        `- "${a.title}" → ${a.external_url}`
+      );
+      return `Available pages for internal linking (${withUrls.length} recent):\n${lines.join('\n')}`;
+    }
   } catch (err) {
-    console.error('[ContentGen] Failed to fetch published URLs for internal linking:', err);
-    return 'Internal linking data unavailable.';
+    console.error('[ContentGen] Direct query for published URLs also failed:', err);
   }
+
+  return 'No published content with URLs available for internal linking.';
 }
 
 // ============================================================================

@@ -123,7 +123,7 @@ async function streamClaudeStep(
     },
     body: JSON.stringify({
       model: DEFAULT_MODEL,
-      max_tokens: 4096,
+      max_tokens: 8192,
       temperature: 0.6,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],

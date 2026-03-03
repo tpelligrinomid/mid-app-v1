@@ -66,6 +66,8 @@ export interface ReportContractSnapshot {
   account_manager_name: string | null;
   team_manager_name: string | null;
   financials: ContractFinancials;
+  engagement_type: 'strategic' | 'tactical' | null;
+  last_plan_date: string | null;
   meetings_90d: ReportMeetingEntry[];
   point_production_90d: PointProductionWeek[];
 }

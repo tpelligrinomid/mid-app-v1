@@ -19,6 +19,7 @@ interface ContractRow {
   monthly_points_allotment: number | null;
   account_manager: string | null;
   team_manager: string | null;
+  engagement_type: 'strategic' | 'tactical' | null;
 }
 
 // Raw row from contract_points_summary materialized view
@@ -112,7 +113,7 @@ export class ManagementReportService {
       const contractRows = await select<ContractRow[]>(
         'contracts',
         {
-          select: 'contract_id,contract_name,external_id,priority,amount,monthly_points_allotment,account_manager,team_manager',
+          select: 'contract_id,contract_name,external_id,priority,amount,monthly_points_allotment,account_manager,team_manager,engagement_type',
           filters: {
             contract_status: 'active',
             hosting: false,
@@ -182,7 +183,23 @@ export class ManagementReportService {
           bullets: m.sentiment!.bullets || [],
         }));
 
-        // 4b. Fetch delivered tasks in the 90-day window
+        // 4b. Fetch last plan date from compass_deliverables
+        const planType = contract.engagement_type === 'strategic' ? 'roadmap' : 'points_plan';
+        const planRows = await select<{ created_at: string }[]>(
+          'compass_deliverables',
+          {
+            select: 'created_at',
+            filters: {
+              contract_id: contract.contract_id,
+              deliverable_type: planType,
+            },
+            order: [{ column: 'created_at', ascending: false }],
+            limit: 1,
+          }
+        );
+        const lastPlanDate = planRows.length > 0 ? planRows[0].created_at : null;
+
+        // 4c. Fetch delivered tasks in the 90-day window
         const tasks = await select<TaskRow[]>(
           'pulse_tasks',
           {
@@ -195,10 +212,10 @@ export class ManagementReportService {
           }
         );
 
-        // 4c. Bucket tasks into 13 weekly Monday-Sunday buckets
+        // 4d. Bucket tasks into 13 weekly Monday-Sunday buckets
         const weeklyBuckets = buildWeeklyBuckets(periodStart, periodEnd, tasks);
 
-        // 4d. Assemble snapshot
+        // 4e. Assemble snapshot
         const burden = Number(points?.points_burden) || 0;
         const deliveryStatus = burden <= 0 ? 'on-track' : 'off-track';
 
@@ -219,6 +236,8 @@ export class ManagementReportService {
           contract_number: contract.external_id,
           priority: contract.priority,
           delivery_status: deliveryStatus,
+          engagement_type: contract.engagement_type,
+          last_plan_date: lastPlanDate,
           account_manager_name: contract.account_manager ? (usersMap.get(contract.account_manager) ?? null) : null,
           team_manager_name: contract.team_manager ? (usersMap.get(contract.team_manager) ?? null) : null,
           financials,

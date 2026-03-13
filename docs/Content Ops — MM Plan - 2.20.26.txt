@@ -1,0 +1,242 @@
+ Content Ops — Three New Generator Endpoints
+
+ Context
+
+ MiD Platform is building a Content Ops module in Compass. Master Marketer needs three new async generation endpoints to support it, all
+ following the existing job pattern (POST → 202 → callback). Spec: docs/content-ops-mm-spec.md.
+
+ New Endpoints
+ ┌─────┬───────────────────────────────────────┬─────────────────────────────┬──────────┬────────────────────────────────────────────┐
+ │  #  │               Endpoint                │           Task ID           │ Priority │                 Complexity                 │
+ ├─────┼───────────────────────────────────────┼─────────────────────────────┼──────────┼────────────────────────────────────────────┤
+ │ 1   │ POST /api/generate/content-piece      │ generate-content-piece      │ High     │ Simple (1 Claude call)                     │
+ ├─────┼───────────────────────────────────────┼─────────────────────────────┼──────────┼────────────────────────────────────────────┤
+ │ 2   │ POST /api/generate/content-ideas      │ generate-content-ideas      │ High     │ Simple (1 Claude call)                     │
+ ├─────┼───────────────────────────────────────┼─────────────────────────────┼──────────┼────────────────────────────────────────────┤
+ │ 3   │ POST /api/generate/competitive-digest │ generate-competitive-digest │ Medium   │ Moderate (Exa research + Claude synthesis) │
+ └─────┴───────────────────────────────────────┴─────────────────────────────┴──────────┴────────────────────────────────────────────┘
+ Shared Changes
+
+ src/lib/task-callback.ts — Add content_body and asset_id support
+
+ Currently deliverTaskResult extracts content_raw from out.full_document_markdown. Content-piece and competitive-digest use content_body
+ instead. Add fallback:
+ content_raw: out.full_document_markdown || out.content_body || "",
+
+ Also echo asset_id from callback metadata (content ops uses asset_id, existing generators use deliverable_id):
+ if (callback.metadata.asset_id) payload.asset_id = callback.metadata.asset_id;
+
+ src/routes/generate.routes.ts — Add 3 route handlers
+
+ Follow existing pattern: import schema → export handler → register route. Each handler is identical boilerplate (extract webhook fields,
+ validate, trigger task, return 202). Add:
+
+ - contentPieceHandler + router.post("/content-piece", contentPieceHandler)
+ - contentIdeasHandler + router.post("/content-ideas", contentIdeasHandler)
+ - competitiveDigestHandler + router.post("/competitive-digest", competitiveDigestHandler)
+
+ ---
+ Endpoint 1: Content Piece Generation
+
+ Input Schema: src/types/content-piece-input.ts
+ ContentPieceInputSchema = z.object({
+   client: { company_name, domain, industry, brand_voice? }
+   content_type: string (blog_post, newsletter, video_script, social_media, case_study, etc.)
+   template: {
+     system_prompt: string (pre-resolved by MiD)
+     user_prompt: string (pre-resolved by MiD)
+     variables: z.record(z.string()).optional() (pass-through, already resolved)
+   }
+   context: {
+     reference_content: [{ title, content, content_type }].optional()
+     library_context: [{ title, content, source_type, similarity? }].optional()
+     additional_instructions: string.optional()
+   }
+   output_format: {
+     format: "markdown" (default)
+     include_meta_description: boolean.default(true)
+     include_social_snippets: boolean.default(true)
+     word_count_target: number.optional()
+   }
+ })
+
+ Output Type: src/types/content-piece-output.ts
+ interface ContentPieceOutput {
+   content_body: string;  // full markdown
+   content_structured: {
+     title: string;
+     meta_description?: string;
+     social_snippets?: { linkedin?: string; twitter?: string };
+     sections: { heading: string; content: string }[];
+     word_count: number;
+     tags_suggested: string[];
+   };
+   metadata: { model, version, generated_at, content_type };
+ }
+
+ Prompt: src/prompts/content-piece.ts
+
+ MiD already resolves template variables, so the prompt builder just assembles:
+ - System: Use template.system_prompt directly
+ - User: Combine template.user_prompt + reference content + library context + additional instructions + JSON output format instructions
+
+ Trigger Task: trigger/generate-content-piece.ts
+
+ Single Claude call. ~10min max duration. Parse JSON output, extract content_body from the markdown section.
+
+ ---
+ Endpoint 2: Idea Generation
+
+ Input Schema: src/types/content-ideas-input.ts
+ ContentIdeasInputSchema = z.object({
+   client: { company_name, domain, industry, brand_voice? }
+   prompt: string
+   count: z.number().int().min(1).max(20).default(5)
+   content_type: string.optional()
+   category: string.optional()
+   context: {
+     library_content: [{ title, content, source_type }].optional()
+     content_plan: string.optional()
+     existing_ideas: string[].optional()
+   }
+ })
+
+ Output Type: src/types/content-ideas-output.ts
+ interface ContentIdeasOutput {
+   ideas: {
+     title: string;
+     description: string;
+     content_type: string;
+     category: string;
+     tags: string[];
+     priority_suggestion: number; // 1-5
+     reasoning: string;
+   }[];
+   metadata: { model, version, generated_at, ideas_count };
+ }
+
+ Prompt: src/prompts/content-ideas.ts
+
+ - System: Expert content strategist role, JSON output format
+ - User: Strategist prompt + library context (differentiate content vs competitive_intel source types) + content plan + existing ideas to
+ avoid + count + filters
+
+ Trigger Task: trigger/generate-content-ideas.ts
+
+ Single Claude call. ~5min max duration. Parse JSON array of ideas.
+
+ ---
+ Endpoint 3: Competitive Intelligence Digest
+
+ Input Schema: src/types/competitive-digest-input.ts
+ CompetitiveDigestInputSchema = z.object({
+   client: { company_name, domain, industry }
+   competitors: [{
+     name, domain, blog_url?, social_urls?: { linkedin?, youtube? }
+   }].min(1)
+   industry_keywords: string[]
+   research_config: {
+     lookback_days: z.number().default(7)
+     include_blog_posts: boolean.default(true)
+     include_social_activity: boolean.default(true)
+     include_youtube: boolean.default(true)
+     include_industry_news: boolean.default(true)
+   }
+ })
+
+ Output Type: src/types/competitive-digest-output.ts
+ interface CompetitiveDigestOutput {
+   title: string;
+   period: { start: string; end: string };
+   content_body: string;  // full markdown digest
+   content_structured: {
+     competitors: [{
+       name: string;
+       new_content: [{ title, url, type, published_date, summary, engagement? }];
+       notable_changes: string[];
+     }];
+     industry_trends: [{ topic, summary, sources: [{ title, url }] }];
+     content_opportunities: [{
+       opportunity, reasoning, suggested_content_type, suggested_category, urgency
+     }];
+   };
+   metadata: { model, version, generated_at, sources_checked, exa_queries_run, competitors_analyzed, lookback_days };
+ }
+
+ Exa Queries: src/lib/exa.ts — Add searchCompetitiveDigest()
+
+ New function alongside existing searchWebResearch():
+ Queries per competitor:
+   - Blog posts: site-specific or "<company> blog" + date filter
+   - Social/mentions: "<company>" news/activity
+ Queries for industry:
+   - Per keyword: "<keyword>" + date filter
+   - Industry news: "<industry> news trends" + date filter
+
+ Use Exa's startPublishedDate for date filtering (ISO string from lookback_days ago). Return results grouped by competitor and industry.
+
+ Prompt: src/prompts/competitive-digest.ts
+
+ - System: Competitive intelligence analyst role
+ - User: Client context + raw Exa results (grouped by competitor) + industry results → ask Claude to synthesize into structured digest with
+ competitor activity, industry trends, and content opportunities
+
+ Trigger Task: trigger/generate-competitive-digest.ts
+
+ Two phases:
+ 1. Research — Run Exa queries (parallel per competitor + industry)
+ 2. Synthesis — Single Claude call to produce structured digest + markdown
+
+ ~15min max duration.
+
+ ---
+ Files Created (12 new)
+ ┌────────────────────────────────────────┬───────────────────┐
+ │                  File                  │      Purpose      │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/content-piece-input.ts       │ Zod schema + type │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/content-piece-output.ts      │ Output interface  │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/content-ideas-input.ts       │ Zod schema + type │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/content-ideas-output.ts      │ Output interface  │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/competitive-digest-input.ts  │ Zod schema + type │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/types/competitive-digest-output.ts │ Output interface  │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/prompts/content-piece.ts           │ Prompt builder    │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/prompts/content-ideas.ts           │ Prompt builder    │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ src/prompts/competitive-digest.ts      │ Prompt builder    │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ trigger/generate-content-piece.ts      │ Trigger task      │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ trigger/generate-content-ideas.ts      │ Trigger task      │
+ ├────────────────────────────────────────┼───────────────────┤
+ │ trigger/generate-competitive-digest.ts │ Trigger task      │
+ └────────────────────────────────────────┴───────────────────┘
+ Files Modified (3)
+ ┌───────────────────────────────┬───────────────────────────────────────────┐
+ │             File              │                  Change                   │
+ ├───────────────────────────────┼───────────────────────────────────────────┤
+ │ src/lib/task-callback.ts      │ Add content_body fallback + asset_id echo │
+ ├───────────────────────────────┼───────────────────────────────────────────┤
+ │ src/routes/generate.routes.ts │ Add 3 handlers + routes                   │
+ ├───────────────────────────────┼───────────────────────────────────────────┤
+ │ src/lib/exa.ts                │ Add searchCompetitiveDigest() function    │
+ └───────────────────────────────┴───────────────────────────────────────────┘
+ Implementation Order
+
+ 1. Shared changes (task-callback.ts)
+ 2. Content piece (types → prompt → task → route)
+ 3. Content ideas (types → prompt → task → route)
+ 4. Competitive digest (types → exa extension → prompt → task → route)
+
+ Verification
+
+ 1. npx tsc --noEmit — clean compile after each endpoint
+ 2. npm run deploy — deploy all three
+ 3. Test each endpoint returns 202 with correct response shape

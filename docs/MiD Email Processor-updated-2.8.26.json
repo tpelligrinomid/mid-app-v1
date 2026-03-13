@@ -1,0 +1,355 @@
+{
+  "name": "MiD Email Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mid-app-email-processor",
+        "options": {}
+      },
+      "id": "fe984cbc-b264-42a0-ab58-69d68c055459",
+      "name": "Email Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        352,
+        240
+      ],
+      "webhookId": "mid-email-webhook"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.email_type }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "user_invitation",
+              "outputKey": "user_invitation"
+            },
+            {
+              "value2": "welcome",
+              "outputKey": "welcome"
+            },
+            {
+              "value2": "password_reset",
+              "outputKey": "password_reset"
+            },
+            {
+              "value2": "contract_notification",
+              "outputKey": "contract_notification"
+            },
+            {
+              "value2": "weekly_report",
+              "outputKey": "weekly_report"
+            },
+            {
+              "value2": "custom",
+              "outputKey": "custom"
+            },
+            {
+              "value2": "status_report",
+              "outputKey": "status_report"
+            }
+          ]
+        }
+      },
+      "id": "887a5461-ee81-4089-aba6-59928ecf0961",
+      "name": "Route by Email Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        656,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"You're invited to join Marketers in Demand\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>You're Invited</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><h1 style='margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712;'>You're Invited!</h1><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Hi {{ $json.body.data.full_name }},</p><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>You've been invited to join the official Marketers in Demand app. With this app, you'll get access to both Pulse and Compass.</p><p style='margin: 0 0 30px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Click below to accept your invitation and set up your account.</p><table role='presentation' cellspacing='0' cellpadding='0'><tr><td style='border-radius: 6px; background-color: #7C3AED;'><a href='{{ $json.body.data.login_url }}' style='display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none;'>Accept Invitation</a></td></tr></table></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>If you didn't expect this invitation, you can safely ignore this email.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"Hi {{ $json.body.data.full_name }},\\n\\nYou've been invited to join the official Marketers in Demand app. With this app, you'll get access to both Pulse and Compass.\\n\\nClick here to accept your invitation and set up your account: {{ $json.body.data.login_url }}\\n\\nIf you didn't expect this invitation, you can safely ignore this email.\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "3921897e-c890-4969-8177-ad0c21c1d48e",
+      "name": "Invitation Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"Welcome to MiD, {{ $json.body.data.full_name }}!\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Welcome to MiD</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><h1 style='margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712;'>Welcome to MiD!</h1><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Hi {{ $json.body.data.full_name }},</p><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Welcome aboard! Your account has been successfully created and you're all set to get started.</p><p style='margin: 0 0 30px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Click the button below to log in and explore the platform.</p><table role='presentation' cellspacing='0' cellpadding='0'><tr><td style='border-radius: 6px; background-color: #7C3AED;'><a href='{{ $json.body.data.login_url }}' style='display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none;'>Go to Dashboard</a></td></tr></table></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>Need help getting started? Reply to this email and we'll be happy to assist.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"Hi {{ $json.body.data.full_name }},\\n\\nWelcome aboard! Your account has been successfully created and you're all set to get started.\\n\\nClick here to log in: {{ $json.body.data.login_url }}\\n\\nNeed help getting started? Reply to this email and we'll be happy to assist.\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "61f0b747-ba98-486b-b005-e72eb8c167ae",
+      "name": "Welcome Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"Reset your MiD password\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Reset Password</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><h1 style='margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712;'>Reset Your Password</h1><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>We received a request to reset your password. Click the button below to create a new password.</p><table role='presentation' cellspacing='0' cellpadding='0'><tr><td style='border-radius: 6px; background-color: #7C3AED;'><a href='{{ $json.body.data.reset_url }}' style='display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none;'>Reset Password</a></td></tr></table><p style='margin: 30px 0 0 0; font-size: 14px; color: #6b7280;'>This link will expire in 24 hours. If you didn't request a password reset, you can safely ignore this email.</p></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>For security, this request was received from {{ $json.body.source }}.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"Reset Your Password\\n\\nWe received a request to reset your password. Click the link below to create a new password:\\n\\n{{ $json.body.data.reset_url }}\\n\\nThis link will expire in 24 hours. If you didn't request a password reset, you can safely ignore this email.\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "4cc2c0ce-42fe-423f-b69d-cbd513cf744c",
+      "name": "Password Reset Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"Contract Update: {{ $json.body.data.contract_name }}\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Contract Notification</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><h1 style='margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712;'>Contract Update</h1><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>There's an update to contract <strong>{{ $json.body.data.contract_name }}</strong>.</p><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='margin: 20px 0; background-color: #f8fafc; border-radius: 6px; border-left: 4px solid #7C3AED;'><tr><td style='padding: 20px;'><p style='margin: 0 0 8px 0; font-size: 14px; color: #6b7280;'>Status</p><p style='margin: 0; font-size: 18px; font-weight: 600; color: #030712;'>{{ $json.body.data.status }}</p></td></tr></table><table role='presentation' cellspacing='0' cellpadding='0'><tr><td style='border-radius: 6px; background-color: #7C3AED;'><a href='{{ $json.body.data.action_url }}' style='display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none;'>View Contract</a></td></tr></table></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>You're receiving this because you're associated with this contract.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"Contract Update\\n\\nThere's an update to contract {{ $json.body.data.contract_name }}.\\n\\nStatus: {{ $json.body.data.status }}\\n\\nView contract: {{ $json.body.data.action_url }}\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "0a018249-85e7-47f1-8fb9-3756aa39d4ad",
+      "name": "Contract Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"Your Weekly MiD Report\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Weekly Report</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><h1 style='margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712;'>Weekly Report</h1><p style='margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>Here's your summary for the week.</p><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='margin: 20px 0; background-color: #f8fafc; border-radius: 6px; border-left: 4px solid #7C3AED;'><tr><td style='padding: 20px;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>Report data will be populated here based on your weekly_report data payload.</p></td></tr></table><table role='presentation' cellspacing='0' cellpadding='0'><tr><td style='border-radius: 6px; background-color: #7C3AED;'><a href='https://app.marketersindemand.com/dashboard' style='display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none;'>View Dashboard</a></td></tr></table></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>This is an automated weekly summary.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"Weekly Report\\n\\nHere's your summary for the week.\\n\\n[Report data will be populated here]\\n\\nView Dashboard: https://app.marketersindemand.com/dashboard\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "d90e64bc-45fe-468d-b7fd-49334a7a02e6",
+      "name": "Weekly Report Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"{{ $json.body.subject || 'Message from MiD' }}\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>{{ $json.body.subject || 'Message from MiD' }}</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><p style='margin: 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>{{ $json.body.data.message || $json.body.data.body || 'No message content provided.' }}</p></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>This message was sent from the MiD platform.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"{{ $json.body.data.message || $json.body.data.body || 'No message content provided.' }}\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "97469076-627c-4d81-b60a-a1d531c4d19a",
+      "name": "Custom Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to.join(', ') }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "MiD Platform",
+          "replyTo": "production@marketersindemand.com"
+        }
+      },
+      "id": "ccd8b9ef-cde7-483c-8df4-ec585f405fc7",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1552,
+        176
+      ],
+      "webhookId": "ec958bf2-da03-48d8-9409-d648ac642281",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dzlpwW3XcdxGU29k",
+          "name": "Gmail account (production@marketersindemand.com)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"to\": {{ JSON.stringify($json.body.to) }},\n  \"subject\": \"{{ $json.body.subject || 'Message from MiD' }}\",\n  \"html\": \"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>{{ $json.body.subject || 'Message from MiD' }}</title></head><body style='margin: 0; padding: 0; font-family: Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background-color: #f8fafc;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='background-color: #f8fafc;'><tr><td align='center' style='padding: 40px 20px;'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);'><tr><td style='background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;'><table role='presentation' width='100%' cellspacing='0' cellpadding='0'><tr><td><img src='https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png' alt='MiD - Marketers in Demand' style='height: 40px; width: auto;' /></td></tr></table></td></tr><tr><td style='padding: 40px;'><p style='margin: 0; font-size: 16px; line-height: 1.6; color: #4b5563;'>{{ $json.body.data.message || $json.body.data.body || 'No message content provided.' }}</p></td></tr><tr><td style='padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;'><p style='margin: 0; font-size: 14px; color: #6b7280;'>This message was sent from the MiD platform.</p></td></tr></table><p style='margin: 30px 0 0 0; font-size: 12px; color: #9ca3af;'>&copy; 2026 Marketers in Demand. All rights reserved.</p></td></tr></table></body></html>\",\n  \"text\": \"{{ $json.body.data.message || $json.body.data.body || 'No message content provided.' }}\\n\\n© 2026 Marketers in Demand\"\n}",
+        "options": {}
+      },
+      "id": "76b3da8c-7fbf-4eb2-9762-a9eb336d63ea",
+      "name": "Client Status Report Template",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        928
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Email Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route by Email Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Email Type": {
+      "main": [
+        [
+          {
+            "node": "Invitation Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Welcome Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Password Reset Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Contract Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Weekly Report Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Custom Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Client Status Report Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invitation Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Password Reset Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contract Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Report Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Custom Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client Status Report Template": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "5da78539-4760-47ee-8d0b-d38280ab800c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8c6f52cf10873b3386167a873342f45fa8d772a5db699f750a7599e54b2136b0"
+  },
+  "id": "Sx3ny1t9GYX2KQqkuZoBv",
+  "tags": []
+}

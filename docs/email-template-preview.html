@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MiD Email Template Preview</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .preview-container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #fff;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #9ca3af;
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .template-selector {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 30px;
+    }
+    .template-selector button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      background: #374151;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .template-selector button:hover {
+      background: #4b5563;
+    }
+    .template-selector button.active {
+      background-color: #7C3AED;
+    }
+    .email-frame {
+      background: #f8fafc;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .template {
+      display: none;
+    }
+    .template.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-container">
+    <h1>MiD Email Templates</h1>
+    <p class="subtitle">Preview how emails will appear to recipients</p>
+
+    <div class="template-selector">
+      <button class="active" onclick="showTemplate('welcome')">Welcome</button>
+      <button onclick="showTemplate('invitation')">Invitation</button>
+      <button onclick="showTemplate('password-reset')">Password Reset</button>
+      <button onclick="showTemplate('contract')">Contract Update</button>
+    </div>
+
+    <div class="email-frame">
+      <!-- Welcome Template -->
+      <div id="welcome" class="template active">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
+          <tr>
+            <td align="center" style="padding: 20px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);">
+                <tr>
+                  <td style="background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td>
+                          <img src="https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png" alt="MiD - Marketers in Demand" style="height: 40px; width: auto;" />
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <h1 style="margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712; font-family: Poppins, sans-serif;">Welcome to MiD!</h1>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">Hi John Doe,</p>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">Welcome aboard! Your account has been successfully created and you're all set to get started.</p>
+                    <p style="margin: 0 0 30px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">Click the button below to log in and explore the platform.</p>
+                    <table role="presentation" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="border-radius: 6px; background-color: #7C3AED;">
+                          <a href="#" style="display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; font-family: Poppins, sans-serif;">Go to Dashboard</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">Need help getting started? Reply to this email and we'll be happy to assist.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 30px 0 0 0; font-size: 12px; color: #9ca3af; font-family: Poppins, sans-serif;">&copy; 2026 Marketers in Demand. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Invitation Template -->
+      <div id="invitation" class="template">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
+          <tr>
+            <td align="center" style="padding: 20px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);">
+                <tr>
+                  <td style="background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td>
+                          <img src="https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png" alt="MiD - Marketers in Demand" style="height: 40px; width: auto;" />
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <h1 style="margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712; font-family: Poppins, sans-serif;">You're Invited!</h1>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">Hi Jane Smith,</p>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">You've been invited to join <strong>ACME Corp</strong> on the MiD platform as a <strong>team_member</strong>.</p>
+                    <p style="margin: 0 0 30px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">Click the button below to accept your invitation and set up your account.</p>
+                    <table role="presentation" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="border-radius: 6px; background-color: #7C3AED;">
+                          <a href="#" style="display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; font-family: Poppins, sans-serif;">Accept Invitation</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">If you didn't expect this invitation, you can safely ignore this email.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 30px 0 0 0; font-size: 12px; color: #9ca3af; font-family: Poppins, sans-serif;">&copy; 2026 Marketers in Demand. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Password Reset Template -->
+      <div id="password-reset" class="template">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
+          <tr>
+            <td align="center" style="padding: 20px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);">
+                <tr>
+                  <td style="background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td>
+                          <img src="https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png" alt="MiD - Marketers in Demand" style="height: 40px; width: auto;" />
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <h1 style="margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712; font-family: Poppins, sans-serif;">Reset Your Password</h1>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">We received a request to reset your password. Click the button below to create a new password.</p>
+                    <table role="presentation" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="border-radius: 6px; background-color: #7C3AED;">
+                          <a href="#" style="display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; font-family: Poppins, sans-serif;">Reset Password</a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin: 30px 0 0 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">This link will expire in 24 hours. If you didn't request a password reset, you can safely ignore this email.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">For security, this request was received from frontend.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 30px 0 0 0; font-size: 12px; color: #9ca3af; font-family: Poppins, sans-serif;">&copy; 2026 Marketers in Demand. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Contract Update Template -->
+      <div id="contract" class="template">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
+          <tr>
+            <td align="center" style="padding: 20px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(3,7,18,0.1), 0 2px 4px -2px rgba(3,7,18,0.1);">
+                <tr>
+                  <td style="background-color: #1e293b; padding: 30px 40px; border-radius: 8px 8px 0 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td>
+                          <img src="https://marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png" alt="MiD - Marketers in Demand" style="height: 40px; width: auto;" />
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <h1 style="margin: 0 0 20px 0; font-size: 24px; font-weight: 600; color: #030712; font-family: Poppins, sans-serif;">Contract Update</h1>
+                    <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.6; color: #4b5563; font-family: Poppins, sans-serif;">There's an update to contract <strong>Acacia Advisors - Marketing Services</strong>.</p>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin: 20px 0; background-color: #f8fafc; border-radius: 6px; border-left: 4px solid #7C3AED;">
+                      <tr>
+                        <td style="padding: 20px;">
+                          <p style="margin: 0 0 8px 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">Status</p>
+                          <p style="margin: 0; font-size: 18px; font-weight: 600; color: #030712; font-family: Poppins, sans-serif;">Active</p>
+                        </td>
+                      </tr>
+                    </table>
+                    <table role="presentation" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="border-radius: 6px; background-color: #7C3AED;">
+                          <a href="#" style="display: inline-block; padding: 14px 32px; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; font-family: Poppins, sans-serif;">View Contract</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 30px 40px; background-color: #f8fafc; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0; font-size: 14px; color: #6b7280; font-family: Poppins, sans-serif;">You're receiving this because you're associated with this contract.</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 30px 0 0 0; font-size: 12px; color: #9ca3af; font-family: Poppins, sans-serif;">&copy; 2026 Marketers in Demand. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTemplate(id) {
+      // Hide all templates
+      document.querySelectorAll('.template').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.template-selector button').forEach(b => b.classList.remove('active'));
+
+      // Show selected template
+      document.getElementById(id).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+ Roadmap Viewer — Store & Render GeneratedRoadmapOutput
+
+  Context
+
+  Master Marketer now generates structured JSON roadmaps via POST /generate/roadmap. When generation completes, the result is delivered to MiD
+  App's callback URL in this payload:
+
+  {
+    "job_id": "uuid",
+    "status": "completed",
+    "deliverable_id": "from metadata",
+    "contract_id": "from metadata",
+    "title": "from metadata",
+    "output": {
+      "content_raw": "",
+      "content_structured": { /* GeneratedRoadmapOutput — full schema below */ }
+    }
+  }
+
+  The content_structured object is the complete roadmap. It needs to be stored in the database and rendered by Lovable as a designed
+  presentation.
+
+  What to Store
+
+  Store the entire content_structured JSON as a single JSONB column (e.g. roadmap_output) on the deliverable/document record. The schema is
+  stable — Lovable reads specific paths to render each section.
+
+  Schema: GeneratedRoadmapOutput
+
+  The output has 10 sections in presentation order. Every section includes a section_description (static boilerplate intro text to display above
+   the section content).
+
+  {
+    type: "roadmap",
+    title: string,
+    summary: string,          // 1-paragraph executive summary
+
+    overview: {
+      section_description: string,
+      process_timeline: [{ step, title, cadence, bullets[] }],  // 6-step visual diagram
+      research_description: string
+    },
+
+    target_market: {
+      section_description: string,
+      profiles: [{
+        target_account: { name, description, location, industry, revenue, number_of_employees, technologies[], key_characteristics[] },
+        empathy_map: { fictional_name, fictional_job_title, thinks, feels, says, does, sees, hears, pains, goals }
+      }]
+    },
+
+    brand_story: {
+      section_description: string,
+      character: { want },
+      problem: { villain, external, internal, philosophical },
+      guide: { empathy, authority },
+      plan: { process, agreement },
+      call_to_action: { direct, transitional },
+      success: string[],       // 4-5 items
+      failure: string[],       // 2-3 items
+      transformation: { from, to }
+    },
+
+    products_and_solutions: {
+      section_description: string,
+      products: [{ product, helps_overcome, picture_of_success, helps_avoid_failure }]
+    },
+
+    competition: {
+      section_description: string,
+      competitors: [{
+        company_name,
+        positioning_description,
+        scores: { organic_seo, social_media, content_strategy, paid_media, brand_positioning, overall },  // 1-10 scale
+        key_observations: string[]  // 4-5 items
+      }]
+    },
+
+    goals: {
+      section_description: string,
+      outcomes: [{ business_outcome, metric, description, benchmark, annual_goal, data_source }],
+      rationale: string[]      // 5 bullet points
+    },
+
+    roadmap_phases: {
+      section_description: string,
+      phases: [{ name, timeframe, theme, deliverables[], milestone }]  // 3 monthly phases
+    },
+
+    quarterly_initiatives: {
+      section_description: string,
+      objectives: [{ objective, key_results[] }]
+    },
+
+    annual_plan: {
+      section_description: string,
+      categories: [{
+        category,
+        initiatives: [{ initiative, description, months: [bool x 12] }]  // Gantt-style
+      }]
+    },
+
+    points_plan: {
+      section_description: string,
+      total_points: number,
+      months: [{
+        month,
+        tasks: [{ task, description, stage, points }],
+        month_total: number
+      }]
+    },
+
+    metadata: { model, version, generated_at, research_document_title }
+  }
+
+  Rendering Guide per Section
+  Section: overview
+  Visual Treatment: Section intro text + 6-step process timeline as horizontal diagram (step number, title, cadence badge, bullet list) +
+    research description block
+  ────────────────────────────────────────
+  Section: target_market
+  Visual Treatment: Card per profile: target account details (name, description, firmographics table, technologies chips, characteristics list)
+  +
+     empathy map grid (8 quadrants: thinks/feels/says/does/sees/hears/pains/goals) with fictional name & title header
+  ────────────────────────────────────────
+  Section: brand_story
+  Visual Treatment: StoryBrand visual flow: Character Want → Problem (villain/external/internal/philosophical) → Guide (empathy/authority) →
+  Plan
+     (process/agreement) → CTA (direct/transitional) → Success list → Failure list → Transformation (from → to arrow)
+  ────────────────────────────────────────
+  Section: products_and_solutions
+  Visual Treatment: Table/matrix with columns: Product, Helps Overcome, Picture of Success, Helps Avoid Failure
+  ────────────────────────────────────────
+  Section: competition
+  Visual Treatment: Card per competitor: positioning paragraph + radar/spider chart from scores (5 dimensions) + overall score badge + key
+    observations bullet list
+  ────────────────────────────────────────
+  Section: goals
+  Visual Treatment: Table: Business Outcome / Metric / Description / Benchmark / Annual Goal / Data Source. Below: rationale as numbered list
+  ────────────────────────────────────────
+  Section: roadmap_phases
+  Visual Treatment: 3-column timeline: each phase card with name, timeframe, theme, deliverables checklist, milestone callout
+  ────────────────────────────────────────
+  Section: quarterly_initiatives
+  Visual Treatment: Accordion or card per objective: objective title + key results as checklist
+  ────────────────────────────────────────
+  Section: annual_plan
+  Visual Treatment: Gantt chart: rows = initiatives grouped by category, columns = 12 months, filled cells where months[i] is true
+  ────────────────────────────────────────
+  Section: points_plan
+  Visual Treatment: Month-by-month tables: task / description / stage badge / points. Footer: month total. Overall header: total points budget
+  Test Fixture
+
+  Use this fixture to build and validate the UI before live data flows. It's a real Washington Speakers Bureau roadmap (42-page PDF converted to
+   schema):
+
+  https://raw.githubusercontent.com/tpelligrinomid/master-marketer/main/docs/fixtures/wsb-roadmap.json
+
+  Seed it into the database as a completed roadmap deliverable so Lovable can render it immediately.
+
+  Key Notes
+
+  - All section_description fields are static boilerplate — render as intro text above each section's dynamic content
+  - Competition scores are passthrough from research (not AI-generated in roadmap pipeline) — always numeric 1-10
+  - Points plan tasks come from the process library — stage is always one of: "Foundation", "Execution", "Analysis"
+  - Annual plan months is always a 12-element boolean array (index 0 = Month 1)
+  - The summary field is a good candidate for a hero/header area at the top of the roadmap view

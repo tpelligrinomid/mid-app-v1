@@ -259,3 +259,120 @@ Note: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are automatically available
 │                         (RLS bypassed)                               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Edge Function: send-email
+
+A separate edge function handles email requests by forwarding them to n8n for processing.
+
+### Endpoint
+
+```
+POST https://<your-project>.supabase.co/functions/v1/send-email
+```
+
+### Authentication
+
+The function supports two authentication methods:
+
+| Method | Use Case | Header |
+|--------|----------|--------|
+| **User JWT** | Frontend calls during user actions | `Authorization: Bearer <token>` |
+| **Backend Key** | Backend-to-backend (automated reports, etc.) | `x-backend-key: <BACKEND_API_KEY>` |
+
+### Request Format
+
+```typescript
+interface EmailRequest {
+  email_type: 'user_invitation' | 'password_reset' | 'welcome' | 'contract_notification' | 'weekly_report' | 'custom';
+  to: string | string[];
+  subject?: string;
+  data?: Record<string, any>;
+}
+```
+
+### Example Payload
+
+```json
+{
+  "email_type": "user_invitation",
+  "to": ["user@example.com"],
+  "data": {
+    "full_name": "John Doe",
+    "role": "team_member",
+    "company_name": "ACME Corp",
+    "login_url": "https://app.marketersindemand.com/login"
+  }
+}
+```
+
+### n8n Payload Format
+
+The edge function transforms the request and sends this to n8n:
+
+```json
+{
+  "email_type": "user_invitation",
+  "to": ["user@example.com"],
+  "subject": "Optional subject",
+  "data": {
+    "full_name": "John Doe",
+    "role": "team_member",
+    "company_name": "ACME Corp",
+    "login_url": "https://app.marketersindemand.com/login"
+  },
+  "timestamp": "2026-01-25T12:00:00.000Z",
+  "source": "frontend"
+}
+```
+
+### Environment Variables
+
+| Location | Variable | Description |
+|----------|----------|-------------|
+| **Supabase** | `N8N_EMAIL_WEBHOOK_URL` | n8n webhook endpoint for email processing |
+| **Supabase** | `BACKEND_API_KEY` | Shared secret for backend-to-backend auth |
+| **Render** | `N8N_EMAIL_WEBHOOK_URL` | Same URL (for potential direct backend calls) |
+
+### Email Types
+
+| Type | Trigger | Typical Data |
+|------|---------|--------------|
+| `user_invitation` | New user invited | `full_name`, `role`, `company_name`, `login_url` |
+| `welcome` | User first login | `full_name`, `login_url` |
+| `password_reset` | Password reset request | `reset_url` |
+| `contract_notification` | Contract status change | `contract_name`, `status`, `action_url` |
+| `weekly_report` | Scheduled report | Report summary data |
+| `custom` | Ad-hoc emails | Varies |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Frontend (Lovable)                              │
+│                                                                      │
+│  User action triggers email (invitation, etc.)                      │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                │ POST /functions/v1/send-email
+                                │ Authorization: Bearer <user-jwt>
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 Supabase Edge Function: send-email                   │
+│                                                                      │
+│  1. Validates auth (JWT or backend key)                             │
+│  2. Validates payload (email_type, to)                              │
+│  3. Transforms and forwards to n8n webhook                          │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                │ POST N8N_EMAIL_WEBHOOK_URL
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         n8n Workflow                                 │
+│                                                                      │
+│  - Receives email request                                           │
+│  - Selects template based on email_type                             │
+│  - Sends email via configured provider                              │
+└─────────────────────────────────────────────────────────────────────┘
+```

@@ -1,0 +1,336 @@
+{
+  "name": "Add Contract Meeting Transcript to Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recording/client-meeting",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1648,
+        0
+      ],
+      "id": "d5734158-f689-47bb-a225-37991d651b7e",
+      "name": "Webhook",
+      "webhookId": "6e69c517-a7a8-4ea0-9e6f-9e45d66a5efc"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.fireflies.ai/graphql",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer b1ccde8a-379b-4bd3-b6b2-47807ebf5d54"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"query Transcript($transcriptId: String!) { transcript(id: $transcriptId) { id title dateString duration meeting_link transcript_url host_email organizer_email participants sentences { index speaker_name speaker_id text start_time end_time } speakers { id name } summary { overview action_items keywords notes outline } } }\",\n  \"variables\": {\n    \"transcriptId\": \"{{ $json.meeting_id }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1152,
+        0
+      ],
+      "id": "9da50ed8-f001-40b4-af9c-0032e68541e9",
+      "name": "Get transcript_id from Fireflies"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tally payload → extract external_id and Fireflies meeting_id\nconst payload = items[0].json || {};\nconst fields = payload.body?.data?.fields || [];\n\n// helper to get value by label or key\nconst byLabel = (label) => (fields.find(f => f.label === label) || {}).value;\nconst byKey   = (key)   => (fields.find(f => f.key   === key)   || {}).value;\n\nconst externalId =\n  byLabel('Contract ID') || byKey('question_1VO594') || '';\n\nconst meetingUrl =\n  byLabel('Meeting URL') || byKey('question_MRPyEE') || '';\n\n// Basic validation\nif (!externalId || !/^MID\\d+$/i.test(externalId)) {\n  throw new Error(`Invalid or missing Contract ID. Got: ${externalId || '(empty)'}`);\n}\nif (!meetingUrl) {\n  throw new Error('Missing Meeting URL');\n}\n\n// Extract Fireflies meetingId from URL\nfunction extractMeetingId(url) {\n  // Example forms:\n  // https://app.fireflies.ai/view/Verisk-New-North-Weekly-Meeting::01K9ADQAS9HMSYHZ0AM173J6KE\n  // https://app.fireflies.ai/view/ASxwZxCstx\n  // https://app.fireflies.ai/share/ASxwZxCstx\n  let m;\n\n  // form with ::ID at end\n  m = url.match(/::([A-Za-z0-9]+)/);\n  if (m) return m[1];\n\n  // /view/<ID> or /share/<ID> or /meeting/<ID>\n  m = url.match(/\\/(?:view|share|meeting)\\/([A-Za-z0-9]+)/);\n  if (m) return m[1];\n\n  // fallback: last alphanumeric chunk\n  m = url.match(/\\/([A-Za-z0-9]{8,})$/);\n  if (m) return m[1];\n\n  return null;\n}\n\nconst meetingId = extractMeetingId(meetingUrl);\nif (!meetingId) {\n  throw new Error(`Could not parse meeting ID from URL: ${meetingUrl}`);\n}\n\nreturn [{ json: { external_id: externalId, meeting_id: meetingId, meeting_url: meetingUrl, raw_form: payload } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        0
+      ],
+      "id": "4634fbcd-0baa-4486-a989-bef3834c904c",
+      "name": "Format Tally Form data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Fireflies transcript → Supabase RPC payload\nconst resp = items[0].json || {};\nconst tr = resp.data?.transcript || {};\nif (!tr.id) { throw new Error('Missing transcript'); }\n\nconst src = $item(0).$node['Format Tally Form data'].json; // rename if your first node has a different name\n\n// Participants: emails from `participants` (handles comma-joined first entry) + speaker names\nfunction normalizeEmails(arr) {\n  const parts = (arr || [])\n    .flatMap(v => (typeof v === 'string' ? v.split(',') : []))\n    .map(s => s.trim())\n    .filter(Boolean);\n  return Array.from(new Set(parts));\n}\n\nconst emails = normalizeEmails(tr.participants);\nconst speakerNames = (tr.speakers || []).map(s => s.name).filter(Boolean);\nconst participants = (speakerNames.length ? speakerNames : emails);\n\n// Duration: Fireflies `duration` is minutes (float). Convert to seconds.\nlet durationSeconds = null;\nif (typeof tr.duration === 'number' && !Number.isNaN(tr.duration)) {\n  durationSeconds = Math.round(tr.duration * 60);\n}\n\nreturn [{\n  json: {\n    external_id: src.external_id,\n    meeting_id: tr.id,\n    meeting_url: tr.transcript_url || src.meeting_url,\n    meeting_ts: tr.dateString || new Date().toISOString(),\n    participants,\n    duration_seconds: durationSeconds,\n    recording_url: tr.audio_url || tr.meeting_link || null, // use if you later request audio_url\n    transcript: tr,                  // store full structured transcript\n    raw_metadata: resp               // original response\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        0
+      ],
+      "id": "6a9c54d6-5ee8-4c46-b736-2965470f4eba",
+      "name": "Format Fireflies Transcript Data"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "chatgpt-4o-latest",
+          "mode": "list",
+          "cachedResultName": "CHATGPT-4O-LATEST"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Task: Classify meeting sentiment and produce 5 concise bullets for leadership.\n\nInput transcript lines are formatted \"Speaker: text\" with optional [mm:ss] timestamps.\n\nLabel rules:\n- positive: overall tone constructive/supportive, progress or solutions outweigh blockers.\n- neutral: mixed/ambiguous tone, routine updates, no strong positive/negative signal.\n- negative: frustration, risk, blockers, missed deadlines, conflict, or slipping delivery.\n\nConfidence calibration (choose one number 0..1):\n- 0.85–1.00: clear, consistent evidence (multiple explicit cues).\n- 0.60–0.84: some signals but mixed or sparse.\n- 0.30–0.59: weak/ambiguous; short or noisy transcript.\n- 0.00–0.29: insufficient content to judge.\n\nBullets (exactly 5):\n- Each 8–18 words, high‑signal, non‑redundant, stand alone.\n- Start with a strong verb; avoid fluff (“great meeting”, “various updates”).\n- Attribute when helpful: “Gab flagged creative is behind; launch still targeted for Thursday.”\n- Prefer outcome, risk, decision, owner, date. No speculation.\n\nHighlights (0–3):\n- Short pull‑quotes with the speaker name that support the label or key risks.\n\nTopics (0–6):\n- Short tags like [\"launch\",\"risk\",\"scope\",\"delivery\",\"hiring\",\"budget\"].\n\nSafety/quality:\n- Do not invent facts or names not present.\n- If content is too short to judge, set label=\"neutral\" and confidence ≤0.4.\n\nMetadata:\n- Set model to the current model id.\n- version=1\n- generated_at=ISO 8601 now.\n\nTranscript:\n{{$json.transcript_labeled}}"
+            },
+            {
+              "role": "system",
+              "content": "You are a strict analyst. Output ONLY valid minified JSON that matches this schema:\n{\n  \"label\": \"positive|neutral|negative\",\n  \"confidence\": <number 0..1>,\n  \"bullets\": [\"<string>\", \"<string>\", \"<string>\", \"<string>\", \"<string>\"],\n  \"highlights\": [{\"speaker\":\"<string>\",\"quote\":\"<string>\"}],\n  \"topics\": [\"<string>\"],\n  \"model\": \"<provider/model-id>\",\n  \"version\": 1,\n  \"generated_at\": \"<ISO-8601>\"\n}\nNever include commentary. Never add fields."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        0
+      ],
+      "id": "e761b0e1-9813-48ce-aadf-41d25dec69c4",
+      "name": "Determine Sentiment",
+      "credentials": {
+        "openAiApi": {
+          "id": "qrpfk6ew9LGGYEtl",
+          "name": "OpenAi account [accounts@newnorth.com]"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build \"Speaker: text\" lines (optionally with timestamps)\nconst tr = $item(0).$node['Format Fireflies Transcript Data'].json.transcript || {};\nconst sentences = Array.isArray(tr.sentences) ? tr.sentences : [];\n\nfunction sToMmSs(v){ if(typeof v!=='number') return ''; const m=Math.floor(v/60), s=Math.round(v%60).toString().padStart(2,'0'); return `${m}:${s}`; }\n\nconst lines = sentences.map(s => {\n  const who = s.speaker_name || 'Unknown';\n  const t = s.text || '';\n  const ts = s.start_time != null ? `[${sToMmSs(s.start_time)}] ` : '';\n  return `${ts}${who}: ${t}`;\n});\n\nconst labeled = lines.join('\\n');\n\n// Optional: cap or chunk for model limits (keep ~8–12k chars per chunk)\nconst MAX = 9000;\nconst chunks = [];\nlet buf = '';\nfor (const line of lines) {\n  if ((buf + line + '\\n').length > MAX) { chunks.push(buf); buf = ''; }\n  buf += line + '\\n';\n}\nif (buf) chunks.push(buf);\n\nreturn [{ json: { transcript_labeled: labeled, transcript_chunks: chunks } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        0
+      ],
+      "id": "093be882-d9b0-4632-924a-644ff60fe9bb",
+      "name": "Format transcript for LLM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM JSON string from common shapes and shape for DB (no regex)\n\nfunction getText(p) {\n  if (typeof p === 'string') return p;\n  if (p && typeof p.text === 'string') return p.text;\n  // Claude/OpenAI via n8n (what your run shows):\n  if (Array.isArray(p?.output) && p.output[0]?.content?.[0]?.text)\n    return p.output[0].content[0].text;\n  // Fallback: plain content array\n  if (Array.isArray(p?.content) && p.content[0]?.text)\n    return p.content[0].text;\n  return '';\n}\n\nconst raw = getText($json) || '';\nlet t = String(raw).trim();\n\n// Strip any surrounding junk by taking the largest {...} block\nconst start = t.indexOf('{');\nconst end = t.lastIndexOf('}');\nlet parsed = {};\nif (start !== -1 && end !== -1) {\n  const slice = t.slice(start, end + 1);\n  try { parsed = JSON.parse(slice); } catch { parsed = {}; }\n}\n\nconst now = new Date().toISOString();\nconst label = ['positive','neutral','negative'].includes(parsed.label) ? parsed.label : 'neutral';\nconst confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.6)));\nconst bullets = Array.isArray(parsed.bullets) ? parsed.bullets.slice(0, 5) : [];\nconst highlights = Array.isArray(parsed.highlights) ? parsed.highlights.slice(0, 3) : [];\nconst topics = Array.isArray(parsed.topics) ? parsed.topics.slice(0, 6) : [];\n\nreturn [{\n  json: {\n    sentiment: {\n      label,\n      confidence,\n      bullets,\n      highlights,\n      topics,\n      model: parsed.model || 'openai/gpt-4-turbo',\n      version: 1,\n      generated_at: parsed.generated_at || now\n    },\n    // Helpful for debugging if something is empty:\n    _raw_llm: raw\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        0
+      ],
+      "id": "d0912f6c-e261-4cf1-aaaf-17f092208a95",
+      "name": "Parse and sanitize LLM data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://jxymrrfdmkwokvasgfio.supabase.co/rest/v1/rpc/insert_contract_meeting_by_external",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4eW1ycmZkbWt3b2t2YXNnZmlvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDU1NjQ0NCwiZXhwIjoyMDYwMTMyNDQ0fQ.T-p4wZvukbltFZk5BRlqtlVqZQj078eUyM3mcC2wUEA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4eW1ycmZkbWt3b2t2YXNnZmlvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDU1NjQ0NCwiZXhwIjoyMDYwMTMyNDQ0fQ.T-p4wZvukbltFZk5BRlqtlVqZQj078eUyM3mcC2wUEA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  p_external_id: $item(0).$node[\"Format Tally Form data\"].json.external_id,\n  p_meeting_ts: $item(0).$node[\"Format Fireflies Transcript Data\"].json.meeting_ts,\n  p_transcript: $item(0).$node[\"Format Fireflies Transcript Data\"].json.transcript,\n  p_source: 'fireflies',\n  p_recording_url: $item(0).$node[\"Format Fireflies Transcript Data\"].json.recording_url,\n  p_participants: $item(0).$node[\"Format Fireflies Transcript Data\"].json.participants,\n  p_duration_seconds: $item(0).$node[\"Format Fireflies Transcript Data\"].json.duration_seconds,\n  p_raw_metadata: $item(0).$node[\"Format Fireflies Transcript Data\"].json.raw_metadata,\n  p_sentiment: $item(0).$node[\"Parse and sanitize LLM data\"].json.sentiment\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        176,
+        0
+      ],
+      "id": "595c242d-aa07-42bf-835f-c5dddc8ec475",
+      "name": "Insert into Supabase table contract_meetings"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n-competitive-analysis.onrender.com",
+            "user-agent": "Tally Webhooks",
+            "content-length": "560",
+            "accept": "application/json, text/plain, */*",
+            "accept-encoding": "gzip, br",
+            "baggage": "sentry-environment=production,sentry-release=6a47799642ac5084f941d58e3cbd3108b463135b,sentry-public_key=6af4b6673f1648edaa8fef3f2ca43405,sentry-trace_id=763c4284f739def44e4d119ef8303482,sentry-org_id=407628,sentry-sampled=false,sentry-sample_rand=0.4264463015550437,sentry-sample_rate=0.0001",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "34.96.62.31",
+            "cf-ipcountry": "BE",
+            "cf-ray": "99cacbabaa1e9db6-CMH",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "content-type": "application/json",
+            "render-proxy-ttl": "4",
+            "rndr-id": "32f85d99-19d4-4f28",
+            "sentry-trace": "763c4284f739def44e4d119ef8303482-49e6e39d430e398c-0",
+            "true-client-ip": "34.96.62.31",
+            "x-forwarded-for": "34.96.62.31, 104.23.243.3",
+            "x-forwarded-proto": "https",
+            "x-request-start": "1762832713613330"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "eventId": "06c8cd58-d973-4692-a35c-b2ee8d99e70c",
+            "eventType": "FORM_RESPONSE",
+            "createdAt": "2025-11-11T03:45:13.441Z",
+            "data": {
+              "responseId": "Pdyl5D1",
+              "submissionId": "Pdyl5D1",
+              "respondentId": "68jJP8N",
+              "formId": "Np5v5p",
+              "formName": "Submit client meeting",
+              "createdAt": "2025-11-11T03:45:13.000Z",
+              "fields": [
+                {
+                  "key": "question_1VO594",
+                  "label": "Contract ID",
+                  "type": "INPUT_TEXT",
+                  "value": "MID20252047"
+                },
+                {
+                  "key": "question_MRPyEE",
+                  "label": "Meeting URL",
+                  "type": "INPUT_LINK",
+                  "value": "https://app.fireflies.ai/view/Verisk-New-North-Weekly-Meeting::01K9ADQAS9HMSYHZ0AM173J6KE"
+                }
+              ]
+            }
+          },
+          "webhookUrl": "https://n8n-competitive-analysis.onrender.com/webhook/recording/client-meeting",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Format Tally Form data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get transcript_id from Fireflies": {
+      "main": [
+        [
+          {
+            "node": "Format Fireflies Transcript Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Tally Form data": {
+      "main": [
+        [
+          {
+            "node": "Get transcript_id from Fireflies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Fireflies Transcript Data": {
+      "main": [
+        [
+          {
+            "node": "Format transcript for LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Parse and sanitize LLM data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format transcript for LLM": {
+      "main": [
+        [
+          {
+            "node": "Determine Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and sanitize LLM data": {
+      "main": [
+        [
+          {
+            "node": "Insert into Supabase table contract_meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "65f13b87-ebc3-42e9-ab38-8e415d099848",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8c6f52cf10873b3386167a873342f45fa8d772a5db699f750a7599e54b2136b0"
+  },
+  "id": "oR4UUtOJWbUiJUQ5",
+  "tags": []
+}

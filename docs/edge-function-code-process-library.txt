@@ -1,0 +1,340 @@
+Here’s the full current `supabase/functions/backend-proxy/index.ts` source (verbatim), no modifications:
+
+```ts
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-backend-key",
+};
+
+// Create service role client (bypasses RLS)
+const supabaseAdmin = createClient(
+  Deno.env.get("SUPABASE_URL") ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+);
+
+// Validate backend API key
+function getBackendKey(req: Request): string | null {
+  const direct =
+    req.headers.get("x-backend-key") ??
+    req.headers.get("x-backend-api-key") ??
+    req.headers.get("x-backend-apikey");
+
+  if (direct) return direct;
+
+  // Optional: allow server-to-server auth via Authorization: Bearer 
+  const auth = req.headers.get("authorization");
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    return auth.slice(7).trim() || null;
+  }
+
+  return null;
+}
+
+function validateBackendKey(req: Request): boolean {
+  const rawKey = getBackendKey(req);
+  const backendKey = rawKey?.trim() ?? null;
+  const expectedKey = Deno.env.get("BACKEND_API_KEY")?.trim() ?? null;
+
+  if (!expectedKey) {
+    console.error("BACKEND_API_KEY not configured");
+    return false;
+  }
+
+  const ok = backendKey === expectedKey;
+
+  if (!ok) {
+    // Log first 4 and last 4 characters of each key for debugging
+    const maskKey = (k: string | null) =>
+      k ? `${k.slice(0, 4)}...${k.slice(-4)} (len=${k.length})` : "(null)";
+
+    console.error(
+      "Invalid or missing backend API key",
+      JSON.stringify({
+        url: req.url,
+        method: req.method,
+        origin: req.headers.get("origin"),
+        userAgent: req.headers.get("user-agent"),
+        hasXBackendKey: req.headers.has("x-backend-key"),
+        hasXBackendApiKey: req.headers.has("x-backend-api-key"),
+        hasXBackendApikey: req.headers.has("x-backend-apikey"),
+        hasAuthorization: req.headers.has("authorization"),
+        receivedKeyMasked: maskKey(backendKey),
+        expectedKeyMasked: maskKey(expectedKey),
+      })
+    );
+  }
+
+  return ok;
+}
+
+// Allowed tables for backend-proxy access
+const ALLOWED_TABLES = [
+  // Compass tables
+  "compass_deliverables",
+  "compass_meetings",
+  "compass_notes",
+  "compass_assets",
+  "compass_process_library",
+  "compass_report_configs",
+  "compass_reports",
+  "compass_deliverable_versions",
+  "compass_knowledge",
+  // Pulse tables
+  "contracts",
+  "contract_documents",
+  "contract_resources",
+  "amendments",
+  "pulse_invoices",
+  "pulse_credit_memos",
+  "pulse_invoice_tasks",
+  // Other tables
+  "audit_logs",
+];
+
+function isTableAllowed(table: string): boolean {
+  return ALLOWED_TABLES.includes(table);
+}
+
+// Supported operations
+type Operation = 
+  | "select"
+  | "insert"
+  | "update"
+  | "upsert"
+  | "delete"
+  | "rpc";
+
+interface ProxyRequest {
+  operation: Operation;
+  table?: string;
+  data?: Record | Record[];
+  filters?: Record;
+  select?: string;
+  rpc_name?: string;
+  rpc_params?: Record;
+  // Alternative RPC field names (backend sends function_name)
+  function_name?: string;
+  // Support onConflict at top level (backend sends it this way)
+  onConflict?: string;
+  options?: {
+    count?: "exact" | "planned" | "estimated";
+    onConflict?: string;
+    returning?: "minimal" | "representation";
+    single?: boolean;
+    limit?: number;
+    offset?: number;
+    order?: { column: string; ascending?: boolean }[];
+  };
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    // Validate backend API key
+    if (!validateBackendKey(req)) {
+      console.error("Invalid or missing backend API key");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const body: ProxyRequest = await req.json();
+    console.log("Proxy request:", JSON.stringify({ operation: body.operation, table: body.table }));
+
+    let result: { data: unknown; error: unknown; count?: number | null };
+
+    switch (body.operation) {
+      case "select": {
+        if (!body.table) throw new Error("Table required for select");
+        if (!isTableAllowed(body.table)) throw new Error(`Table '${body.table}' is not allowed`);
+
+        let query = supabaseAdmin
+          .from(body.table)
+          .select(body.select || "*", { count: body.options?.count });
+
+        // Apply filters
+        if (body.filters) {
+          for (const [key, value] of Object.entries(body.filters)) {
+            if (value === null) {
+              // Handle null values with IS NULL
+              query = query.is(key, null);
+            } else if (typeof value === "object") {
+              const filterObj = value as Record;
+              if ("eq" in filterObj) query = query.eq(key, filterObj.eq);
+              if ("neq" in filterObj) query = query.neq(key, filterObj.neq);
+              if ("gt" in filterObj) query = query.gt(key, filterObj.gt);
+              if ("gte" in filterObj) query = query.gte(key, filterObj.gte);
+              if ("lt" in filterObj) query = query.lt(key, filterObj.lt);
+              if ("lte" in filterObj) query = query.lte(key, filterObj.lte);
+              if ("like" in filterObj) query = query.like(key, filterObj.like as string);
+              if ("ilike" in filterObj) query = query.ilike(key, filterObj.ilike as string);
+              if ("in" in filterObj) query = query.in(key, filterObj.in as unknown[]);
+              if ("is" in filterObj) query = query.is(key, filterObj.is as null | boolean);
+            } else {
+              query = query.eq(key, value);
+            }
+          }
+        }
+
+        // Apply ordering
+        if (body.options?.order) {
+          for (const ord of body.options.order) {
+            query = query.order(ord.column, { ascending: ord.ascending ?? true });
+          }
+        }
+
+        // Apply pagination
+        if (body.options?.limit) query = query.limit(body.options.limit);
+        if (body.options?.offset) query = query.range(body.options.offset, body.options.offset + (body.options.limit || 10) - 1);
+
+        // Single row
+        if (body.options?.single) {
+          result = await query.single();
+        } else {
+          result = await query;
+        }
+        break;
+      }
+
+      case "insert": {
+        if (!body.table) throw new Error("Table required for insert");
+        if (!isTableAllowed(body.table)) throw new Error(`Table '${body.table}' is not allowed`);
+        if (!body.data) throw new Error("Data required for insert");
+
+        const query = supabaseAdmin
+          .from(body.table)
+          .insert(body.data)
+          .select(body.select || "*");
+
+        result = await query;
+        break;
+      }
+
+      case "update": {
+        if (!body.table) throw new Error("Table required for update");
+        if (!isTableAllowed(body.table)) throw new Error(`Table '${body.table}' is not allowed`);
+        if (!body.data) throw new Error("Data required for update");
+        if (!body.filters) throw new Error("Filters required for update (safety)");
+
+        let query = supabaseAdmin.from(body.table).update(body.data as Record);
+
+        // Apply filters
+        for (const [key, value] of Object.entries(body.filters)) {
+          if (value === null) {
+            query = query.is(key, null);
+          } else if (typeof value === "object") {
+            const filterObj = value as Record;
+            if ("eq" in filterObj) query = query.eq(key, filterObj.eq);
+          } else {
+            query = query.eq(key, value);
+          }
+        }
+
+        result = await query.select(body.select || "*");
+        break;
+      }
+
+      case "upsert": {
+        if (!body.table) throw new Error("Table required for upsert");
+        if (!isTableAllowed(body.table)) throw new Error(`Table '${body.table}' is not allowed`);
+        if (!body.data) throw new Error("Data required for upsert");
+
+        // Support onConflict at top level OR inside options
+        const onConflict = body.onConflict || body.options?.onConflict;
+
+        console.log("Upsert operation:", { 
+          table: body.table, 
+          onConflict, 
+          dataCount: Array.isArray(body.data) ? body.data.length : 1 
+        });
+
+        const query = supabaseAdmin
+          .from(body.table)
+          .upsert(body.data, { 
+            onConflict: onConflict,
+            ignoreDuplicates: false 
+          })
+          .select(body.select || "*");
+
+        result = await query;
+        break;
+      }
+
+      case "delete": {
+        if (!body.table) throw new Error("Table required for delete");
+        if (!isTableAllowed(body.table)) throw new Error(`Table '${body.table}' is not allowed`);
+        if (!body.filters) throw new Error("Filters required for delete (safety)");
+
+        let query = supabaseAdmin.from(body.table).delete();
+
+        // Apply filters
+        for (const [key, value] of Object.entries(body.filters)) {
+          if (value === null) {
+            query = query.is(key, null);
+          } else if (typeof value === "object") {
+            const filterObj = value as Record;
+            if ("eq" in filterObj) query = query.eq(key, filterObj.eq);
+          } else {
+            query = query.eq(key, value);
+          }
+        }
+
+        result = await query.select(body.select || "*");
+        break;
+      }
+
+      case "rpc": {
+        // Support both rpc_name and function_name field names
+        const functionName = body.rpc_name || body.function_name;
+        // Support both rpc_params and data field names
+        const params = body.rpc_params || body.data || {};
+
+        if (!functionName) throw new Error("rpc_name or function_name required for rpc operation");
+
+        console.log("RPC call:", { function: functionName, params });
+        result = await supabaseAdmin.rpc(functionName, params as Record);
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown operation: ${body.operation}`);
+    }
+
+    if (result.error) {
+      console.error("Database error:", result.error);
+      return new Response(
+        JSON.stringify({ error: result.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("Success:", { rowCount: Array.isArray(result.data) ? result.data.length : 1 });
+
+    return new Response(
+      JSON.stringify({ data: result.data, count: result.count }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("Proxy error:", errorMessage);
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
+```

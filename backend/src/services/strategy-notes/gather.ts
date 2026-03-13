@@ -63,7 +63,9 @@ export interface RecentNote {
 export interface StrategyNoteData {
   contract: ContractInfo;
   points: PointsSummary | null;
-  points_delivered_30d: number;
+  points_delivered_lookback: number;
+  lookback_days: number;
+  lookahead_days: number;
   tasks_in_progress: TaskInfo[];
   tasks_completed: TaskInfo[];
   tasks_blocked: TaskInfo[];
@@ -197,18 +199,20 @@ export async function gatherStrategyNoteData(
     content_raw: n.content_raw ? n.content_raw.substring(0, 1500) : null,
   }));
 
-  // Sum points from completed tasks (already filtered to lookback window)
-  const pointsDelivered30d = (completedTasks || []).reduce(
+  // Sum points from completed tasks (filtered to config lookback window)
+  const pointsDeliveredLookback = (completedTasks || []).reduce(
     (sum, t) => sum + (Number(t.points) || 0),
     0
   );
 
-  console.log(`[StrategyNotes] Data gathered for ${contract.contract_name}: points=${points ? 'yes' : 'no'}, delivered_30d=${pointsDelivered30d}, working=${workingTasks?.length || 0}, completed=${completedTasks?.length || 0}, blocked=${blockedTasks?.length || 0}, meetings=${meetings?.length || 0}`);
+  console.log(`[StrategyNotes] Data gathered for ${contract.contract_name}: points=${points ? 'yes' : 'no'}, delivered_${lookbackDays}d=${pointsDeliveredLookback}, working=${workingTasks?.length || 0}, completed=${completedTasks?.length || 0}, blocked=${blockedTasks?.length || 0}, meetings=${meetings?.length || 0}`);
 
   return {
     contract,
     points,
-    points_delivered_30d: pointsDelivered30d,
+    points_delivered_lookback: pointsDeliveredLookback,
+    lookback_days: lookbackDays,
+    lookahead_days: lookaheadDays,
     tasks_in_progress: workingTasks || [],
     tasks_completed: completedTasks || [],
     tasks_blocked: blockedTasks || [],

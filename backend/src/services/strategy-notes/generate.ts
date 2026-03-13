@@ -24,7 +24,8 @@ interface GeneratedNote {
 // Prompt Building
 // ============================================================================
 
-const SYSTEM_PROMPT = `You are an internal strategist assistant at a marketing agency.
+function buildSystemPrompt(lookbackDays: number, lookaheadDays: number): string {
+  return `You are an internal strategist assistant at a marketing agency.
 Generate a weekly strategy note for the account team. The note should be concise, actionable, and highlight anything the strategist should pay attention to before their client meeting.
 
 Flag any concerns: declining sentiment, point burden issues, overdue tasks, or topics the client has raised repeatedly.
@@ -43,8 +44,8 @@ Week of {exact date from prompt}
 
 ### Points Summary
 - Monthly allotment: X
-- Working (next 30 days): X
-- Delivered (last 30 days): X
+- Working (next ${lookaheadDays} days): X
+- Delivered (last ${lookbackDays} days): X
 - Points burden: X
 - Tier: X
 
@@ -69,6 +70,7 @@ JSON format:
   "action_items": [{ "item": "...", "due": "..." }]
 }
 \`\`\``;
+}
 
 function buildUserPrompt(data: StrategyNoteData, weekOfDate: string, additionalInstructions?: string | null): string {
   const lines: string[] = [];
@@ -81,7 +83,7 @@ function buildUserPrompt(data: StrategyNoteData, weekOfDate: string, additionalI
   if (data.points) {
     lines.push(`Monthly allotment: ${data.contract.monthly_points_allotment ?? 'N/A'}`);
     lines.push(`Points purchased: ${data.points.points_purchased}`);
-    lines.push(`Points delivered (last 30 days): ${data.points_delivered_30d}`);
+    lines.push(`Points delivered (last ${data.lookback_days} days): ${data.points_delivered_lookback}`);
     lines.push(`Points working: ${data.points.points_working}`);
     lines.push(`Points balance: ${data.points.points_balance}`);
     lines.push(`Points burden: ${data.points.points_burden}`);
@@ -268,7 +270,7 @@ export async function generateStrategyNote(config: NoteConfig): Promise<Generate
   console.log(`[StrategyNotes] Data gathered: ${data.tasks_in_progress.length} working, ${data.tasks_completed.length} completed, ${data.meetings.length} meetings`);
 
   // 2. Build prompt with additional instructions if configured
-  let systemPrompt = SYSTEM_PROMPT;
+  let systemPrompt = buildSystemPrompt(config.lookback_days, config.lookahead_days);
   if (config.additional_instructions) {
     systemPrompt += `\n\n## Per-Contract Instructions\n${config.additional_instructions}`;
   }

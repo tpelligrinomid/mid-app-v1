@@ -81,7 +81,7 @@ function buildUserPrompt(data: StrategyNoteData, weekOfDate: string, additionalI
   if (data.points) {
     lines.push(`Monthly allotment: ${data.contract.monthly_points_allotment ?? 'N/A'}`);
     lines.push(`Points purchased: ${data.points.points_purchased}`);
-    lines.push(`Points delivered (all time): ${data.points.points_delivered}`);
+    lines.push(`Points delivered (last 30 days): ${data.points_delivered_30d}`);
     lines.push(`Points working: ${data.points.points_working}`);
     lines.push(`Points balance: ${data.points.points_balance}`);
     lines.push(`Points burden: ${data.points.points_burden}`);

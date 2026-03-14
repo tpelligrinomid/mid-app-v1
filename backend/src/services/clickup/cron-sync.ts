@@ -159,13 +159,17 @@ export class ClickUpCronSyncService {
         const folders = await this.getFoldersToSync();
         console.log(`[ClickUp Cron Sync] Found ${folders.length} folders to sync`);
 
-        // For incremental mode, only fetch tasks updated in the last 30 minutes
-        // (buffer of 2x the 15-min cron interval to avoid missing updates)
+        // For incremental mode, use last_successful_sync_at cursor with 5-min buffer
+        // to avoid missing tasks that changed while a sync was blocked or crashed
         let dateUpdatedGt: number | undefined;
         if (mode === 'incremental') {
-          const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
-          dateUpdatedGt = thirtyMinutesAgo;
-          console.log(`[ClickUp Cron Sync] Incremental mode: only fetching tasks updated since ${new Date(thirtyMinutesAgo).toISOString()}`);
+          const lastSync = await this.getLastSuccessfulSync();
+          const bufferMs = 5 * 60 * 1000; // 5-minute overlap buffer for clock skew
+          const fallback = Date.now() - (60 * 60 * 1000); // 1-hour fallback if no prior sync
+          dateUpdatedGt = lastSync
+            ? new Date(lastSync).getTime() - bufferMs
+            : fallback;
+          console.log(`[ClickUp Cron Sync] Incremental mode: fetching tasks updated since ${new Date(dateUpdatedGt).toISOString()} (cursor: ${lastSync || 'none, using 1h fallback'})`);
         }
 
         for (const folder of folders) {
@@ -301,7 +305,7 @@ export class ClickUpCronSyncService {
 
   /**
    * Check if a sync is already running
-   * Returns true if running and started less than 1 hour ago (to handle crashed syncs)
+   * Returns true if running and started less than 10 minutes ago (to handle crashed syncs)
    */
   private async checkForRunningSync(): Promise<{ isRunning: boolean; startedAt?: string }> {
     const { data, error } = await dbProxy.select<Array<{ status: string; updated_at: string }>>('pulse_sync_state', {
@@ -319,16 +323,34 @@ export class ClickUpCronSyncService {
       return { isRunning: false };
     }
 
-    // Check if the sync has been running for more than 1 hour (likely crashed)
+    // Check if the sync has been running for more than 10 minutes (likely crashed)
+    // Syncs typically complete in under 5 minutes; 10 min is a safe upper bound
     const updatedAt = new Date(state.updated_at);
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-    if (updatedAt < oneHourAgo) {
-      console.log('[ClickUp Cron Sync] Previous sync appears stale (>1 hour), allowing new sync');
+    if (updatedAt < tenMinutesAgo) {
+      console.log('[ClickUp Cron Sync] Previous sync appears stale (>10 minutes), allowing new sync');
       return { isRunning: false };
     }
 
     return { isRunning: true, startedAt: state.updated_at };
+  }
+
+  /**
+   * Get the last_successful_sync_at timestamp from pulse_sync_state
+   */
+  private async getLastSuccessfulSync(): Promise<string | null> {
+    const { data, error } = await dbProxy.select<Array<{ last_successful_sync_at: string | null }>>('pulse_sync_state', {
+      columns: 'last_successful_sync_at',
+      filters: { service: 'clickup', entity_type: 'tasks' },
+      single: true
+    });
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    return data[0].last_successful_sync_at || null;
   }
 
   /**

@@ -783,7 +783,7 @@ router.get('/ideas', async (req: Request, res: Response): Promise<void> => {
     const { data: access } = await req.supabase
       .from('user_contract_access')
       .select('contract_id')
-      .eq('user_id', req.user.id)
+      .eq('user_id', req.user.user_id)
       .eq('contract_id', contract_id)
       .single();
 
@@ -873,7 +873,7 @@ router.get('/ideas/:id', async (req: Request, res: Response): Promise<void> => {
     const { data: access } = await req.supabase
       .from('user_contract_access')
       .select('contract_id')
-      .eq('user_id', req.user.id)
+      .eq('user_id', req.user.user_id)
       .eq('contract_id', idea.contract_id)
       .single();
 
@@ -942,7 +942,7 @@ router.post(
         target_date: input.target_date || null,
         custom_attributes: input.custom_attributes || null,
         tags: input.tags || null,
-        created_by: req.user.id,
+        created_by: req.user.user_id,
       })
       .select()
       .single();
@@ -1143,7 +1143,7 @@ router.post(
         status: 'draft',
         custom_attributes: idea.custom_attributes,
         tags: idea.tags,
-        created_by: req.user.id,
+        created_by: req.user.user_id,
       })
       .select()
       .single();
@@ -1191,7 +1191,7 @@ router.get('/assets', async (req: Request, res: Response): Promise<void> => {
     const { data: access } = await req.supabase
       .from('user_contract_access')
       .select('contract_id')
-      .eq('user_id', req.user.id)
+      .eq('user_id', req.user.user_id)
       .eq('contract_id', contract_id)
       .single();
 
@@ -1285,7 +1285,7 @@ router.get('/assets/:id', async (req: Request, res: Response): Promise<void> => 
     const { data: access } = await req.supabase
       .from('user_contract_access')
       .select('contract_id')
-      .eq('user_id', req.user.id)
+      .eq('user_id', req.user.user_id)
       .eq('contract_id', asset.contract_id)
       .single();
 
@@ -1362,7 +1362,7 @@ router.post(
         custom_attributes: input.custom_attributes || null,
         published_date: input.published_date || null,
         metadata: input.metadata || null,
-        created_by: req.user.id,
+        created_by: req.user.user_id,
       })
       .select()
       .single();
@@ -1756,7 +1756,7 @@ router.post(
         ...(content_type_id && { content_type_id }),
         ...(category_id && { category_id }),
       };
-      const result = await submitBulkScrape(contract_id, urls, batchOptions, req.user.id);
+      const result = await submitBulkScrape(contract_id, urls, batchOptions, req.user.user_id);
 
       res.status(202).json({
         batch_id: result.batch_id,
@@ -1907,7 +1907,7 @@ router.post(
           source: 'file_upload',
           file_extraction: { status: 'pending' },
         },
-        created_by: req.user.id,
+        created_by: req.user.user_id,
       };
 
       const assets = await edgeFnInsert<Array<{ asset_id: string }>>(

@@ -45,7 +45,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       const { data: accessList } = await req.supabase
         .from('user_contract_access')
         .select('contract_id')
-        .eq('user_id', req.user.id);
+        .eq('user_id', req.user.user_id);
 
       const contractIds = accessList?.map((a) => a.contract_id) || [];
 
@@ -258,7 +258,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
       const { data: access } = await req.supabase
         .from('user_contract_access')
         .select('id')
-        .eq('user_id', req.user.id)
+        .eq('user_id', req.user.user_id)
         .eq('contract_id', id)
         .single();
 

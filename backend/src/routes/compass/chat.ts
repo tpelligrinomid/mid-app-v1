@@ -80,7 +80,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     const { data: access } = await req.supabase
       .from('user_contract_access')
       .select('contract_id')
-      .eq('user_id', req.user.id)
+      .eq('user_id', req.user.user_id)
       .eq('contract_id', contract_id)
       .single();
 

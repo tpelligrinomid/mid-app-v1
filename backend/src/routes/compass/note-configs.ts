@@ -136,7 +136,7 @@ router.post(
         lookback_days: configData.lookback_days || 7,
         lookahead_days: configData.lookahead_days || 30,
         additional_instructions: configData.additional_instructions || null,
-        created_by: req.user.id,
+        created_by: req.user.user_id,
       })
       .select()
       .single();

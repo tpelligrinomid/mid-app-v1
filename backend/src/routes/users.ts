@@ -14,7 +14,7 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.json({
-      id: req.user.id,
+      id: req.user.user_id,
       auth_id: req.user.auth_id,
       email: req.user.email,
       name: req.user.name,

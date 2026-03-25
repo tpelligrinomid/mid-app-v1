@@ -1,7 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
 export interface UserProfile {
-  id: string;
+  user_id: string;
   auth_id: string;
   email: string;
   name: string;

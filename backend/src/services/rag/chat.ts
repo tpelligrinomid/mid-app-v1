@@ -78,8 +78,10 @@ async function classifyIntent(
 
 Categories:
 - "structured": Questions about counts, trends, dates, categories, statuses, or attributes. These need database queries, not content search. Examples: "How many blog posts did we publish last month?", "What topics do we write about most?", "What content is in draft status?", "Show me content published in Q4"
-- "rag": Questions about what specific content says, themes, opinions, strategies, or summaries. These need semantic search through actual content. Examples: "What's our take on ABM?", "Summarize our last meeting", "What do we say about demand gen?"
-- "hybrid": Questions that need both structured data AND content search. Examples: "What topics did we cover in Q4 and what were the key themes?", "Which published blog posts discuss ABM?"
+- "rag": Questions about what specific content says, themes, opinions, strategies, or deep-dive analysis. These need semantic search through actual content. Examples: "What's our take on ABM?", "What do we say about demand gen?", "What themes come up in our blog posts?"
+- "hybrid": Questions that need both structured data AND content search. This includes any request that combines temporal/recency language with content summarization. Examples: "What topics did we cover in Q4 and what were the key themes?", "Which published blog posts discuss ABM?", "Give me a summary of the last 3 meetings", "What was discussed in recent meetings?", "Summarize our last meeting", "What did we talk about this month?", "What are the key takeaways from meetings in the last 90 days?"
+
+IMPORTANT: Any question asking to summarize, recap, or describe what happened in recent/last/past meetings or notes MUST be classified as "hybrid" with the appropriate structured_queries (e.g., "meetings_list"), NOT as "rag". The structured query provides the correct chronological ordering, while RAG provides the content for summarization.
 
 Also provide "structured_queries" — an array of short labels for what structured data to fetch. Valid labels:
 - "content_by_category" — count/list content grouped by category

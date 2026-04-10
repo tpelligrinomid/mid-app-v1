@@ -13,7 +13,7 @@ import type { PromptStep } from '../../types/content.js';
 
 // Claude API config (matches chat.ts)
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-opus-4-20250514';
+const DEFAULT_MODEL = 'claude-opus-4-6-20250415';
 const API_VERSION = '2023-06-01';
 
 // ============================================================================

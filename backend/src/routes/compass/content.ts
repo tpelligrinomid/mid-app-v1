@@ -1681,6 +1681,65 @@ router.post(
   }
 );
 
+/**
+ * POST /api/compass/content/assets/:id/embed
+ * Trigger RAG embedding for an existing asset's content_body.
+ */
+router.post(
+  '/assets/:id/embed',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      res.status(503).json({ error: 'Embedding service not configured' });
+      return;
+    }
+
+    const assetId = req.params.id;
+
+    const { data: asset, error: assetError } = await req.supabase
+      .from('content_assets')
+      .select('asset_id, contract_id, title, content_body')
+      .eq('asset_id', assetId)
+      .maybeSingle();
+
+    if (assetError) {
+      res.status(500).json({ error: assetError.message });
+      return;
+    }
+
+    if (!asset) {
+      res.status(404).json({ error: 'Asset not found' });
+      return;
+    }
+
+    if (!asset.content_body) {
+      res.status(400).json({ error: 'Asset has no content_body to embed' });
+      return;
+    }
+
+    try {
+      await ingestContent({
+        contract_id: asset.contract_id,
+        source_type: 'content',
+        source_id: asset.asset_id,
+        title: asset.title,
+        content: asset.content_body,
+      });
+
+      res.json({ ok: true, message: `Embedded "${asset.title}" into knowledge base` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Embedding failed';
+      console.error(`[Content] Embed failed for asset ${assetId}:`, err);
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
 // ============================================================================
 // BULK INGESTION ENDPOINTS
 // (Must be registered before /assets/:id routes to avoid collision)

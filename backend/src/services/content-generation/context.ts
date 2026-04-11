@@ -95,13 +95,40 @@ function formatBrandVoice(bv: BrandVoiceRow): string {
 // Reference Content Formatting
 // ============================================================================
 
+interface DeliverableRow {
+  deliverable_id: string;
+  title: string;
+  deliverable_type: string;
+  content_raw: string | null;
+  content_structured: Record<string, unknown> | null;
+}
+
 function formatReferenceBlock(
   ragResults: SimilarityResult[],
   manualAssets: AssetRow[],
+  referenceDeliverables: DeliverableRow[],
   additionalInstructions?: string
 ): string {
   const sections: string[] = [];
 
+  // Reference deliverables — injected first as high-priority authoritative context
+  if (referenceDeliverables.length > 0) {
+    sections.push('## Reference Deliverables\n');
+    sections.push('The following deliverables are provided as authoritative source material.');
+    sections.push('Treat this content as primary context — use it to inform tone, positioning, audience understanding, and messaging.\n');
+
+    for (let i = 0; i < referenceDeliverables.length; i++) {
+      const d = referenceDeliverables[i];
+      const content = d.content_raw
+        || (d.content_structured ? JSON.stringify(d.content_structured, null, 2) : null);
+      sections.push(`[${i + 1}] "${d.title}" (${d.deliverable_type})`);
+      sections.push('---');
+      sections.push(content || '(no content)');
+      sections.push('');
+    }
+  }
+
+  // Reference content assets + RAG results — supplementary context
   if (ragResults.length > 0 || manualAssets.length > 0) {
     sections.push('## Reference Content\n');
     sections.push('The following content from the client\'s library is provided as context.');
@@ -241,10 +268,11 @@ export async function gatherGenerationContext(params: {
   contract_id: string;
   asset_id: string;
   reference_asset_ids?: string[];
+  reference_deliverable_ids?: string[];
   auto_retrieve?: boolean;
   additional_instructions?: string;
 }): Promise<GenerationContext> {
-  const { contract_id, asset_id, reference_asset_ids, auto_retrieve = true, additional_instructions } = params;
+  const { contract_id, asset_id, reference_asset_ids, reference_deliverable_ids, auto_retrieve = true, additional_instructions } = params;
 
   // Fetch contract, brand voice, and asset in parallel
   const [contractRows, brandVoiceRows, assetRows] = await Promise.all([
@@ -297,6 +325,25 @@ export async function gatherGenerationContext(params: {
   let manualAssets: AssetRow[] = [];
   const sources: GenerationContext['sources'] = [];
 
+  // Reference deliverables (high-priority authoritative context)
+  let referenceDeliverables: DeliverableRow[] = [];
+  if (reference_deliverable_ids && reference_deliverable_ids.length > 0) {
+    for (const delivId of reference_deliverable_ids.slice(0, 5)) {
+      try {
+        const rows = await select<DeliverableRow[]>('compass_deliverables', {
+          select: 'deliverable_id, title, deliverable_type, content_raw, content_structured',
+          filters: { deliverable_id: delivId },
+          limit: 1,
+        });
+        if (rows?.[0]) {
+          referenceDeliverables.push(rows[0]);
+        }
+      } catch (err) {
+        console.error(`[ContentGen] Failed to fetch reference deliverable ${delivId}:`, err);
+      }
+    }
+  }
+
   // Manual reference assets
   if (reference_asset_ids && reference_asset_ids.length > 0) {
     for (const refId of reference_asset_ids.slice(0, 5)) {
@@ -346,7 +393,7 @@ export async function gatherGenerationContext(params: {
     }
   }
 
-  const referenceBlock = formatReferenceBlock(ragResults, manualAssets, additional_instructions);
+  const referenceBlock = formatReferenceBlock(ragResults, manualAssets, referenceDeliverables, additional_instructions);
 
   // Fetch relevant published URLs for internal linking (non-blocking — if it fails, we just skip it)
   const publishedUrls = await fetchRelevantPublishedUrls(

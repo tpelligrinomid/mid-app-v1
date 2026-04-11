@@ -33,6 +33,7 @@ export interface GenerateParams {
   contract_id: string;
   sequence_id?: string;
   reference_asset_ids?: string[];
+  reference_deliverable_ids?: string[];
   auto_retrieve?: boolean;
   additional_instructions?: string;
 }
@@ -207,7 +208,7 @@ export async function executeGeneration(
     return;
   }
 
-  const { asset_id, contract_id, sequence_id, reference_asset_ids, auto_retrieve, additional_instructions } = params;
+  const { asset_id, contract_id, sequence_id, reference_asset_ids, reference_deliverable_ids, auto_retrieve, additional_instructions } = params;
 
   try {
     // 1. Resolve prompt sequence
@@ -226,6 +227,7 @@ export async function executeGeneration(
       contract_id,
       asset_id,
       reference_asset_ids,
+      reference_deliverable_ids,
       auto_retrieve,
       additional_instructions,
     });

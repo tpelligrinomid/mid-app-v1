@@ -269,10 +269,11 @@ export async function gatherGenerationContext(params: {
   asset_id: string;
   reference_asset_ids?: string[];
   reference_deliverable_ids?: string[];
+  user_variables?: Record<string, string>;
   auto_retrieve?: boolean;
   additional_instructions?: string;
 }): Promise<GenerationContext> {
-  const { contract_id, asset_id, reference_asset_ids, reference_deliverable_ids, auto_retrieve = true, additional_instructions } = params;
+  const { contract_id, asset_id, reference_asset_ids, reference_deliverable_ids, user_variables, auto_retrieve = true, additional_instructions } = params;
 
   // Fetch contract, brand voice, and asset in parallel
   const [contractRows, brandVoiceRows, assetRows] = await Promise.all([
@@ -319,6 +320,15 @@ export async function gatherGenerationContext(params: {
     solution: '',
     results: '',
   };
+
+  // Merge user-provided variables (from the frontend form) — these override auto-resolved defaults
+  if (user_variables) {
+    for (const [key, value] of Object.entries(user_variables)) {
+      if (value !== undefined && value !== null) {
+        variables[key] = value;
+      }
+    }
+  }
 
   // Fetch reference content
   let ragResults: SimilarityResult[] = [];

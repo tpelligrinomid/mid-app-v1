@@ -1614,7 +1614,7 @@ router.post(
     }
 
     const assetId = req.params.id;
-    const { sequence_id, reference_asset_ids, reference_deliverable_ids, auto_retrieve, additional_instructions } = req.body;
+    const { sequence_id, reference_asset_ids, reference_deliverable_ids, variables, auto_retrieve, additional_instructions } = req.body;
 
     // Verify asset exists and get contract_id
     const { data: asset, error: assetError } = await req.supabase
@@ -1658,6 +1658,7 @@ router.post(
           sequence_id,
           reference_asset_ids,
           reference_deliverable_ids,
+          variables,
           auto_retrieve: auto_retrieve !== false,
           additional_instructions,
         },

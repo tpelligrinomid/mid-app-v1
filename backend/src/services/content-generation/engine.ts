@@ -9,6 +9,7 @@
 import { resolveTemplate } from './templates.js';
 import { gatherGenerationContext } from './context.js';
 import { select, update } from '../../utils/edge-functions.js';
+import { ingestContent } from '../rag/ingestion.js';
 import type { PromptStep } from '../../types/content.js';
 
 // Claude API config (matches chat.ts)
@@ -321,6 +322,19 @@ export async function executeGeneration(
     );
 
     console.log(`[ContentGen] Generation complete: asset=${asset_id} tokens=${totalInputTokens}+${totalOutputTokens}`);
+
+    // Fire-and-forget: embed generated content into RAG knowledge base
+    if (contentBody && process.env.OPENAI_API_KEY) {
+      ingestContent({
+        contract_id,
+        source_type: 'content',
+        source_id: asset_id,
+        title: context.variables.topic,
+        content: contentBody,
+      }).catch((err) => {
+        console.error(`[ContentGen] Embedding failed for asset ${asset_id} (non-blocking):`, err);
+      });
+    }
 
     // Fire-and-forget: auto-categorize and tag the generated content
     // Same pattern as the ingest pipeline — reuses existing categorization logic

@@ -104,7 +104,7 @@ export async function submitDeliverable(
   };
 
   // MM route prefixes: /api/generate/ for generators, /api/intake/ for reformatters (plan, brief)
-  const GENERATE_ROUTE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan']);
+  const GENERATE_ROUTE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan', 'brief']);
   const prefix = GENERATE_ROUTE_TYPES.has(data.deliverable_type) ? '/api/generate' : '/api/intake';
   const slug = data.deliverable_type.replace(/_/g, '-');
   const endpoint = `${prefix}/${encodeURIComponent(slug)}`;

@@ -58,6 +58,10 @@ export interface DeliverableSubmission {
   sales_follow_up_sla_hours?: number;
   /** ABM plan: launch timeline description */
   launch_timeline?: string;
+  /** Brief: reference deliverables with full content */
+  reference_deliverables?: Array<{ title: string; deliverable_type: string; content: string }>;
+  /** Brief: reference images as publicly fetchable URLs */
+  reference_images?: Array<{ url: string; caption?: string }>;
 }
 
 /** Shared shape for client and each competitor */
@@ -129,6 +133,10 @@ export interface GenerateDeliverableRequest {
   sales_follow_up_sla_hours?: number;
   /** ABM plan: launch timeline description */
   launch_timeline?: string;
+  /** Brief: IDs of existing deliverables to include as authoritative reference material */
+  reference_deliverable_ids?: string[];
+  /** Brief: reference images (storage paths in Supabase, signed URLs generated before submission) */
+  reference_images?: Array<{ storage_path: string; caption?: string }>;
 }
 
 /** Request body for POST /deliverables/:id/convert */

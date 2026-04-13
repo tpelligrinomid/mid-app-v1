@@ -440,6 +440,8 @@ router.post(
       monthly_ad_budget,
       sales_follow_up_sla_hours,
       launch_timeline,
+      reference_deliverable_ids,
+      reference_images,
     } = req.body as GenerateDeliverableRequest;
 
     // Frontend nests seed_topics/max_crawl_pages inside research_inputs; accept both locations
@@ -467,7 +469,7 @@ router.post(
     }
 
     // Reject generation for manually-created types
-    const GENERATABLE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan']);
+    const GENERATABLE_TYPES = new Set(['research', 'roadmap', 'seo_audit', 'content_plan', 'abm_plan', 'brief']);
     if (!GENERATABLE_TYPES.has(deliverable.deliverable_type)) {
       res.status(400).json({
         error: `AI generation is not supported for type "${deliverable.deliverable_type}".`,
@@ -487,6 +489,28 @@ router.post(
         generation: metadata?.generation,
       });
       return;
+    }
+
+    // Generate signed URLs for reference images (needs req.supabase, must happen before 202)
+    let resolvedImages: Array<{ url: string; caption?: string }> | undefined;
+    if (reference_images && reference_images.length > 0 && req.supabase) {
+      resolvedImages = [];
+      for (const img of reference_images.slice(0, 20)) {
+        try {
+          const { data: signedUrlData, error: signedUrlError } = await req.supabase
+            .storage
+            .from('content-assets')
+            .createSignedUrl(img.storage_path, 3600); // 1-hour TTL
+
+          if (signedUrlData?.signedUrl && !signedUrlError) {
+            resolvedImages.push({ url: signedUrlData.signedUrl, caption: img.caption });
+          } else {
+            console.warn(`[Deliverables] Failed to sign image ${img.storage_path}:`, signedUrlError?.message);
+          }
+        } catch (err) {
+          console.warn(`[Deliverables] Failed to sign image ${img.storage_path}:`, err);
+        }
+      }
     }
 
     // Return 202 immediately
@@ -516,6 +540,8 @@ router.post(
       monthlyAdBudget: monthly_ad_budget,
       salesFollowUpSlaHours: sales_follow_up_sla_hours,
       launchTimeline: launch_timeline,
+      referenceDeliverableIds: reference_deliverable_ids,
+      referenceImages: resolvedImages,
     }).catch(() => {
       // Already handled inside generateDeliverableInBackground
     });

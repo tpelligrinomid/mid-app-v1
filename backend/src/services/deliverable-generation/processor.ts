@@ -33,6 +33,9 @@ export interface GenerateOptions {
   monthlyAdBudget?: number;
   salesFollowUpSlaHours?: number;
   launchTimeline?: string;
+  // Brief fields
+  referenceDeliverableIds?: string[];
+  referenceImages?: Array<{ url: string; caption?: string }>;
 }
 
 /** Update the generation state in compass_deliverables.metadata */
@@ -222,6 +225,8 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     monthlyAdBudget,
     salesFollowUpSlaHours,
     launchTimeline,
+    referenceDeliverableIds,
+    referenceImages,
   } = opts;
 
   try {
@@ -514,6 +519,85 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
 
       console.log(
         `[Deliverable Generation] Submitted ABM plan "${title}" (job ${abmJobId}, run ${abmRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
+    // Briefs: custom instructions + user-selected reference deliverables + optional images
+    if (deliverableType === 'brief') {
+      const context = await assembleContext(contractId, title, primaryMeetingIds);
+
+      // Fetch referenced deliverables
+      const refDeliverables: Array<{ title: string; deliverable_type: string; content: string }> = [];
+      if (referenceDeliverableIds && referenceDeliverableIds.length > 0) {
+        for (const refId of referenceDeliverableIds.slice(0, 5)) {
+          try {
+            const rows = await select<Array<{ title: string; deliverable_type: string; content_raw: string | null; content_structured: Record<string, unknown> | null }>>(
+              'compass_deliverables',
+              {
+                select: 'title, deliverable_type, content_raw, content_structured',
+                filters: { deliverable_id: refId },
+                limit: 1,
+              }
+            );
+            const row = rows?.[0];
+            if (row) {
+              const content = row.content_raw
+                || (row.content_structured ? JSON.stringify(row.content_structured, null, 2) : null);
+              if (content) {
+                refDeliverables.push({
+                  title: row.title,
+                  deliverable_type: row.deliverable_type,
+                  content,
+                });
+              }
+            }
+          } catch (err) {
+            console.warn(`[Deliverable Generation] Failed to fetch reference deliverable ${refId}:`, err);
+          }
+        }
+      }
+
+      const client = researchInputs?.client;
+
+      console.log(
+        `[Deliverable Generation] Brief context for "${title}":`,
+        {
+          has_client: !!client,
+          has_instructions: !!instructions,
+          reference_deliverables_count: refDeliverables.length,
+          reference_images_count: referenceImages?.length ?? 0,
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+        }
+      );
+
+      const { jobId: briefJobId, triggerRunId: briefRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client,
+        knowledge_base: context,
+        metadata: { deliverable_id: deliverableId },
+        ...(refDeliverables.length > 0 && { reference_deliverables: refDeliverables }),
+        ...(referenceImages && referenceImages.length > 0 && { reference_images: referenceImages }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: briefJobId,
+        trigger_run_id: briefRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: context.processes.length,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted brief "${title}" (job ${briefJobId}, run ${briefRunId}), awaiting webhook callback`
       );
       return;
     }

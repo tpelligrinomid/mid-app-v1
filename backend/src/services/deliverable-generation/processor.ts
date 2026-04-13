@@ -567,7 +567,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
             { select: 'contract_name', filters: { contract_id: contractId }, limit: 1 }
           );
           if (contractRows?.[0]) {
-            briefClient = { company_name: contractRows[0].contract_name, domain: '' };
+            briefClient = { company_name: contractRows[0].contract_name, domain: 'n/a' };
           }
         } catch (err) {
           console.warn('[Deliverable Generation] Failed to resolve client from contract:', err);

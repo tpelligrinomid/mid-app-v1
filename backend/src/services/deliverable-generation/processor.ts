@@ -558,12 +558,26 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         }
       }
 
-      const client = researchInputs?.client;
+      // Resolve client: use explicit research_inputs if provided, otherwise auto-resolve from contract
+      let briefClient = researchInputs?.client;
+      if (!briefClient) {
+        try {
+          const contractRows = await select<Array<{ contract_name: string }>>(
+            'contracts',
+            { select: 'contract_name', filters: { contract_id: contractId }, limit: 1 }
+          );
+          if (contractRows?.[0]) {
+            briefClient = { company_name: contractRows[0].contract_name, domain: '' };
+          }
+        } catch (err) {
+          console.warn('[Deliverable Generation] Failed to resolve client from contract:', err);
+        }
+      }
 
       console.log(
         `[Deliverable Generation] Brief context for "${title}":`,
         {
-          has_client: !!client,
+          has_client: !!briefClient,
           has_instructions: !!instructions,
           reference_deliverables_count: refDeliverables.length,
           reference_images_count: referenceImages?.length ?? 0,
@@ -577,7 +591,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         contract_id: contractId,
         title,
         instructions,
-        client,
+        client: briefClient,
         knowledge_base: context,
         metadata: { deliverable_id: deliverableId },
         ...(refDeliverables.length > 0 && { reference_deliverables: refDeliverables }),

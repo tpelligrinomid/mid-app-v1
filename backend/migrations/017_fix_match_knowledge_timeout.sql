@@ -41,6 +41,9 @@ BEGIN
   -- Tune HNSW for higher recall on broad queries (match_count up to 50)
   SET LOCAL hnsw.ef_search = 100;
 
+  -- Safety net: override the default 8s timeout for broad cold-cache queries
+  SET LOCAL statement_timeout = '30s';
+
   -- Explicitly cast text to vector
   query_vector := query_embedding::vector(1536);
 

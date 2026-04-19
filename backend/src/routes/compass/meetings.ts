@@ -22,6 +22,7 @@ import type {
 } from '../../services/master-marketer/types.js';
 import { update as edgeFnUpdate, insert as edgeFnInsert, del as edgeFnDel } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
+import { extractTranscriptText } from '../../utils/transcript.js';
 
 const router = Router();
 
@@ -125,7 +126,11 @@ async function writeProcessingResults(
     is_auto_generated: true,
   }, { select: 'note_id' });
 
-  // Auto-embed the generated note
+  // Auto-embed the generated summary note.
+  // The raw transcript is embedded separately under source_type='meeting' at
+  // create/update time — do NOT re-ingest under that source_id here, or the
+  // summary would overwrite the transcript chunks (ingestContent deletes by
+  // source_id before inserting).
   if (noteContent && process.env.OPENAI_API_KEY && insertedNotes?.[0]) {
     try {
       await ingestContent({
@@ -137,21 +142,6 @@ async function writeProcessingResults(
       });
     } catch (embedErr) {
       console.error('[Meetings] Note embedding failed (non-blocking):', embedErr);
-    }
-  }
-
-  // Also embed the meeting transcript itself
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      await ingestContent({
-        contract_id: contractId,
-        source_type: 'meeting',
-        source_id: meetingId,
-        title: title,
-        content: noteContent,
-      });
-    } catch (embedErr) {
-      console.error('[Meetings] Transcript embedding failed (non-blocking):', embedErr);
     }
   }
 }
@@ -519,11 +509,7 @@ router.post(
 
     // Auto-embed transcript if provided
     if (meeting.transcript && process.env.OPENAI_API_KEY) {
-      const transcriptText = typeof meeting.transcript === 'string'
-        ? meeting.transcript
-        : Array.isArray(meeting.transcript)
-          ? (meeting.transcript as { text: string; speaker?: string }[]).map((s) => s.text).join(' ')
-          : JSON.stringify(meeting.transcript);
+      const transcriptText = extractTranscriptText(meeting.transcript);
 
       if (transcriptText) {
         try {
@@ -683,9 +669,25 @@ router.post(
       processing: { status: 'pending' },
     });
 
+    const transcriptText = formatTranscriptText(transcriptSegments);
+
+    // Fire-and-forget: embed the raw transcript so the chat can cite direct quotes.
+    // (Manual-create embeds inline above; this path needs its own because the
+    // response was already sent and MM no longer handles transcript ingestion.)
+    if (transcriptText && process.env.OPENAI_API_KEY) {
+      ingestContent({
+        contract_id,
+        source_type: 'meeting',
+        source_id: meeting.meeting_id,
+        title: firefliesData.title || 'Meeting',
+        content: transcriptText,
+      }).catch((embedErr) => {
+        console.error('[Meetings] Fireflies transcript embedding failed (non-blocking):', embedErr);
+      });
+    }
+
     // Fire-and-forget: auto-process if Master Marketer is configured
     if (process.env.MASTER_MARKETER_URL && process.env.MASTER_MARKETER_API_KEY) {
-      const transcriptText = formatTranscriptText(transcriptSegments);
       processMeetingInBackground(
         meeting.meeting_id,
         contract_id,
@@ -871,11 +873,7 @@ router.put(
 
     // Re-embed if transcript changed
     if (updateData.transcript !== undefined && process.env.OPENAI_API_KEY && meeting.transcript) {
-      const transcriptText = typeof meeting.transcript === 'string'
-        ? meeting.transcript
-        : Array.isArray(meeting.transcript)
-          ? (meeting.transcript as { text: string; speaker?: string }[]).map((s) => s.text).join(' ')
-          : JSON.stringify(meeting.transcript);
+      const transcriptText = extractTranscriptText(meeting.transcript);
 
       if (transcriptText) {
         try {

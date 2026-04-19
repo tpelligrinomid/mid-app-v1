@@ -7,6 +7,7 @@
 
 import type { SourceType } from '../../types/rag.js';
 import { ingestContent } from './ingestion.js';
+import { extractTranscriptText } from '../../utils/transcript.js';
 import { select } from '../../utils/edge-functions.js';
 
 export interface BackfillOptions {
@@ -66,17 +67,9 @@ function getMeetingContent(meeting: MeetingRow): string {
     parts.push(meeting.title);
   }
 
-  // Extract transcript text
-  if (meeting.transcript) {
-    if (typeof meeting.transcript === 'string') {
-      parts.push(meeting.transcript);
-    } else if (Array.isArray(meeting.transcript)) {
-      // TranscriptSegment[]
-      const segments = meeting.transcript as { text: string; speaker?: string }[];
-      parts.push(segments.map((s) => s.speaker ? `${s.speaker}: ${s.text}` : s.text).join('\n'));
-    } else if (typeof meeting.transcript === 'object') {
-      parts.push(JSON.stringify(meeting.transcript));
-    }
+  const transcriptText = extractTranscriptText(meeting.transcript);
+  if (transcriptText) {
+    parts.push(transcriptText);
   }
 
   // Add sentiment bullets if available

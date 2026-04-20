@@ -119,6 +119,23 @@ export class ClickUpClient {
   }
 
   /**
+   * Create a task in a list.
+   * See: https://clickup.com/api/clickupreference/operation/CreateTask/
+   */
+  async createTask(listId: string, payload: {
+    name: string;
+    description?: string;
+    assignees?: number[];
+    due_date?: number; // Unix ms
+    priority?: 1 | 2 | 3 | 4;
+    tags?: string[];
+    status?: string;
+  }): Promise<{ id: string; url: string; name: string }> {
+    const response = await this.client.post(`/list/${listId}/task`, payload);
+    return response.data;
+  }
+
+  /**
    * Get time entries for a team within a date range
    */
   async getTeamTimeEntries(teamId: string, startDate: Date, endDate: Date) {

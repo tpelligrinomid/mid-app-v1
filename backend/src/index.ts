@@ -12,6 +12,7 @@ import quickbooksAuthRouter from './routes/auth/quickbooks.js';
 import quickbooksPdfRouter from './routes/quickbooks-pdf.js';
 import cronRouter from './routes/cron.js';
 import webhooksRouter from './routes/webhooks.js';
+import tallyWebhookRouter from './routes/webhooks-tally.js';
 import notesRouter from './routes/compass/notes.js';
 import meetingsRouter from './routes/compass/meetings.js';
 import reportsRouter from './routes/pulse/reports.js';
@@ -66,7 +67,14 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    // Preserve the raw body so webhook handlers (e.g. Tally HMAC) can
+    // verify signatures against the exact bytes that were signed.
+    (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+  },
+}));
 
 // Health check (no auth required)
 app.get('/health', (_req, res) => {
@@ -85,6 +93,9 @@ app.use('/api/cron', cronRouter);
 
 // Webhook routes (no auth middleware - authenticated via x-api-key header)
 app.use('/api/webhooks', webhooksRouter);
+
+// Tally webhook (no auth middleware - authenticated via HMAC signature)
+app.use('/api/webhooks/tally', tallyWebhookRouter);
 
 // Protected routes (require authentication)
 app.use('/api/users', authMiddleware, usersRouter);

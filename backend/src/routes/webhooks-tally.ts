@@ -247,10 +247,11 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
     const clickup = new ClickUpClient(token);
 
     const lists = (await clickup.getListsInFolder(contract.clickup_folder_id)) as ClickUpListRow[];
-    const todosList = lists.find((l) => l.name?.trim().toLowerCase() === 'to dos');
+    const normalize = (s: string) => s.toLowerCase().replace(/[\s-]+/g, '');
+    const todosList = lists.find((l) => l.name && normalize(l.name) === 'todos');
     if (!todosList) {
       await postFailureAlert(
-        `No list named "To Dos" found in folder ${contract.clickup_folder_id} (contract: ${contract.contract_name}).`,
+        `No ToDos list found in folder ${contract.clickup_folder_id} (contract: ${contract.contract_name}). Looked for any list matching "ToDos" / "To Dos" / "To-Dos".`,
         payload,
         rawBodyText
       );

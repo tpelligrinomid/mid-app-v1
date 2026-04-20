@@ -356,7 +356,7 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
       markdown_content: buildTaskDescription(payload),
       assignees: assignees.length > 0 ? assignees : undefined,
       due_date: dueDateMs,
-      status: 'Working',
+      status: 'WORKING',
     });
 
     console.log(

@@ -125,6 +125,7 @@ export class ClickUpClient {
   async createTask(listId: string, payload: {
     name: string;
     description?: string;
+    markdown_content?: string;
     assignees?: number[];
     due_date?: number; // Unix ms
     priority?: 1 | 2 | 3 | 4;

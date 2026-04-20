@@ -33,6 +33,12 @@ interface ContractRow {
   external_id: string | null;
   clickup_folder_id: string | null;
   account_manager: string | null;
+  slack_channel_internal: string | null;
+}
+
+interface ClickUpUserRow {
+  id: string;
+  full_name: string | null;
 }
 
 interface ClickUpListRow {
@@ -61,7 +67,9 @@ function findField(fields: TallyField[], label: string): TallyField | undefined 
   return fields.find((f) => f.label?.toLowerCase() === label.toLowerCase());
 }
 
-function resolveValue(field: TallyField): string | null {
+type RenderFormat = 'markdown' | 'slack';
+
+function resolveValue(field: TallyField, format: RenderFormat = 'markdown'): string | null {
   const v = field.value;
   if (v === null || v === undefined) return null;
 
@@ -77,7 +85,10 @@ function resolveValue(field: TallyField): string | null {
     const files = v as Array<{ name?: string; url?: string }>;
     const links = files
       .filter((f) => f.url)
-      .map((f) => `<${f.url}|${f.name ?? 'file'}>`);
+      .map((f) => {
+        const name = f.name ?? 'file';
+        return format === 'slack' ? `<${f.url}|${name}>` : `[${name}](${f.url})`;
+      });
     return links.length > 0 ? links.join(', ') : null;
   }
 
@@ -92,11 +103,12 @@ function buildTaskDescription(payload: TallyPayload): string {
   const lines: string[] = [];
   for (const field of payload.data.fields) {
     if (field.label?.toLowerCase() === 'contract') continue;
-    const value = resolveValue(field);
+    const value = resolveValue(field, 'markdown');
     if (!value) continue;
     lines.push(`**${field.label}:** ${value}`);
+    lines.push('');
   }
-  lines.push('');
+  lines.push('---');
   lines.push(`_Form: ${payload.data.formName}_`);
   lines.push(`_Submission ID: ${payload.data.submissionId}_`);
   lines.push(`_Submitted: ${payload.data.createdAt}_`);
@@ -106,6 +118,74 @@ function buildTaskDescription(payload: TallyPayload): string {
 function dateToUnixMs(date: string): number | undefined {
   const parsed = new Date(`${date}T12:00:00Z`);
   return isNaN(parsed.getTime()) ? undefined : parsed.getTime();
+}
+
+async function postSuccessNotification(params: {
+  contract: ContractRow;
+  projectType: string;
+  taskUrl: string;
+  assigneeName: string | null;
+  dueDate: string | null;
+  submissionId: string;
+}): Promise<void> {
+  const { contract, projectType, taskUrl, assigneeName, dueDate, submissionId } = params;
+  const fallbackChannel = process.env.TALLY_FALLBACK_SLACK_CHANNEL;
+
+  const lines: string[] = [];
+  lines.push(`:sparkles: *New project intake: ${projectType}*`);
+  lines.push(`*Contract:* ${contract.contract_name}${contract.external_id ? ` (${contract.external_id})` : ''}`);
+  if (assigneeName) lines.push(`*Assigned to:* ${assigneeName}`);
+  else lines.push(`*Assigned to:* _(unassigned — no account manager set on contract)_`);
+  if (dueDate) lines.push(`*Due:* ${dueDate}`);
+  lines.push(`*Task:* <${taskUrl}|View in ClickUp>`);
+  lines.push(`_Submission ID: ${submissionId}_`);
+  const text = lines.join('\n');
+
+  // Prefer the contract's internal channel; if missing or the post fails,
+  // fall back to the default alert channel so nothing is silent.
+  if (contract.slack_channel_internal) {
+    try {
+      const result = await postSlackMessage({ channel: contract.slack_channel_internal, text });
+      if (result.ok) return;
+      console.warn(
+        `[Tally] Success notification to contract channel ${contract.slack_channel_internal} failed: ${result.error}`
+      );
+    } catch (err) {
+      console.warn('[Tally] Success notification to contract channel threw:', err);
+    }
+  } else {
+    console.warn(`[Tally] Contract "${contract.contract_name}" has no slack_channel_internal — using fallback channel`);
+  }
+
+  if (fallbackChannel) {
+    const noteLines = [
+      ...lines,
+      '',
+      contract.slack_channel_internal
+        ? `_(posted here because the contract's Slack channel \`${contract.slack_channel_internal}\` rejected the message — bot may not be a member)_`
+        : `_(posted here because the contract has no slack_channel_internal configured)_`,
+    ];
+    try {
+      await postSlackMessage({ channel: fallbackChannel, text: noteLines.join('\n') });
+    } catch (err) {
+      console.error('[Tally] Fallback channel post for success notification threw:', err);
+    }
+  }
+}
+
+async function resolveAssigneeName(clickupUserId: string | null): Promise<string | null> {
+  if (!clickupUserId) return null;
+  try {
+    const rows = await select<ClickUpUserRow[]>('pulse_clickup_users', {
+      select: 'id, full_name',
+      filters: { id: clickupUserId },
+      limit: 1,
+    });
+    return rows?.[0]?.full_name ?? null;
+  } catch (err) {
+    console.warn('[Tally] Failed to resolve account manager name:', err);
+    return null;
+  }
 }
 
 async function postFailureAlert(
@@ -132,7 +212,7 @@ async function postFailureAlert(
     lines.push('*Submitted fields:*');
     const fieldLines = payload.data.fields
       .map((field) => {
-        const value = resolveValue(field);
+        const value = resolveValue(field, 'slack');
         return value ? `• *${field.label}:* ${value}` : null;
       })
       .filter((line): line is string => line !== null);
@@ -212,7 +292,7 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
     }
 
     const contractRows = await select<ContractRow[]>('contracts', {
-      select: 'contract_id, contract_name, external_id, clickup_folder_id, account_manager',
+      select: 'contract_id, contract_name, external_id, clickup_folder_id, account_manager, slack_channel_internal',
       filters: { external_id: contractValue },
       limit: 1,
     });
@@ -273,7 +353,7 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
 
     const task = await clickup.createTask(todosList.id, {
       name: `${projectType} — ${contract.contract_name}`,
-      description: buildTaskDescription(payload),
+      markdown_content: buildTaskDescription(payload),
       assignees: assignees.length > 0 ? assignees : undefined,
       due_date: dueDateMs,
     });
@@ -281,6 +361,22 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
     console.log(
       `[Tally] Created task ${task.id} in list ${todosList.id} for contract ${contract.contract_name} (${contractValue})`
     );
+
+    // Fire-and-forget success notification to the contract's internal Slack
+    // channel. Failures here don't change the HTTP response — the task is
+    // already created.
+    const assigneeName = await resolveAssigneeName(contract.account_manager);
+    const dueDateDisplay = typeof dueDateRaw === 'string' ? dueDateRaw : null;
+    postSuccessNotification({
+      contract,
+      projectType,
+      taskUrl: task.url,
+      assigneeName,
+      dueDate: dueDateDisplay,
+      submissionId: payload.data.submissionId,
+    }).catch((err) => {
+      console.error('[Tally] Success notification threw:', err);
+    });
 
     res.status(200).json({ ok: true, task_id: task.id, task_url: task.url });
   } catch (err) {

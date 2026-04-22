@@ -491,6 +491,36 @@ router.post(
       return;
     }
 
+    // Plan types require a prior roadmap deliverable on the same contract.
+    // Check synchronously so the frontend gets a clean 422 instead of a
+    // silent background failure from Master Marketer rejecting the payload.
+    const PLAN_TYPES_REQUIRING_ROADMAP = new Set(['abm_plan', 'content_plan']);
+    if (PLAN_TYPES_REQUIRING_ROADMAP.has(deliverable.deliverable_type)) {
+      const { data: existingRoadmap, error: roadmapErr } = await req.supabase
+        .from('compass_deliverables')
+        .select('deliverable_id')
+        .eq('contract_id', deliverable.contract_id)
+        .eq('deliverable_type', 'roadmap')
+        .not('content_structured', 'is', null)
+        .limit(1)
+        .maybeSingle();
+
+      if (roadmapErr) {
+        console.error('[Deliverables] Roadmap preflight query failed:', roadmapErr);
+        res.status(500).json({ error: 'Failed to verify roadmap prerequisite' });
+        return;
+      }
+
+      if (!existingRoadmap) {
+        res.status(422).json({
+          error: 'Generate a roadmap for this contract before generating a plan.',
+          error_code: 'MISSING_ROADMAP',
+          deliverable_type: deliverable.deliverable_type,
+        });
+        return;
+      }
+    }
+
     // Generate signed URLs for reference images (needs req.supabase, must happen before 202)
     let resolvedImages: Array<{ url: string; caption?: string }> | undefined;
     if (reference_images && reference_images.length > 0 && req.supabase) {

@@ -319,6 +319,10 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         }
       );
 
+      if (!roadmapData) {
+        throw new Error('Content plan requires an approved roadmap deliverable for this contract. Generate the roadmap first.');
+      }
+
       const { jobId: cpJobId, triggerRunId: cpRunId } = await submitDeliverable({
         deliverable_type: deliverableType,
         contract_id: contractId,
@@ -481,6 +485,10 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
           has_tech_stack: !!techStack,
         }
       );
+
+      if (!roadmapData) {
+        throw new Error('ABM plan requires an approved roadmap deliverable for this contract. Generate the roadmap first.');
+      }
 
       if (!client) {
         throw new Error('ABM plan requires client info — provide research_inputs.client with company_name and domain');

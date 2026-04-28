@@ -324,16 +324,44 @@ export async function executeGeneration(
     console.log(`[ContentGen] Generation complete: asset=${asset_id} tokens=${totalInputTokens}+${totalOutputTokens}`);
 
     // Fire-and-forget: embed generated content into RAG knowledge base
+    // (skipped when the asset's content type has is_rag_eligible = false —
+    // used for derivative output like social post packages, summaries, etc.,
+    // which would otherwise pollute future retrievals as echo-chamber input)
     if (contentBody && process.env.OPENAI_API_KEY) {
-      ingestContent({
-        contract_id,
-        source_type: 'content',
-        source_id: asset_id,
-        title: context.variables.topic,
-        content: contentBody,
-      }).catch((err) => {
-        console.error(`[ContentGen] Embedding failed for asset ${asset_id} (non-blocking):`, err);
-      });
+      let isRagEligible = true;
+      try {
+        const assetRows = await select<Array<{ content_type_id: string | null }>>('content_assets', {
+          select: 'content_type_id',
+          filters: { asset_id },
+          limit: 1,
+        });
+        const contentTypeId = assetRows?.[0]?.content_type_id;
+        if (contentTypeId) {
+          const typeRows = await select<Array<{ is_rag_eligible: boolean }>>('content_types', {
+            select: 'is_rag_eligible',
+            filters: { type_id: contentTypeId },
+            limit: 1,
+          });
+          isRagEligible = typeRows?.[0]?.is_rag_eligible ?? true;
+        }
+      } catch (err) {
+        // Fail-safe: on lookup error, default to eligible (preserve prior behavior).
+        console.warn(`[ContentGen] RAG eligibility check failed for asset ${asset_id}, defaulting to eligible:`, err);
+      }
+
+      if (isRagEligible) {
+        ingestContent({
+          contract_id,
+          source_type: 'content',
+          source_id: asset_id,
+          title: context.variables.topic,
+          content: contentBody,
+        }).catch((err) => {
+          console.error(`[ContentGen] Embedding failed for asset ${asset_id} (non-blocking):`, err);
+        });
+      } else {
+        console.log(`[ContentGen] Skipping RAG ingestion for asset ${asset_id} — content type marked is_rag_eligible=false`);
+      }
     }
 
     // Fire-and-forget: auto-categorize and tag the generated content

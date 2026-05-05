@@ -118,7 +118,7 @@ interface EnrichedTask {
   name: string;
   description: string;
   list_type: string | null;
-  points: number;
+  points: number | null;
   date_done: string | null;
   category: Category;
   confidence: number;
@@ -237,6 +237,9 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
     }
 
     // 3. All delivered tasks across all contracts in the window.
+    // Mirror client-status-report filters: parent tasks only (no subtasks),
+    // non-internal, non-deleted, non-archived. Subtasks usually have null
+    // points because the point estimate lives on the parent.
     // Paginate to avoid PostgREST's default 1000-row cap.
     const PAGE_SIZE = 1000;
     const taskRows: TaskRow[] = [];
@@ -248,6 +251,10 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
           contract_id: { in: contractIds },
           status: 'delivered',
           date_done: { gte: periodStart.toISOString() },
+          parent_task_id: { is: null },
+          is_internal_only: false,
+          is_deleted: false,
+          is_archived: false,
         },
         order: [{ column: 'task_id', ascending: true }],
         limit: PAGE_SIZE,
@@ -333,7 +340,7 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         name: t.name ?? '',
         description: t.description ?? '',
         list_type: t.list_type,
-        points: Number(t.points) || 0,
+        points: t.points === null || t.points === undefined ? null : Number(t.points),
         date_done: t.date_done,
         category,
         confidence: cls?.confidence ?? 0,
@@ -371,7 +378,8 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         t.list_type,
         t.name,
         truncate(t.description, 1000),
-        t.points,
+        // Preserve null vs zero — null means "no points estimate", not "zero effort"
+        t.points === null ? '' : t.points,
         t.date_done,
       ]);
     }
@@ -391,7 +399,7 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         rollupMap.set(key, entry);
       }
       entry.taskCounts.set(t.category, (entry.taskCounts.get(t.category) ?? 0) + 1);
-      entry.pointTotals.set(t.category, (entry.pointTotals.get(t.category) ?? 0) + t.points);
+      entry.pointTotals.set(t.category, (entry.pointTotals.get(t.category) ?? 0) + (t.points ?? 0));
     }
 
     const rollupHeaders: string[] = ['contract_name', 'priority', 'total_tasks', 'total_points'];
@@ -422,7 +430,7 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
     const portfolioPointTotals = new Map<Category, number>();
     for (const t of enriched) {
       portfolioTaskCounts.set(t.category, (portfolioTaskCounts.get(t.category) ?? 0) + 1);
-      portfolioPointTotals.set(t.category, (portfolioPointTotals.get(t.category) ?? 0) + t.points);
+      portfolioPointTotals.set(t.category, (portfolioPointTotals.get(t.category) ?? 0) + (t.points ?? 0));
     }
     let portfolioTaskTotal = 0;
     let portfolioPointTotal = 0;

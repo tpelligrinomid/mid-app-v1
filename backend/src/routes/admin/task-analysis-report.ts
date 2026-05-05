@@ -80,6 +80,7 @@ interface ContractRow {
   priority: string | null;
   account_manager: string | null;
   team_manager: string | null;
+  engagement_type: string | null;
 }
 
 interface TaskRow {
@@ -196,18 +197,22 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
   console.log(`[TaskAnalysis] Starting report for last ${days} days (${periodStart.toISOString()} to ${periodEnd.toISOString()})`);
 
   try {
-    // 1. Active non-hosting contracts
-    const contractRows = await select<ContractRow[]>('contracts', {
-      select: 'contract_id,contract_name,external_id,priority,account_manager,team_manager',
+    // 1. Active non-hosting contracts, excluding internal engagement type
+    const allContractRows = await select<ContractRow[]>('contracts', {
+      select: 'contract_id,contract_name,external_id,priority,account_manager,team_manager,engagement_type',
       filters: {
         contract_status: 'active',
         hosting: false,
       },
     });
-    console.log(`[TaskAnalysis] ${contractRows.length} active contracts`);
+    // Client-side filter so contracts with null engagement_type are kept; only
+    // contracts explicitly tagged 'internal' are excluded.
+    const contractRows = allContractRows.filter((c) => c.engagement_type !== 'internal');
+    const internalCount = allContractRows.length - contractRows.length;
+    console.log(`[TaskAnalysis] ${contractRows.length} active contracts (excluded ${internalCount} internal)`);
 
     if (contractRows.length === 0) {
-      res.status(404).json({ error: 'No active non-hosting contracts found' });
+      res.status(404).json({ error: 'No active non-internal non-hosting contracts found' });
       return;
     }
 
@@ -231,15 +236,28 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       }
     }
 
-    // 3. All delivered tasks across all contracts in the window
-    const taskRows = await select<TaskRow[]>('pulse_tasks', {
-      select: 'task_id,contract_id,name,description,status,list_type,points,date_done,clickup_task_id',
-      filters: {
-        contract_id: { in: contractIds },
-        status: 'delivered',
-        date_done: { gte: periodStart.toISOString() },
-      },
-    });
+    // 3. All delivered tasks across all contracts in the window.
+    // Paginate to avoid PostgREST's default 1000-row cap.
+    const PAGE_SIZE = 1000;
+    const taskRows: TaskRow[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await select<TaskRow[]>('pulse_tasks', {
+        select: 'task_id,contract_id,name,description,status,list_type,points,date_done,clickup_task_id',
+        filters: {
+          contract_id: { in: contractIds },
+          status: 'delivered',
+          date_done: { gte: periodStart.toISOString() },
+        },
+        order: [{ column: 'task_id', ascending: true }],
+        limit: PAGE_SIZE,
+        offset,
+      });
+      taskRows.push(...page);
+      console.log(`[TaskAnalysis] Fetched ${taskRows.length} tasks so far (page ${page.length} rows)`);
+      if (page.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
     console.log(`[TaskAnalysis] ${taskRows.length} delivered tasks in window`);
 
     if (taskRows.length === 0) {
@@ -409,6 +427,7 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       window_start: periodStart.toISOString(),
       window_end: periodEnd.toISOString(),
       contracts_evaluated: contractRows.length,
+      contracts_excluded_internal: internalCount,
       tasks_total: taskRows.length,
       tasks_classified: classifications.size,
       tasks_unclassified_fallback_to_other: taskRows.length - classifications.size,

@@ -272,12 +272,15 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
     let totalInput = 0;
     let totalOutput = 0;
 
+    const batches: TaskRow[][] = [];
     for (let i = 0; i < taskRows.length; i += BATCH_SIZE) {
-      const batch = taskRows.slice(i, i + BATCH_SIZE);
-      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(taskRows.length / BATCH_SIZE);
-      console.log(`[TaskAnalysis] Classifying batch ${batchNum}/${totalBatches} (${batch.length} tasks)`);
+      batches.push(taskRows.slice(i, i + BATCH_SIZE));
+    }
+    const totalBatches = batches.length;
 
+    const processBatch = async (batch: TaskRow[], idx: number): Promise<void> => {
+      const batchNum = idx + 1;
+      console.log(`[TaskAnalysis] Classifying batch ${batchNum}/${totalBatches} (${batch.length} tasks)`);
       try {
         const { classifications: batchClassifications, usage } = await classifyBatch(batch);
         for (const r of batchClassifications) {
@@ -288,10 +291,27 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         totalInput += usage.input_tokens;
         totalOutput += usage.output_tokens;
       } catch (err) {
-        console.error(`[TaskAnalysis] Batch ${batchNum} classification failed:`, err);
+        console.error(`[TaskAnalysis] Batch ${batchNum} failed:`, err);
         // Continue — unclassified tasks fall through to "Other" below
       }
+    };
+
+    // Run batch 0 alone to warm the prompt cache, then fan out the rest.
+    // If we fired all batches in parallel up front, every worker would pay the
+    // cache-write premium for the same prefix instead of reading from cache.
+    const CONCURRENCY = 5;
+    if (batches.length > 0) {
+      await processBatch(batches[0], 0);
     }
+    let nextIndex = 1;
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      while (true) {
+        const idx = nextIndex++;
+        if (idx >= batches.length) return;
+        await processBatch(batches[idx], idx);
+      }
+    });
+    await Promise.all(workers);
 
     console.log(`[TaskAnalysis] Classified ${classifications.size}/${taskRows.length} tasks`);
 

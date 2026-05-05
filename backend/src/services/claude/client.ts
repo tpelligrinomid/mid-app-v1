@@ -93,3 +93,86 @@ export async function sendMessage(
   const textBlock = result.content.find((b) => b.type === 'text');
   return textBlock?.text ?? '';
 }
+
+interface CachedRequestOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+interface CachedRequestResult {
+  text: string;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+}
+
+/**
+ * Send a message with the system prompt marked for prompt caching.
+ *
+ * The system prompt is sent as a single text block with `cache_control: ephemeral`,
+ * so repeated calls with the same system prompt only pay full price for the first
+ * one. Useful for batched classification where the taxonomy is the stable prefix
+ * and only the user message changes.
+ *
+ * Cache hits will only register if the system prompt exceeds the model's minimum
+ * cacheable prefix (4096 tokens on Haiku 4.5). Below that threshold the marker is
+ * silently ignored — no error, just no cache hits.
+ */
+export async function sendCachedRequest(
+  systemPrompt: string,
+  userMessage: string,
+  options: CachedRequestOptions = {}
+): Promise<CachedRequestResult> {
+  const apiKey = getApiKey();
+  const {
+    model = 'claude-haiku-4-5',
+    maxTokens = 4096,
+    temperature = 0,
+  } = options;
+
+  const response = await withRetry(async () => {
+    const res = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: [
+          {
+            type: 'text',
+            text: systemPrompt,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Claude API ${res.status}: ${errorText.substring(0, 200)}`);
+    }
+
+    return res;
+  });
+
+  const result = await response.json() as {
+    content: { type: string; text: string }[];
+    usage: CachedRequestResult['usage'];
+  };
+
+  const textBlock = result.content.find((b) => b.type === 'text');
+  return {
+    text: textBlock?.text ?? '',
+    usage: result.usage,
+  };
+}

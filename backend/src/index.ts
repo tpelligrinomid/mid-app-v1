@@ -23,6 +23,7 @@ import contentRouter from './routes/compass/content.js';
 import chatRouter from './routes/compass/chat.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
 import brandVoiceRouter from './routes/compass/brand-voice.js';
+import taskAnalysisReportRouter from './routes/admin/task-analysis-report.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -90,6 +91,9 @@ app.use('/api/auth/quickbooks', quickbooksAuthRouter);
 
 // Cron routes (no auth middleware - authenticated via CRON_SECRET header)
 app.use('/api/cron', cronRouter);
+
+// Admin routes (no auth middleware - authenticated via CRON_SECRET header, ad-hoc CSV exports)
+app.use('/api/admin', taskAnalysisReportRouter);
 
 // Webhook routes (no auth middleware - authenticated via x-api-key header)
 app.use('/api/webhooks', webhooksRouter);

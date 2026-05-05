@@ -71,7 +71,9 @@ A zip with three files:
 | `rollup.csv` | One row per contract + a portfolio total row | Visualization at the portfolio level. Columns: contract_name, priority, total_tasks, total_points, then 26 columns covering tasks and points for each of the 13 categories. |
 | `summary.json` | Run metadata | Window, contract counts, task counts, Claude usage (incl. cache hits), elapsed ms. Useful for sanity-checking. |
 
-The 13 categories are: Web Development, Tech Stack/Ops, Account Management, Content Creation, Podcast, Design/Creative, Paid Media, ABM, SEO/AEO, Performance/Reporting, Strategy/Research, Video, Other.
+The 14 categories are: Web Development, Tech Stack, Marketing Ops, Account Management, Content Creation, Podcast, Design/Creative, Paid Media, ABM, SEO/AEO, Performance/Reporting, Strategy/Research, Video, Other.
+
+**Note on `Tech Stack` vs `Marketing Ops`:** `Tech Stack` is reserved for tasks literally named "Tech Stack" — these are cost-tracking placeholder tasks representing platform subscription costs, not service work. They're pre-classified by name without an AI call. All actual operational work (CRM admin, integrations, lead routing, process documentation, lifecycle definition) goes under `Marketing Ops`.
 
 ---
 
@@ -88,12 +90,16 @@ for each of 13 categories, plus a PORTFOLIO TOTAL row at the bottom).
 
 Context: I'm the head of a marketing agency. These are all tasks
 my agency has delivered for active client contracts in the last 90
-days. Each task has been AI-classified into one of 13 work categories
-(Web Development, Tech Stack/Ops, Account Management, Content
-Creation, Podcast, Design/Creative, Paid Media, ABM, SEO/AEO,
-Performance/Reporting, Strategy/Research, Video, Other). The "points"
-field is our internal effort estimate for each task — higher points
-means heavier work.
+days. Each task has been classified into one of 14 categories:
+Web Development, Tech Stack, Marketing Ops, Account Management,
+Content Creation, Podcast, Design/Creative, Paid Media, ABM,
+SEO/AEO, Performance/Reporting, Strategy/Research, Video, Other.
+The "points" field is our internal effort estimate for each task —
+higher points means heavier work. Note: "Tech Stack" tasks are
+cost-tracking placeholders representing platform subscription
+costs, not service work — feel free to surface these separately
+or exclude them from "work delivered" framings since they don't
+represent labor.
 
 I want a single interactive HTML artifact I can share with my
 leadership team that tells the story of what we actually produced

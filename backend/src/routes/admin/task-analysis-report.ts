@@ -25,7 +25,8 @@ function verifySecret(req: Request, res: Response, next: () => void) {
 
 const CATEGORIES = [
   'Web Development',
-  'Tech Stack/Ops',
+  'Tech Stack',
+  'Marketing Ops',
   'Account Management',
   'Content Creation',
   'Podcast',
@@ -41,12 +42,20 @@ const CATEGORIES = [
 
 type Category = (typeof CATEGORIES)[number];
 
+// "Tech Stack" is a literal cost-tracking task name, not a category of service work.
+// It's pre-classified here without an AI call; the AI taxonomy below excludes it.
+function preClassifyByName(name: string): Category | null {
+  const normalized = (name ?? '').trim().toLowerCase();
+  if (normalized === 'tech stack') return 'Tech Stack';
+  return null;
+}
+
 const TAXONOMY_PROMPT = `You are a marketing operations analyst classifying agency tasks into exactly one category from a fixed taxonomy.
 
 Categories (use the exact name shown):
 
 - Web Development: building, updating, or maintaining websites and web apps. Page builds, CMS work, HubSpot/WordPress development, landing pages, site migrations, technical implementation in the browser layer.
-- Tech Stack/Ops: marketing technology administration and integrations. CRM/MAP setup, HubSpot/Marketo/Salesforce config, Zapier/n8n workflows, data piping, lead routing, attribution plumbing, internal tooling and ops.
+- Marketing Ops: hands-on configuration of marketing technology platforms AND the operating model around them. CRM/MAP admin (HubSpot, Marketo, Salesforce, Pardot), workflow and automation builds inside those platforms, integration work (Zapier, n8n, native connectors), lead routing implementation, attribution implementation, data piping between systems, lead lifecycle definition (MQL/SQL/PQL), marketing process documentation, team enablement and training, internal tooling for the marketing team. Anything that is platform configuration OR process/operating-model work for the marketing function.
 - Account Management: client-facing relationship and project management. Status calls, QBRs, account reviews, scoping conversations, contract renewals, internal coordination on behalf of an account, project management overhead.
 - Content Creation: writing or producing long-form and short-form written content. Blogs, eBooks, whitepapers, case studies, website copy, email copy, sales enablement content, ghostwriting.
 - Podcast: anything tied to podcast production. Episode planning, recording, editing, show notes, guest outreach, podcast distribution, podcast-specific promotion.
@@ -81,6 +90,9 @@ interface ContractRow {
   account_manager: string | null;
   team_manager: string | null;
   engagement_type: string | null;
+  contract_type: string | null;
+  monthly_points_allotment: number | null;
+  amount: number | null;
 }
 
 interface TaskRow {
@@ -113,6 +125,10 @@ interface EnrichedTask {
   contract_name: string;
   contract_external_id: string | null;
   priority: string | null;
+  contract_type: string | null;
+  engagement_type: string | null;
+  monthly_points_allotment: number | null;
+  amount: number | null;
   account_manager: string;
   team_manager: string;
   name: string;
@@ -199,7 +215,7 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
   try {
     // 1. Active non-hosting contracts, excluding internal engagement type
     const allContractRows = await select<ContractRow[]>('contracts', {
-      select: 'contract_id,contract_name,external_id,priority,account_manager,team_manager,engagement_type',
+      select: 'contract_id,contract_name,external_id,priority,account_manager,team_manager,engagement_type,contract_type,monthly_points_allotment,amount',
       filters: {
         contract_status: 'active',
         hosting: false,
@@ -272,16 +288,33 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       return;
     }
 
-    // 4. Batch-classify via Claude
+    // 4. Pre-classify cost-tracking tasks by name, then batch-classify the rest via Claude
     const classifications = new Map<string, Classification>();
     let totalCacheCreate = 0;
     let totalCacheRead = 0;
     let totalInput = 0;
     let totalOutput = 0;
 
+    const tasksToClassify: TaskRow[] = [];
+    let preClassifiedCount = 0;
+    for (const task of taskRows) {
+      const preCategory = preClassifyByName(task.name ?? '');
+      if (preCategory) {
+        classifications.set(task.task_id, {
+          id: task.task_id,
+          category: preCategory,
+          confidence: 1.0,
+        });
+        preClassifiedCount++;
+      } else {
+        tasksToClassify.push(task);
+      }
+    }
+    console.log(`[TaskAnalysis] Pre-classified ${preClassifiedCount} tasks by name; ${tasksToClassify.length} need AI classification`);
+
     const batches: TaskRow[][] = [];
-    for (let i = 0; i < taskRows.length; i += BATCH_SIZE) {
-      batches.push(taskRows.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < tasksToClassify.length; i += BATCH_SIZE) {
+      batches.push(tasksToClassify.slice(i, i + BATCH_SIZE));
     }
     const totalBatches = batches.length;
 
@@ -335,6 +368,10 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         contract_name: contract?.contract_name ?? '(unknown)',
         contract_external_id: contract?.external_id ?? null,
         priority: contract?.priority ?? null,
+        contract_type: contract?.contract_type ?? null,
+        engagement_type: contract?.engagement_type ?? null,
+        monthly_points_allotment: contract?.monthly_points_allotment ?? null,
+        amount: contract?.amount ?? null,
         account_manager: contract?.account_manager ? (usersMap.get(contract.account_manager) ?? contract.account_manager) : '',
         team_manager: contract?.team_manager ? (usersMap.get(contract.team_manager) ?? contract.team_manager) : '',
         name: t.name ?? '',
@@ -354,6 +391,10 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       'contract_name',
       'contract_external_id',
       'priority',
+      'contract_type',
+      'engagement_type',
+      'monthly_points_allotment',
+      'amount',
       'account_manager',
       'team_manager',
       'category',
@@ -371,6 +412,10 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         t.contract_name,
         t.contract_external_id,
         t.priority,
+        t.contract_type,
+        t.engagement_type,
+        t.monthly_points_allotment,
+        t.amount,
         t.account_manager,
         t.team_manager,
         t.category,
@@ -385,7 +430,18 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
     }
 
     // 7. Build rollup.csv (contract × category — one row per contract, columns = categories)
-    const rollupMap = new Map<string, { taskCounts: Map<Category, number>; pointTotals: Map<Category, number>; contractName: string; priority: string | null }>();
+    interface RollupEntry {
+      taskCounts: Map<Category, number>;
+      pointTotals: Map<Category, number>;
+      contractName: string;
+      contractExternalId: string | null;
+      priority: string | null;
+      contractType: string | null;
+      engagementType: string | null;
+      monthlyPointsAllotment: number | null;
+      amount: number | null;
+    }
+    const rollupMap = new Map<string, RollupEntry>();
     for (const t of enriched) {
       const key = t.contract_id ?? 'unknown';
       let entry = rollupMap.get(key);
@@ -394,7 +450,12 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
           taskCounts: new Map(),
           pointTotals: new Map(),
           contractName: t.contract_name,
+          contractExternalId: t.contract_external_id,
           priority: t.priority,
+          contractType: t.contract_type,
+          engagementType: t.engagement_type,
+          monthlyPointsAllotment: t.monthly_points_allotment,
+          amount: t.amount,
         };
         rollupMap.set(key, entry);
       }
@@ -402,7 +463,17 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       entry.pointTotals.set(t.category, (entry.pointTotals.get(t.category) ?? 0) + (t.points ?? 0));
     }
 
-    const rollupHeaders: string[] = ['contract_name', 'priority', 'total_tasks', 'total_points'];
+    const rollupHeaders: string[] = [
+      'contract_name',
+      'contract_external_id',
+      'priority',
+      'contract_type',
+      'engagement_type',
+      'monthly_points_allotment',
+      'amount',
+      'total_tasks',
+      'total_points',
+    ];
     for (const c of CATEGORIES) {
       rollupHeaders.push(`${c} (tasks)`);
       rollupHeaders.push(`${c} (points)`);
@@ -417,7 +488,17 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
         totalTasks += entry.taskCounts.get(c) ?? 0;
         totalPoints += entry.pointTotals.get(c) ?? 0;
       }
-      const row: unknown[] = [entry.contractName, entry.priority, totalTasks, totalPoints.toFixed(2)];
+      const row: unknown[] = [
+        entry.contractName,
+        entry.contractExternalId,
+        entry.priority,
+        entry.contractType,
+        entry.engagementType,
+        entry.monthlyPointsAllotment,
+        entry.amount,
+        totalTasks,
+        totalPoints.toFixed(2),
+      ];
       for (const c of CATEGORIES) {
         row.push(entry.taskCounts.get(c) ?? 0);
         row.push((entry.pointTotals.get(c) ?? 0).toFixed(2));
@@ -434,7 +515,10 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
     }
     let portfolioTaskTotal = 0;
     let portfolioPointTotal = 0;
-    const portfolioRow: unknown[] = ['PORTFOLIO TOTAL', '', 0, 0];
+    // Header layout: contract_name, contract_external_id, priority, contract_type,
+    // engagement_type, monthly_points_allotment, amount, total_tasks, total_points,
+    // then the per-category columns. Pad the contract-metadata cells for the total row.
+    const portfolioRow: unknown[] = ['PORTFOLIO TOTAL', '', '', '', '', '', '', 0, 0];
     for (const c of CATEGORIES) {
       const tc = portfolioTaskCounts.get(c) ?? 0;
       const pt = portfolioPointTotals.get(c) ?? 0;
@@ -443,8 +527,8 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       portfolioRow.push(tc);
       portfolioRow.push(pt.toFixed(2));
     }
-    portfolioRow[2] = portfolioTaskTotal;
-    portfolioRow[3] = portfolioPointTotal.toFixed(2);
+    portfolioRow[7] = portfolioTaskTotal;
+    portfolioRow[8] = portfolioPointTotal.toFixed(2);
     rollupCsv += rowToCsv(portfolioRow);
 
     // 8. Stream a zip with both files + a summary
@@ -457,7 +541,8 @@ router.post('/task-analysis-report', verifySecret, async (req: Request, res: Res
       contracts_evaluated: contractRows.length,
       contracts_excluded_internal: internalCount,
       tasks_total: taskRows.length,
-      tasks_classified: classifications.size,
+      tasks_pre_classified_by_name: preClassifiedCount,
+      tasks_ai_classified: classifications.size - preClassifiedCount,
       tasks_unclassified_fallback_to_other: taskRows.length - classifications.size,
       claude_usage: {
         cache_creation_input_tokens: totalCacheCreate,

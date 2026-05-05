@@ -84,82 +84,127 @@ Drop `tasks.csv` and `rollup.csv` into Claude.ai (web), use Opus 4.7, and paste 
 ### Main prompt — produces the dashboard artifact
 
 ```
-Attached: tasks.csv (one row per delivered task, ~6,000+ rows) and
-rollup.csv (one row per contract with task counts and points totals
-for each of 13 categories, plus a PORTFOLIO TOTAL row at the bottom).
+Attached: tasks.csv (one row per delivered task, ~2,000+ rows after
+filtering to parent tasks only) and rollup.csv (one row per contract
+with task counts and points totals for each category, plus a
+PORTFOLIO TOTAL row at the bottom).
 
 Context: I'm the head of a marketing agency. These are all tasks
 my agency has delivered for active client contracts in the last 90
-days. Each task has been classified into one of 14 categories:
-Web Development, Tech Stack, Marketing Ops, Account Management,
-Content Creation, Podcast, Design/Creative, Paid Media, ABM,
-SEO/AEO, Performance/Reporting, Strategy/Research, Video, Other.
-The "points" field is our internal effort estimate for each task —
-higher points means heavier work. Note: "Tech Stack" tasks are
-cost-tracking placeholders representing platform subscription
-costs, not service work — feel free to surface these separately
-or exclude them from "work delivered" framings since they don't
-represent labor.
+days. Each task is classified into one of 14 categories: Web
+Development, Tech Stack, Marketing Ops, Account Management, Content
+Creation, Podcast, Design/Creative, Paid Media, ABM, SEO/AEO,
+Performance/Reporting, Strategy/Research, Video, Other.
+
+Important field definitions:
+- "points" is our internal effort/sprint-points estimate per task.
+  Higher points = heavier work.
+- "monthly_points_allotment" is the contracted monthly point budget
+  we sold to the client. Multiply by ~3 to get the expected 90-day
+  allotment.
+- "amount" is the contract's monthly recurring revenue (USD). Use
+  this for revenue-efficiency analysis.
+- "priority" is our internal account tier (Tier 1 / Tier 2 / etc.).
+- "engagement_type" is "strategic" or "tactical" — strategic
+  engagements are higher-touch / longer-horizon.
+- "contract_type" describes the contract structure (retainer,
+  project, etc.).
+- "Tech Stack" tasks are cost-tracking placeholders representing
+  platform subscription costs, NOT service work. Surface these
+  separately and EXCLUDE them from any "labor delivered" or
+  "service mix" calculations. Include them only in cost-context
+  views.
 
 I want a single interactive HTML artifact I can share with my
 leadership team that tells the story of what we actually produced
-this quarter. Use code execution (pandas + plotly or similar) to
-process both CSVs, then render the artifact.
+this quarter and how it lines up with what we sold. Use code
+execution (pandas + plotly or similar) to process both CSVs, then
+render the artifact.
 
 Required sections:
 
-1. **Executive summary at the top** — 4-6 KPI tiles: total tasks,
-   total points, number of active contracts, average tasks per
-   contract, top category by volume, top category by effort (points).
-   Below the tiles, 3-5 bullet headlines about what stands out.
+1. **Executive summary at the top** — KPI tiles for: total contracts,
+   total tasks (excluding Tech Stack), total service points
+   delivered (excluding Tech Stack), portfolio MRR (sum of unique
+   contract amounts), portfolio monthly allotment (sum of unique
+   monthly_points_allotment), top service category by points, and
+   "delivery vs allotment" ratio (90-day points delivered ÷ 3 ×
+   monthly_points_allotment summed across the portfolio). Then 3-5
+   bullet headlines about what stands out.
 
-2. **Portfolio composition** — two side-by-side charts:
+2. **Portfolio composition (service work only)** — two side-by-side
+   charts, both EXCLUDING Tech Stack:
    (a) tasks per category, sorted descending
    (b) points per category, sorted descending
-   Make it easy to see where volume and effort diverge (a category
-   might have many small tasks or few heavy ones).
+   Make it easy to see where volume and effort diverge.
 
 3. **Effort intensity by category** — average points per task for
-   each category, sorted. Flag categories where avg points is
-   notably high or low compared to portfolio average.
+   each service category (exclude Tech Stack). Flag categories
+   where avg points is notably high or low compared to portfolio
+   average.
 
-4. **Contracts × categories heatmap** — rows = contracts (sorted
-   by total tasks desc), columns = the 13 categories, cell intensity
-   = task count. Truncate to the top ~25 contracts by volume so it
-   stays readable; note total contracts in a caption.
+4. **Capacity utilization per contract** — for each contract,
+   compute: expected_90d_points = monthly_points_allotment × 3,
+   delivered_service_points = total_points minus Tech Stack points,
+   utilization = delivered_service_points / expected_90d_points.
+   Render as a horizontal bar chart sorted by utilization,
+   color-coded: green if 80-110% (on track), red if >110%
+   (over-delivering = revenue leak), amber if <80% (under-delivering
+   = client risk). Annotate the highest over- and under-utilizers.
 
-5. **Top 3 contracts per category** — small multiples (one mini
-   bar chart per category) showing the contracts contributing the
-   most tasks in that category. Helps me see who's driving each
-   slice of work.
+5. **Revenue efficiency** — points-per-dollar by contract. For each
+   contract: efficiency = delivered_service_points / amount. Plot
+   as scatter with amount (MRR) on x-axis, delivered service points
+   on y-axis. Diagonal lines mark efficiency bands (e.g. 0.5 / 1.0
+   / 2.0 points per dollar). Label outliers — high-effort/low-revenue
+   contracts and the inverse.
 
-6. **Contract concentration analysis** — for each contract,
-   calculate how concentrated its work is across categories (e.g.
-   Herfindahl index or just "% of tasks in top category"). Plot
-   contracts on two axes: total tasks (x) vs concentration (y).
-   Highlight contracts that are unusually concentrated or diversified.
+6. **Tier × engagement type breakdown** — small grid of charts:
+   for each combination of priority tier (Tier 1/2/3/4) AND
+   engagement_type (strategic/tactical), show portfolio composition
+   (% of points by category, Tech Stack excluded). Helps me see
+   whether Tier 1 strategics are actually getting different work
+   than Tier 3 tacticals.
 
-7. **Tier comparison** (the rollup has a "priority" column with
-   Tier 1 / Tier 2 / etc.) — show portfolio composition (% of tasks
-   by category) split by tier. Are Tier 1 contracts getting different
-   work than Tier 2/3?
+7. **Contracts × categories heatmap** — rows = top ~25 contracts by
+   service points delivered (Tech Stack excluded), columns = the 13
+   service categories, cell intensity = points delivered. Note
+   total contract count in a caption.
 
-8. **Written analysis section** — 4-6 paragraphs of plain-English
-   insights answering:
-   - What kind of agency are we, based on what we actually deliver?
-     (vs what we say we do)
-   - Where are we spending the most effort and is that aligned with
-     where the highest-tier accounts are?
-   - Any categories that are surprisingly large or small?
-   - Which contracts are outliers (very high volume, very concentrated,
-     or unusual category mix)?
-   - One or two questions this data raises that we should investigate.
+8. **Top 3 contracts per category** — small multiples showing the
+   contracts contributing the most points in each service category.
+
+9. **Tech Stack costs (separate section)** — bar chart of Tech
+   Stack point totals per contract (only contracts that have one).
+   Caption explaining these are cost line items, not delivered
+   labor. Total Tech Stack points across the portfolio as a single
+   KPI.
+
+10. **Written analysis section** — 5-7 paragraphs of plain-English
+    insights answering:
+    - Where are we over-delivering vs allotment, and is that
+      concentrated in any tier or engagement type?
+    - Where are we under-delivering, and which of those are revenue
+      risks (high MRR, low utilization)?
+    - Which contracts are revenue-efficient (high effort relative
+      to MRR) vs revenue-inefficient (low effort relative to MRR)?
+    - Does our service mix actually match our positioning? (e.g.
+      if we sell ourselves as a content agency but Marketing Ops
+      is the biggest category, that's worth flagging)
+    - Are strategic engagements meaningfully different from tactical
+      ones in their work mix, or are we delivering the same thing
+      under both labels?
+    - One or two questions this data raises that we should
+      investigate next quarter.
 
 Design requirements:
 - Modern, minimal aesthetic. Pick a cohesive color palette.
-- Responsive layout that works in a browser at typical desktop widths.
+- Responsive layout that works in a browser at typical desktop
+  widths.
 - Section headers, clean typography, good use of whitespace.
 - All charts should have clear labels, legends, and tooltips.
+- For utilization and efficiency charts, use diverging color scales
+  (e.g. red-amber-green) so over/under is visually obvious.
 - No "AI slop" defaults — avoid generic purple-on-white gradients,
   Inter/Roboto, or stock dashboard templates.
 
@@ -196,9 +241,37 @@ within the same tier?
 
 **Stress-test the taxonomy:**
 ```
-If you were going to retitle our 13 categories based on what's
+If you were going to retitle our 14 categories based on what's
 actually in each one, what would you call them? Show the proposed
 new name + a 1-line rationale per category.
+```
+
+**Identify at-risk accounts:**
+```
+List the top 10 contracts at delivery risk: high MRR (top quartile
+of amount) but low capacity utilization (delivered_service_points
+< 0.7 × monthly_points_allotment × 3, where service points exclude
+Tech Stack). For each, show MRR, allotment, delivered points,
+utilization %, and the top 2 categories of work being done.
+```
+
+**Find revenue leaks:**
+```
+Which contracts are we significantly over-delivering on (delivered
+service points > 1.2 × expected 90-day allotment)? Show MRR,
+allotment, delivered, over-delivery %, and what categories are
+absorbing the extra effort. Are any of these consistent patterns
+worth raising in client conversations?
+```
+
+**Strategic vs tactical reality check:**
+```
+Compare strategic vs tactical engagements head-to-head: average
+points delivered per contract, average MRR, points-per-dollar
+efficiency, and category mix. Are strategic engagements actually
+delivering more strategic-type work (Strategy/Research, ABM,
+Performance/Reporting) than tactical ones, or is the engagement
+type label decoupled from the actual work?
 ```
 
 ### Tips for working with Claude.ai on this

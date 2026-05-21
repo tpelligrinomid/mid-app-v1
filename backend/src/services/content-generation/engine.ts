@@ -14,7 +14,7 @@ import type { PromptStep } from '../../types/content.js';
 
 // Claude API config (matches chat.ts)
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-opus-4-6';
+const DEFAULT_MODEL = 'claude-opus-4-7';
 const API_VERSION = '2023-06-01';
 
 // ============================================================================
@@ -197,6 +197,70 @@ async function streamClaudeStep(
 }
 
 // ============================================================================
+// Retry
+// ============================================================================
+
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Transient failures worth retrying. The common one: undici surfaces a stale
+ * keep-alive socket reset as `TypeError: terminated` with an ECONNRESET cause.
+ * Also covers connection timeouts and Anthropic 429/5xx responses.
+ */
+function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+
+  const message = err.message.toLowerCase();
+  if (message.includes('terminated') || message.includes('fetch failed')) return true;
+
+  // Network error codes can sit on the error itself or its `cause`
+  const code =
+    (err as NodeJS.ErrnoException).code ??
+    (err as { cause?: NodeJS.ErrnoException }).cause?.code;
+  if (
+    code &&
+    ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT'].includes(code)
+  ) {
+    return true;
+  }
+
+  // streamClaudeStep throws `Claude API <status>: ...` for non-OK responses
+  if (/Claude API (?:429|5\d\d)/.test(err.message)) return true;
+
+  return false;
+}
+
+/**
+ * Runs `fn`, retrying transient failures with exponential backoff + jitter.
+ * `onRetry` fires before each retry — used to re-emit step_start so the client
+ * knows the failed attempt's partial text should be discarded.
+ */
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  onRetry?: () => void
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= MAX_ATTEMPTS || !isRetryableError(err)) throw err;
+
+      const delayMs = 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[ContentGen] ${label} attempt ${attempt}/${MAX_ATTEMPTS} failed (${reason}); retrying in ${delayMs}ms`
+      );
+      onRetry?.();
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+// ============================================================================
 // Main Execution
 // ============================================================================
 
@@ -262,12 +326,24 @@ export async function executeGeneration(
         resolvedUser = resolvedUser + '\n\n' + context.referenceBlock;
       }
 
-      // Stream this step through Claude
-      const result = await streamClaudeStep(
-        resolvedSystem,
-        resolvedUser,
-        apiKey,
-        (text) => onChunk({ type: 'delta', text })
+      // Stream this step through Claude, retrying transient network failures
+      const result = await withRetry(
+        `Step "${step.name}"`,
+        () =>
+          streamClaudeStep(
+            resolvedSystem,
+            resolvedUser,
+            apiKey,
+            (text) => onChunk({ type: 'delta', text })
+          ),
+        // Re-emit step_start so the client resets this step's partial text
+        () =>
+          onChunk({
+            type: 'step_start',
+            step: step.name,
+            step_number: i + 1,
+            total_steps: steps.length,
+          })
       );
 
       stepOutputs[step.output_key] = result.fullText;

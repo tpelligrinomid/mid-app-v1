@@ -146,6 +146,12 @@ async function streamClaudeStep(
   let fullText = '';
   let inputTokens = 0;
   let outputTokens = 0;
+  // Anthropic ends a successful stream with `message_stop`, preceded by a
+  // `message_delta` carrying the final `stop_reason` + usage. If the socket
+  // closes cleanly mid-response we get neither — fullText is partial and
+  // outputTokens stays 0. Track completion so we can reject that case below.
+  let sawMessageStop = false;
+  let stopReason: string | null = null;
 
   try {
     while (true) {
@@ -163,7 +169,7 @@ async function streamClaudeStep(
 
         let event: {
           type: string;
-          delta?: { type: string; text?: string };
+          delta?: { type: string; text?: string; stop_reason?: string };
           usage?: { input_tokens: number; output_tokens: number };
           message?: { usage?: { input_tokens: number; output_tokens: number } };
         };
@@ -183,13 +189,34 @@ async function streamClaudeStep(
           inputTokens = event.message.usage.input_tokens;
         }
 
-        if (event.type === 'message_delta' && event.usage) {
-          outputTokens = event.usage.output_tokens;
+        if (event.type === 'message_delta') {
+          if (event.usage) outputTokens = event.usage.output_tokens;
+          if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
+        }
+
+        if (event.type === 'message_stop') {
+          sawMessageStop = true;
         }
       }
     }
   } finally {
     reader.releaseLock();
+  }
+
+  // Clean-but-incomplete stream: the reader drained without a terminal
+  // `message_stop`. Treat as a transient failure so withRetry re-runs the step
+  // rather than persisting a truncated body. (A genuine `max_tokens` stop still
+  // emits message_stop, so it passes through here and is surfaced below.)
+  if (!sawMessageStop) {
+    throw new Error(
+      `Claude API stream terminated before completion (received ${fullText.length} chars, no message_stop)`
+    );
+  }
+
+  // The model hit the output cap — the content is real but truncated. Surface
+  // it so callers don't silently ship a half-finished asset.
+  if (stopReason === 'max_tokens') {
+    throw new Error('Claude API stream stopped at max_tokens — output truncated');
   }
 
   return { fullText, inputTokens, outputTokens };

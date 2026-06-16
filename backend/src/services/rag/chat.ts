@@ -14,7 +14,7 @@ import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const API_VERSION = '2023-06-01';
 
 // ============================================================================

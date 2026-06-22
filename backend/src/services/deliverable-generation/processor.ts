@@ -531,6 +531,64 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       return;
     }
 
+    // Messaging plans: pull research + roadmap (if present) + user-selected transcripts.
+    // Markdown-first output (like research) — no structured schema required.
+    // Roadmap is included when available but is NOT a hard prerequisite (positioning
+    // work often precedes the roadmap), so there's no preflight check in the route.
+    if (deliverableType === 'messaging_plan') {
+      const [roadmapData, researchData, context] = await Promise.all([
+        resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
+        resolvePriorResearch(contractId, deliverableId),
+        assembleContext(contractId, title, primaryMeetingIds),
+      ]);
+
+      // Transcripts from user-selected primary meetings (brand-story / kickoff sessions)
+      const transcripts = context.primary_meetings.map(m => m.transcript);
+
+      // Client comes from the frontend research_inputs (optional — MM can also derive it from research)
+      const client = researchInputs?.client;
+
+      console.log(
+        `[Deliverable Generation] Messaging plan context for "${title}":`,
+        {
+          has_client: !!client,
+          has_roadmap: !!roadmapData,
+          has_research: !!researchData,
+          transcript_count: transcripts.length,
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+        }
+      );
+
+      const { jobId: mpJobId, triggerRunId: mpRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client,
+        metadata: { deliverable_id: deliverableId },
+        ...(roadmapData && { roadmap: roadmapData }),
+        ...(researchData && { research: researchData }),
+        ...(transcripts.length > 0 && { transcripts }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: mpJobId,
+        trigger_run_id: mpRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: context.processes.length,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted messaging plan "${title}" (job ${mpJobId}, run ${mpRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
     // Briefs: custom instructions + user-selected reference deliverables + optional images
     if (deliverableType === 'brief') {
       const context = await assembleContext(contractId, title, primaryMeetingIds);

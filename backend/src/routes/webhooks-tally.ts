@@ -115,9 +115,24 @@ function buildTaskDescription(payload: TallyPayload): string {
   return lines.join('\n');
 }
 
-function dateToUnixMs(date: string): number | undefined {
-  const parsed = new Date(`${date}T12:00:00Z`);
-  return isNaN(parsed.getTime()) ? undefined : parsed.getTime();
+const INTAKE_TIMEZONE = 'America/New_York';
+
+/**
+ * Due date for the intake task: today, in the agency's timezone.
+ *
+ * The task we create is a triage item — strategy reviews the submission and
+ * creates the real project task from it — so it's due the day it lands, not
+ * on the submitter's requested date. The requested date is carried in the
+ * task description for reference only (see buildTaskDescription).
+ *
+ * Anchored at noon UTC so ClickUp renders the intended calendar day: the
+ * client sends no due_date_time, so ClickUp treats this as an all-day due
+ * date and displays it in the workspace timezone.
+ */
+function todayDueDateMs(): number {
+  // en-CA gives YYYY-MM-DD
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: INTAKE_TIMEZONE });
+  return new Date(`${today}T12:00:00Z`).getTime();
 }
 
 async function postSuccessNotification(params: {
@@ -125,10 +140,10 @@ async function postSuccessNotification(params: {
   projectType: string;
   taskUrl: string;
   assigneeName: string | null;
-  dueDate: string | null;
+  requestedDueDate: string | null;
   submissionId: string;
 }): Promise<void> {
-  const { contract, projectType, taskUrl, assigneeName, dueDate, submissionId } = params;
+  const { contract, projectType, taskUrl, assigneeName, requestedDueDate, submissionId } = params;
   const fallbackChannel = process.env.TALLY_FALLBACK_SLACK_CHANNEL;
 
   const lines: string[] = [];
@@ -136,7 +151,8 @@ async function postSuccessNotification(params: {
   lines.push(`*Contract:* ${contract.contract_name}${contract.external_id ? ` (${contract.external_id})` : ''}`);
   if (assigneeName) lines.push(`*Assigned to:* ${assigneeName}`);
   else lines.push(`*Assigned to:* _(unassigned — no account manager set on contract)_`);
-  if (dueDate) lines.push(`*Due:* ${dueDate}`);
+  lines.push(`*Due:* today _(review this intake and set up the project task)_`);
+  if (requestedDueDate) lines.push(`*Requested project due date:* ${requestedDueDate}`);
   lines.push(`*Task:* <${taskUrl}|View in ClickUp>`);
   lines.push(`_Submission ID: ${submissionId}_`);
   const text = lines.join('\n');
@@ -341,9 +357,11 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
 
     const projectTypeField = findField(payload.data.fields, 'Select the type of project');
     const projectType = (projectTypeField && resolveValue(projectTypeField)) || 'Project';
+    // The submitter's "Desired due date" is reference info only — it rides
+    // along in the task description. The task itself is due today.
     const dueDateField = findField(payload.data.fields, 'Desired due date');
     const dueDateRaw = dueDateField?.value;
-    const dueDateMs = typeof dueDateRaw === 'string' ? dateToUnixMs(dueDateRaw) : undefined;
+    const dueDateMs = todayDueDateMs();
 
     const assignees: number[] = [];
     if (contract.account_manager) {
@@ -373,7 +391,7 @@ router.post('/project-intake', async (req: Request, res: Response): Promise<void
       projectType,
       taskUrl: task.url,
       assigneeName,
-      dueDate: dueDateDisplay,
+      requestedDueDate: dueDateDisplay,
       submissionId: payload.data.submissionId,
     }).catch((err) => {
       console.error('[Tally] Success notification threw:', err);

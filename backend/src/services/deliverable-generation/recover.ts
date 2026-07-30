@@ -266,7 +266,7 @@ export async function findStuckDeliverables(options?: {
  *
  * Read-only. Reached via ?debug=1 on the cron route.
  */
-export async function diagnoseDeliverables(limit = 400): Promise<
+export async function diagnoseDeliverables(limit = 200): Promise<
   Array<{
     deliverable_id?: string;
     row_status?: string;
@@ -274,14 +274,14 @@ export async function diagnoseDeliverables(limit = 400): Promise<
     has_run_id: boolean;
     submitted_at?: string;
     age_minutes?: number | null;
-    has_content: boolean;
     would_match: boolean;
   }>
 > {
-  const rows = await select<
-    Array<DeliverableRow & { status?: string; content_raw?: string | null; content_structured?: unknown }>
-  >('compass_deliverables', {
-    select: 'deliverable_id,status,metadata,content_raw,content_structured',
+  // Select ONLY small columns. Pulling content_raw/content_structured across
+  // hundreds of deliverables exhausts the edge function's memory
+  // (Proxy 546 WORKER_RESOURCE_LIMIT) — each row can be hundreds of KB.
+  const rows = await select<Array<DeliverableRow & { status?: string }>>('compass_deliverables', {
+    select: 'deliverable_id,status,metadata',
     order: [{ column: 'created_at', ascending: false }],
     limit,
   });
@@ -304,7 +304,6 @@ export async function diagnoseDeliverables(limit = 400): Promise<
         has_run_id: !!g.trigger_run_id,
         submitted_at: g.submitted_at,
         age_minutes: ageMinutes,
-        has_content: !!(r.content_raw || r.content_structured),
         would_match:
           IN_FLIGHT_STATUSES.has(g.status) && !!g.trigger_run_id && !!g.submitted_at,
       };

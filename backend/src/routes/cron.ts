@@ -6,7 +6,7 @@ import { ManagementReportService } from '../services/reports/management-report.j
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
 import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
-import { recoverStuckDeliverables, diagnoseDeliverables } from '../services/deliverable-generation/recover.js';
+import { recoverStuckDeliverables, diagnoseDeliverables, recoverDeliverable } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -626,6 +626,22 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
         with_generation_metadata: rows.length,
         would_match: rows.filter((r) => r.would_match).length,
         rows,
+        duration_ms: Date.now() - startTime,
+      });
+      return;
+    }
+
+    // ?deliverableId= recovers one specific deliverable, bypassing the sweep's
+    // matching entirely. For unblocking a known-stranded deliverable when the
+    // sweep's criteria aren't matching it.
+    const targetId = req.query.deliverableId as string | undefined;
+    if (targetId) {
+      const result = await recoverDeliverable(targetId);
+      console.log(`[Cron] Targeted recovery of ${targetId}: ${result.outcome}`);
+      res.json({
+        success: true,
+        targeted: true,
+        result,
         duration_ms: Date.now() - startTime,
       });
       return;

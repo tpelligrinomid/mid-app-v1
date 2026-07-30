@@ -6,6 +6,7 @@ import { ManagementReportService } from '../services/reports/management-report.j
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
 import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
+import { recoverStuckDeliverables } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -594,6 +595,66 @@ router.post('/generate-strategy-notes', verifyCronSecret, async (req: Request, r
       success: false,
       error: message,
       duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/recover-deliverables
+// Triggered by Render Cron Job
+//
+// Sweeps for deliverables that Master Marketer finished but never delivered —
+// the callback POST can be rejected before it reaches us (a Render WAF 403 at
+// the edge leaves nothing in our logs), and a restart or network blip during
+// delivery strands one the same way. MM keeps the output, so we pull it back.
+//
+// Render Cron Job Configuration:
+// - Name: recover-stuck-deliverables
+// - Schedule: */15 * * * * (every 15 minutes)
+// - Command: curl -X POST "https://your-app.onrender.com/api/cron/recover-deliverables?secret=$CRON_SECRET"
+router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+
+  try {
+    // Default 60 min clears the SEO audit's 45-minute maxDuration, so a job
+    // that's merely slow is never mistaken for a stranded one. Override with
+    // ?stuckAfterMinutes= when testing.
+    const stuckAfterMinutes = Number(req.query.stuckAfterMinutes) || 60;
+
+    const { scanned, results } = await recoverStuckDeliverables({ stuckAfterMinutes });
+
+    const recovered = results.filter(
+      (r) => r.outcome === 'recovered' || r.outcome === 'recovered_failed'
+    );
+    const stillRunning = results.filter((r) => r.outcome === 'still_running');
+    const errored = results.filter((r) => r.outcome === 'error');
+
+    const durationMs = Date.now() - startTime;
+
+    if (scanned > 0) {
+      console.log(
+        `[Cron] Deliverable recovery: ${scanned} stuck, ${recovered.length} recovered, ` +
+        `${stillRunning.length} still running, ${errored.length} errored (${durationMs}ms)`
+      );
+    }
+
+    res.json({
+      success: true,
+      scanned,
+      recovered: recovered.length,
+      still_running: stillRunning.length,
+      errored: errored.length,
+      stuck_after_minutes: stuckAfterMinutes,
+      results,
+      duration_ms: durationMs,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[Cron] Deliverable recovery failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
     });
   }
 });

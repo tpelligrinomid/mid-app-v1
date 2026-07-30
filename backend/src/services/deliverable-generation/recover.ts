@@ -207,25 +207,31 @@ export async function recoverDeliverable(deliverableId: string): Promise<Recover
  * will pick up jobs that are simply still working. The SEO audit is the long pole
  * at up to 45 minutes (its Trigger.dev maxDuration), so the default leaves headroom.
  *
- * The date filter bounds the scan; generation status lives inside a JSON column,
- * so that part is filtered in memory (same approach as the RAG backfill).
+ * Candidates come from the top-level `status` column, which is set to 'working'
+ * when generation is submitted and back to 'planned' when it completes or fails
+ * (see routes/compass/deliverables.ts). That makes it an exact, server-side
+ * filterable marker for "handed to MM and still waiting".
+ *
+ * Do NOT filter on `updated_at` here: nothing maintains that column on the
+ * generation-state writes, so a deliverable created weeks ago but generated
+ * today keeps a stale timestamp and gets silently excluded. That bug let a
+ * stranded deliverable sit unrecovered for 11 hours.
+ *
+ * Generation status lives inside the JSON metadata column, so those checks stay
+ * in memory (same approach as the RAG backfill).
  */
 export async function findStuckDeliverables(options?: {
   stuckAfterMinutes?: number;
-  lookbackDays?: number;
   max?: number;
 }): Promise<{ rowsExamined: number; stuck: string[] }> {
   const stuckAfterMinutes = options?.stuckAfterMinutes ?? 60;
-  const lookbackDays = options?.lookbackDays ?? 7;
   const max = options?.max ?? 25;
 
-  const lookbackFrom = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
   const stuckBefore = Date.now() - stuckAfterMinutes * 60 * 1000;
 
   const rows = await select<DeliverableRow[]>('compass_deliverables', {
     select: 'deliverable_id,metadata',
-    filters: { updated_at: { gte: lookbackFrom } },
-    order: [{ column: 'updated_at', ascending: false }],
+    filters: { status: 'working' },
     limit: 500,
   });
 
@@ -249,8 +255,8 @@ export async function findStuckDeliverables(options?: {
   }
 
   // rowsExamined disambiguates a quiet run: examined>0 with stuck=0 means we
-  // looked and found nothing wrong, whereas examined=0 means the date filter
-  // returned nothing and the sweep isn't actually inspecting anything.
+  // looked at in-flight generations and none were stranded, whereas examined=0
+  // means no deliverable is currently in 'working' status at all.
   return { rowsExamined: examined.length, stuck };
 }
 
@@ -259,7 +265,6 @@ export async function findStuckDeliverables(options?: {
  */
 export async function recoverStuckDeliverables(options?: {
   stuckAfterMinutes?: number;
-  lookbackDays?: number;
   max?: number;
 }): Promise<{ rowsExamined: number; scanned: number; results: RecoveryResult[] }> {
   const { rowsExamined, stuck } = await findStuckDeliverables(options);

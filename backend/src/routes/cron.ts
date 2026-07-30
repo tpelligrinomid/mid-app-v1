@@ -640,7 +640,7 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
       // Nothing to reject means nothing was inspected — the lookback filter
       // returned no rows at all, which is worth surfacing rather than reading
       // as a clean sweep.
-      console.warn('[Cron] Deliverable recovery examined 0 rows — check the lookback filter');
+      console.warn('[Cron] Deliverable recovery examined 0 rows — no deliverables in working status');
     }
 
     res.json({

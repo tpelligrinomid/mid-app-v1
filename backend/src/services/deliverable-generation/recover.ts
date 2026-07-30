@@ -261,6 +261,57 @@ export async function findStuckDeliverables(options?: {
 }
 
 /**
+ * Diagnostic: dump the generation state of every deliverable that has any, with
+ * no top-level status filter, so we can see why a stranded one isn't matching.
+ *
+ * Read-only. Reached via ?debug=1 on the cron route.
+ */
+export async function diagnoseDeliverables(limit = 400): Promise<
+  Array<{
+    deliverable_id?: string;
+    row_status?: string;
+    gen_status?: string;
+    has_run_id: boolean;
+    submitted_at?: string;
+    age_minutes?: number | null;
+    has_content: boolean;
+    would_match: boolean;
+  }>
+> {
+  const rows = await select<
+    Array<DeliverableRow & { status?: string; content_raw?: string | null; content_structured?: unknown }>
+  >('compass_deliverables', {
+    select: 'deliverable_id,status,metadata,content_raw,content_structured',
+    order: [{ column: 'created_at', ascending: false }],
+    limit,
+  });
+
+  const now = Date.now();
+
+  return (rows || [])
+    .filter((r) => r?.metadata?.generation)
+    .map((r) => {
+      const g = r.metadata!.generation!;
+      const submittedAt = g.submitted_at ? Date.parse(g.submitted_at) : NaN;
+      const ageMinutes = Number.isFinite(submittedAt)
+        ? Math.round((now - submittedAt) / 60000)
+        : null;
+
+      return {
+        deliverable_id: r.deliverable_id,
+        row_status: r.status,
+        gen_status: g.status,
+        has_run_id: !!g.trigger_run_id,
+        submitted_at: g.submitted_at,
+        age_minutes: ageMinutes,
+        has_content: !!(r.content_raw || r.content_structured),
+        would_match:
+          IN_FLIGHT_STATUSES.has(g.status) && !!g.trigger_run_id && !!g.submitted_at,
+      };
+    });
+}
+
+/**
  * Sweep for stranded deliverables and pull each one back. Used by the cron route.
  */
 export async function recoverStuckDeliverables(options?: {

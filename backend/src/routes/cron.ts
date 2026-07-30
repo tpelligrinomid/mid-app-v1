@@ -6,7 +6,7 @@ import { ManagementReportService } from '../services/reports/management-report.j
 import { ClientStatusReportService } from '../services/reports/client-status-report.js';
 import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
-import { recoverStuckDeliverables } from '../services/deliverable-generation/recover.js';
+import { recoverStuckDeliverables, diagnoseDeliverables } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
 
 const router = Router();
@@ -615,6 +615,22 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
   const startTime = Date.now();
 
   try {
+    // ?debug=1 dumps the generation state of every deliverable that has any,
+    // with no status filter, so a stranded one that isn't matching is visible.
+    // Read-only — recovers nothing.
+    if (req.query.debug) {
+      const rows = await diagnoseDeliverables();
+      res.json({
+        success: true,
+        debug: true,
+        with_generation_metadata: rows.length,
+        would_match: rows.filter((r) => r.would_match).length,
+        rows,
+        duration_ms: Date.now() - startTime,
+      });
+      return;
+    }
+
     // Default 60 min clears the SEO audit's 45-minute maxDuration, so a job
     // that's merely slow is never mistaken for a stranded one. Override with
     // ?stuckAfterMinutes= when testing.

@@ -636,7 +636,11 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
     // sweep's criteria aren't matching it.
     const targetId = req.query.deliverableId as string | undefined;
     if (targetId) {
-      const result = await recoverDeliverable(targetId);
+      // Optional &runId= bypasses stored metadata, which is not reliably
+      // persisted. Trigger.dev retains runs for 14 days, so the run ID from the
+      // Trigger dashboard is enough to recover a deliverable on its own.
+      const explicitRunId = req.query.runId as string | undefined;
+      const result = await recoverDeliverable(targetId, explicitRunId);
       console.log(`[Cron] Targeted recovery of ${targetId}: ${result.outcome}`);
       res.json({
         success: true,

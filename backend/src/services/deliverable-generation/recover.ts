@@ -93,7 +93,10 @@ export function normalizeOutput(raw: Record<string, unknown>): {
  * Safe to call repeatedly — a deliverable already marked completed short-circuits,
  * and a job still running is reported rather than treated as a failure.
  */
-export async function recoverDeliverable(deliverableId: string): Promise<RecoveryResult> {
+export async function recoverDeliverable(
+  deliverableId: string,
+  explicitRunId?: string
+): Promise<RecoveryResult> {
   try {
     const rows = await select<DeliverableRow[]>('compass_deliverables', {
       select: 'metadata,contract_id,title',
@@ -104,21 +107,31 @@ export async function recoverDeliverable(deliverableId: string): Promise<Recover
     const row = rows?.[0];
     const generation = row?.metadata?.generation;
 
-    if (!generation) {
-      return { deliverable_id: deliverableId, outcome: 'not_found', message: 'No generation metadata' };
+    // An explicit run ID bypasses stored state entirely. Necessary because
+    // metadata.generation is not reliably persisted — see the note on
+    // findStuckDeliverables — and MM resolves run IDs against Trigger.dev,
+    // which retains runs for 14 days regardless of what we stored.
+    const runId = explicitRunId || generation?.trigger_run_id;
+
+    if (!explicitRunId) {
+      if (!generation) {
+        return { deliverable_id: deliverableId, outcome: 'not_found', message: 'No generation metadata' };
+      }
+      if (generation.status === 'completed') {
+        return { deliverable_id: deliverableId, outcome: 'already_completed' };
+      }
     }
-    if (generation.status === 'completed') {
-      return { deliverable_id: deliverableId, outcome: 'already_completed' };
-    }
-    if (!generation.trigger_run_id) {
+
+    if (!runId) {
       return { deliverable_id: deliverableId, outcome: 'no_run_id', message: 'No trigger_run_id stored' };
     }
 
     console.log(
-      `[Recovery] Attempting deliverable ${deliverableId}, run ${generation.trigger_run_id}`
+      `[Recovery] Attempting deliverable ${deliverableId}, run ${runId}` +
+      (explicitRunId ? ' (explicit run id)' : '')
     );
 
-    const result = await getJobByRunId(generation.trigger_run_id);
+    const result = await getJobByRunId(runId);
     const normalizedStatus = result.status?.toLowerCase();
 
     if (normalizedStatus === 'completed' || normalizedStatus === 'complete') {
@@ -137,8 +150,8 @@ export async function recoverDeliverable(deliverableId: string): Promise<Recover
           metadata: {
             generation: {
               status: 'completed',
-              job_id: generation.job_id,
-              trigger_run_id: generation.trigger_run_id,
+              job_id: generation?.job_id,
+              trigger_run_id: runId,
               completed_at: new Date().toISOString(),
             },
           },
@@ -175,8 +188,8 @@ export async function recoverDeliverable(deliverableId: string): Promise<Recover
           metadata: {
             generation: {
               status: 'failed',
-              job_id: generation.job_id,
-              trigger_run_id: generation.trigger_run_id,
+              job_id: generation?.job_id,
+              trigger_run_id: runId,
               error: result.error || 'Job failed (recovered from MM)',
               completed_at: new Date().toISOString(),
             },

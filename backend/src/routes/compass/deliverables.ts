@@ -16,6 +16,7 @@ import type {
 import { insert, update, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
 import { generateDeliverableInBackground } from '../../services/deliverable-generation/processor.js';
+import { setGenerationState } from '../../services/deliverable-generation/state.js';
 import { submitConvert } from '../../services/master-marketer/client.js';
 import type { GenerateDeliverableRequest, ConvertDeliverableRequest, GenerationState } from '../../services/deliverable-generation/types.js';
 
@@ -660,10 +661,10 @@ router.post(
     // Fire-and-forget: update state and submit to MM
     (async () => {
       try {
-        await update(
-          'compass_deliverables',
-          { status: 'working', metadata: { generation: { status: 'submitted', submitted_at: new Date().toISOString() } } },
-          { deliverable_id: deliverableId }
+        await setGenerationState(
+          deliverableId,
+          { status: 'submitted', submitted_at: new Date().toISOString() },
+          { status: 'working' }
         );
 
         const { jobId, triggerRunId } = await submitConvert(deliverable.deliverable_type, {
@@ -677,21 +678,22 @@ router.post(
           },
         });
 
-        await update(
-          'compass_deliverables',
-          { metadata: { generation: { status: 'submitted', job_id: jobId, trigger_run_id: triggerRunId, submitted_at: new Date().toISOString() } } },
-          { deliverable_id: deliverableId }
-        );
+        await setGenerationState(deliverableId, {
+          status: 'submitted',
+          job_id: jobId,
+          trigger_run_id: triggerRunId,
+          submitted_at: new Date().toISOString(),
+        });
 
         console.log(`[Deliverables] Submitted convert for "${deliverable.title}" (job ${jobId}, run ${triggerRunId})`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(`[Deliverables] Convert failed for ${deliverableId}:`, errorMessage);
         try {
-          await update(
-            'compass_deliverables',
-            { status: 'planned', metadata: { generation: { status: 'failed', error: errorMessage, completed_at: new Date().toISOString() } } },
-            { deliverable_id: deliverableId }
+          await setGenerationState(
+            deliverableId,
+            { status: 'failed', error: errorMessage, completed_at: new Date().toISOString() },
+            { status: 'planned' }
           );
         } catch (updateErr) {
           console.error(`[Deliverables] Failed to update failure state for ${deliverableId}:`, updateErr);

@@ -15,7 +15,8 @@
  * endpoint and the cron sweep, so the two can't drift apart.
  */
 
-import { select, update as edgeFnUpdate } from '../../utils/edge-functions.js';
+import { select } from '../../utils/edge-functions.js';
+import { setGenerationState } from './state.js';
 import { getJobByRunId } from '../master-marketer/client.js';
 import { ingestContent } from '../rag/ingestion.js';
 import type { GenerationState } from './types.js';
@@ -141,22 +142,19 @@ export async function recoverDeliverable(
 
       const output = normalizeOutput(result.output as unknown as Record<string, unknown>);
 
-      await edgeFnUpdate(
-        'compass_deliverables',
+      await setGenerationState(
+        deliverableId,
+        {
+          status: 'completed',
+          job_id: generation?.job_id,
+          trigger_run_id: runId,
+          completed_at: new Date().toISOString(),
+        },
         {
           status: 'planned',
           content_raw: output.content_raw,
           content_structured: output.content_structured,
-          metadata: {
-            generation: {
-              status: 'completed',
-              job_id: generation?.job_id,
-              trigger_run_id: runId,
-              completed_at: new Date().toISOString(),
-            },
-          },
-        },
-        { deliverable_id: deliverableId }
+        }
       );
 
       // Auto-embed (non-blocking)
@@ -181,21 +179,16 @@ export async function recoverDeliverable(
     }
 
     if (normalizedStatus === 'failed' || normalizedStatus === 'fail') {
-      await edgeFnUpdate(
-        'compass_deliverables',
+      await setGenerationState(
+        deliverableId,
         {
-          status: 'planned',
-          metadata: {
-            generation: {
-              status: 'failed',
-              job_id: generation?.job_id,
-              trigger_run_id: runId,
-              error: result.error || 'Job failed (recovered from MM)',
-              completed_at: new Date().toISOString(),
-            },
-          },
+          status: 'failed',
+          job_id: generation?.job_id,
+          trigger_run_id: runId,
+          error: result.error || 'Job failed (recovered from MM)',
+          completed_at: new Date().toISOString(),
         },
-        { deliverable_id: deliverableId }
+        { status: 'planned' }
       );
 
       return { deliverable_id: deliverableId, outcome: 'recovered_failed' };

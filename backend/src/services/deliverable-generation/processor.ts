@@ -11,6 +11,7 @@ import { update as edgeFnUpdate, select } from '../../utils/edge-functions.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
 import type { GenerationState, ResearchInputs } from './types.js';
+import { setGenerationStateSafe } from './state.js';
 
 /** Options for generateDeliverableInBackground */
 export interface GenerateOptions {
@@ -43,15 +44,10 @@ async function updateGenerationState(
   deliverableId: string,
   state: GenerationState['generation']
 ): Promise<void> {
-  try {
-    await edgeFnUpdate(
-      'compass_deliverables',
-      { metadata: { generation: state } },
-      { deliverable_id: deliverableId }
-    );
-  } catch (err) {
-    console.error(`[Deliverable Generation] Failed to update state for ${deliverableId}:`, err);
-  }
+  // Merges into existing metadata and logs loudly on failure — see state.ts.
+  // This used to swallow errors silently, which is how trigger_run_id went
+  // unpersisted for months and left deliverables unrecoverable.
+  await setGenerationStateSafe(deliverableId, state);
 }
 
 /**

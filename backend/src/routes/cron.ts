@@ -620,7 +620,7 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
     // ?stuckAfterMinutes= when testing.
     const stuckAfterMinutes = Number(req.query.stuckAfterMinutes) || 60;
 
-    const { scanned, results } = await recoverStuckDeliverables({ stuckAfterMinutes });
+    const { rowsExamined, scanned, results } = await recoverStuckDeliverables({ stuckAfterMinutes });
 
     const recovered = results.filter(
       (r) => r.outcome === 'recovered' || r.outcome === 'recovered_failed'
@@ -632,13 +632,20 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
 
     if (scanned > 0) {
       console.log(
-        `[Cron] Deliverable recovery: ${scanned} stuck, ${recovered.length} recovered, ` +
-        `${stillRunning.length} still running, ${errored.length} errored (${durationMs}ms)`
+        `[Cron] Deliverable recovery: examined ${rowsExamined}, ${scanned} stuck, ` +
+        `${recovered.length} recovered, ${stillRunning.length} still running, ` +
+        `${errored.length} errored (${durationMs}ms)`
       );
+    } else if (rowsExamined === 0) {
+      // Nothing to reject means nothing was inspected — the lookback filter
+      // returned no rows at all, which is worth surfacing rather than reading
+      // as a clean sweep.
+      console.warn('[Cron] Deliverable recovery examined 0 rows — check the lookback filter');
     }
 
     res.json({
       success: true,
+      rows_examined: rowsExamined,
       scanned,
       recovered: recovered.length,
       still_running: stillRunning.length,

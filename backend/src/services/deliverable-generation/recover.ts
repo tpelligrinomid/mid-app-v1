@@ -214,7 +214,7 @@ export async function findStuckDeliverables(options?: {
   stuckAfterMinutes?: number;
   lookbackDays?: number;
   max?: number;
-}): Promise<string[]> {
+}): Promise<{ rowsExamined: number; stuck: string[] }> {
   const stuckAfterMinutes = options?.stuckAfterMinutes ?? 60;
   const lookbackDays = options?.lookbackDays ?? 7;
   const max = options?.max ?? 25;
@@ -229,9 +229,10 @@ export async function findStuckDeliverables(options?: {
     limit: 500,
   });
 
+  const examined = rows || [];
   const stuck: string[] = [];
 
-  for (const row of rows || []) {
+  for (const row of examined) {
     const generation = row?.metadata?.generation;
     if (!row.deliverable_id || !generation) continue;
     if (!IN_FLIGHT_STATUSES.has(generation.status)) continue;
@@ -247,7 +248,10 @@ export async function findStuckDeliverables(options?: {
     if (stuck.length >= max) break;
   }
 
-  return stuck;
+  // rowsExamined disambiguates a quiet run: examined>0 with stuck=0 means we
+  // looked and found nothing wrong, whereas examined=0 means the date filter
+  // returned nothing and the sweep isn't actually inspecting anything.
+  return { rowsExamined: examined.length, stuck };
 }
 
 /**
@@ -257,11 +261,11 @@ export async function recoverStuckDeliverables(options?: {
   stuckAfterMinutes?: number;
   lookbackDays?: number;
   max?: number;
-}): Promise<{ scanned: number; results: RecoveryResult[] }> {
-  const stuck = await findStuckDeliverables(options);
+}): Promise<{ rowsExamined: number; scanned: number; results: RecoveryResult[] }> {
+  const { rowsExamined, stuck } = await findStuckDeliverables(options);
 
   if (stuck.length === 0) {
-    return { scanned: 0, results: [] };
+    return { rowsExamined, scanned: 0, results: [] };
   }
 
   console.log(`[Recovery] Sweep found ${stuck.length} stuck deliverable(s): ${stuck.join(', ')}`);
@@ -273,5 +277,5 @@ export async function recoverStuckDeliverables(options?: {
     results.push(await recoverDeliverable(deliverableId));
   }
 
-  return { scanned: stuck.length, results };
+  return { rowsExamined, scanned: stuck.length, results };
 }

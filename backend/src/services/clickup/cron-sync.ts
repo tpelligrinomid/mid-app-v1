@@ -87,6 +87,8 @@ interface FolderToSync {
 /** Result of the archived-task pass. */
 export interface ArchivedSyncResult {
   dry_run: boolean;
+  /** true when limitLists/folderId restricted the scan — counts are not the full picture */
+  bounded: boolean;
   folders_scanned: number;
   lists_scanned: number;
   archived_tasks_found: number;
@@ -847,10 +849,19 @@ export class ClickUpCronSyncService {
    *
    * @param options.dryRun report what would change without writing anything
    */
-  async syncArchivedTasks(options: { dryRun?: boolean } = {}): Promise<ArchivedSyncResult> {
+  async syncArchivedTasks(
+    options: { dryRun?: boolean; limitLists?: number; folderId?: string } = {}
+  ): Promise<ArchivedSyncResult> {
     const dryRun = options.dryRun ?? false;
+    // Bounded modes exist so the pass can be reviewed interactively. A full run
+    // walks every list of every active contract against ClickUp sequentially,
+    // which takes longer than an HTTP client will wait — fine for the Render
+    // cron, too slow to poke by hand.
+    const limitLists = options.limitLists;
+    const onlyFolder = options.folderId;
     const result: ArchivedSyncResult = {
       dry_run: dryRun,
+      bounded: limitLists !== undefined || !!onlyFolder,
       folders_scanned: 0,
       lists_scanned: 0,
       archived_tasks_found: 0,
@@ -862,9 +873,13 @@ export class ClickUpCronSyncService {
       errors: []
     };
 
-    const folders = await this.getFoldersToSync();
+    const allFolders = await this.getFoldersToSync();
+    const folders = onlyFolder
+      ? allFolders.filter((f) => f.clickup_folder_id === onlyFolder)
+      : allFolders;
 
     for (const folder of folders) {
+      if (limitLists !== undefined && result.lists_scanned >= limitLists) break;
       result.folders_scanned++;
 
       let lists;
@@ -877,6 +892,7 @@ export class ClickUpCronSyncService {
       }
 
       for (const list of lists) {
+        if (limitLists !== undefined && result.lists_scanned >= limitLists) break;
         if (syncConfig.clickup.blacklistedLists.byId.includes(list.id)) continue;
         if (shouldSkipList(list.name)) continue;
 

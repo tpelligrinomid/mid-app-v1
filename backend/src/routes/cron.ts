@@ -634,8 +634,13 @@ router.post('/clickup-archived-sync', verifyCronSecret, async (req: Request, res
 
     console.log(`[Cron] ClickUp archived sync starting (dryRun=${dryRun})`);
 
+    // ?limitLists=N / ?folderId= bound the scan for interactive review; a full
+    // run is too slow for an HTTP client to wait on (it's sized for the cron).
+    const limitLists = req.query.limitLists ? Number(req.query.limitLists) : undefined;
+    const folderId = (req.query.folderId as string) || undefined;
+
     const syncService = new ClickUpCronSyncService();
-    const result = await syncService.syncArchivedTasks({ dryRun });
+    const result = await syncService.syncArchivedTasks({ dryRun, limitLists, folderId });
 
     const durationMs = Date.now() - startTime;
     console.log(

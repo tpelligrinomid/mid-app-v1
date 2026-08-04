@@ -84,6 +84,33 @@ interface FolderToSync {
  * ClickUp Cron Sync Service
  * Uses the backend-proxy Edge Function for database operations (no service role key needed)
  */
+/** Result of the archived-task pass. */
+export interface ArchivedSyncResult {
+  dry_run: boolean;
+  folders_scanned: number;
+  lists_scanned: number;
+  archived_tasks_found: number;
+  /** rows whose is_archived/status differ from what ClickUp reports */
+  would_change: number;
+  /** rows already correct — skipped, not rewritten */
+  already_correct: number;
+  /** archived in ClickUp but no pulse_tasks row (will be inserted) */
+  not_in_db: number;
+  /** rows actually written (0 on a dry run) */
+  updated: number;
+  changes: Array<{
+    clickup_task_id: string;
+    name: string;
+    list_name: string;
+    contract_id: string | null;
+    current_is_archived: boolean;
+    current_status: string;
+    new_is_archived: boolean;
+    new_status: string;
+  }>;
+  errors: Array<{ context: string; error: string }>;
+}
+
 export class ClickUpCronSyncService {
   private client: ClickUpClient;
 
@@ -756,6 +783,192 @@ export class ClickUpCronSyncService {
     // This is simplified - the backend-proxy may not support complex queries
     // For now, skip this step in cron sync
     console.log('[ClickUp Cron Sync] Skipping next_invoice_date update (requires complex query)');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // Archived task sync
+  //
+  // ClickUp excludes archived tasks from list responses unless you ask for them
+  // explicitly, so the 15-minute and weekly passes (which both send
+  // archived=false) never see a task once it is archived. Its pulse_tasks row
+  // keeps is_archived=false indefinitely.
+  //
+  // This runs as a separate, additive pass on its own cadence. It does not
+  // touch the existing sync paths. Two independent mechanisms are covered:
+  //   1. ClickUp's `archived` flag  -> is_archived (set by transformTask)
+  //   2. A list status named "Archived" -> status='archived' (via mapStatus)
+  // A task can carry both — deliverables commonly do — and transformTask
+  // handles them independently, so no special-casing is needed here.
+  //
+  // Deliberately NOT date-filtered: archived tasks are a small bounded set, and
+  // it is unverified whether archiving bumps ClickUp's date_updated. A full
+  // scan per list avoids depending on that.
+  // ══════════════════════════════════════════════════════════════
+
+  /** Fetch archived tasks for one list, paginated. */
+  private async fetchArchivedTasksForList(
+    listId: string,
+    listName: string,
+    listType: string,
+    folderId: string
+  ): Promise<ClickUpTask[]> {
+    const all: ClickUpTask[] = [];
+    let page = 0;
+
+    while (page <= 100) {
+      const tasks = await fetchWithRetry(() =>
+        this.client.getTasksFromList(listId, {
+          archived: true,
+          includeClosed: true,
+          subtasks: true,
+          page
+        })
+      );
+
+      if (!tasks.length) break;
+
+      all.push(
+        ...tasks.map((task: ClickUpTask) => ({
+          ...task,
+          list_id: listId,
+          list_name: listName,
+          list_type: listType,
+          folder_id: folderId
+        }))
+      );
+      page++;
+    }
+
+    return all;
+  }
+
+  /**
+   * Sync archived tasks across all active contracts' folders.
+   *
+   * @param options.dryRun report what would change without writing anything
+   */
+  async syncArchivedTasks(options: { dryRun?: boolean } = {}): Promise<ArchivedSyncResult> {
+    const dryRun = options.dryRun ?? false;
+    const result: ArchivedSyncResult = {
+      dry_run: dryRun,
+      folders_scanned: 0,
+      lists_scanned: 0,
+      archived_tasks_found: 0,
+      would_change: 0,
+      already_correct: 0,
+      not_in_db: 0,
+      updated: 0,
+      changes: [],
+      errors: []
+    };
+
+    const folders = await this.getFoldersToSync();
+
+    for (const folder of folders) {
+      result.folders_scanned++;
+
+      let lists;
+      try {
+        lists = await fetchWithRetry(() => this.client.getListsInFolder(folder.clickup_folder_id));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        result.errors.push({ context: `folder ${folder.clickup_folder_id}`, error: message });
+        continue;
+      }
+
+      for (const list of lists) {
+        if (syncConfig.clickup.blacklistedLists.byId.includes(list.id)) continue;
+        if (shouldSkipList(list.name)) continue;
+
+        result.lists_scanned++;
+
+        let archivedTasks: ClickUpTask[];
+        try {
+          archivedTasks = await this.fetchArchivedTasksForList(
+            list.id,
+            list.name,
+            detectListType(list.name),
+            folder.clickup_folder_id
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push({ context: `list ${list.id} (${list.name})`, error: message });
+          continue;
+        }
+
+        if (!archivedTasks.length) continue;
+        result.archived_tasks_found += archivedTasks.length;
+
+        // Compare against what we currently hold so a dry run can show exactly
+        // which rows would change, and a live run can report real deltas.
+        const existingById = new Map<string, { is_archived: boolean; status: string }>();
+        for (const task of archivedTasks) {
+          const { data } = await dbProxy.select<Array<{ is_archived: boolean; status: string }>>(
+            'pulse_tasks',
+            {
+              columns: 'clickup_task_id, is_archived, status',
+              filters: { clickup_task_id: task.id }
+            }
+          );
+          const row = data?.[0];
+          if (row) existingById.set(task.id, row);
+        }
+
+        const toWrite: Record<string, unknown>[] = [];
+
+        for (const task of archivedTasks) {
+          const transformed = this.transformTask(task, folder.contract_id, folder.clickup_folder_id);
+          const existing = existingById.get(task.id);
+          const newStatus = transformed.status as string;
+
+          if (!existing) {
+            result.not_in_db++;
+          } else if (existing.is_archived === true && existing.status === newStatus) {
+            result.already_correct++;
+            continue; // nothing to do — skip the write entirely
+          } else {
+            result.would_change++;
+            if (result.changes.length < 200) {
+              result.changes.push({
+                clickup_task_id: task.id,
+                name: task.name,
+                list_name: list.name,
+                contract_id: folder.contract_id,
+                current_is_archived: existing.is_archived,
+                current_status: existing.status,
+                new_is_archived: true,
+                new_status: newStatus
+              });
+            }
+          }
+
+          toWrite.push(transformed);
+        }
+
+        if (!dryRun && toWrite.length) {
+          const batchSize = 50;
+          for (let i = 0; i < toWrite.length; i += batchSize) {
+            const batch = toWrite.slice(i, i + batchSize);
+            const { error } = await dbProxy.upsert('pulse_tasks', batch, {
+              onConflict: 'clickup_task_id'
+            });
+            if (error) {
+              result.errors.push({
+                context: `upsert list ${list.id}`,
+                error: typeof error === 'string' ? error : JSON.stringify(error)
+              });
+            } else {
+              result.updated += batch.length;
+            }
+            if (i + batchSize < toWrite.length) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+          }
+        }
+      }
+    }
+
+    return result;
   }
 
   async markDeletedTasks(): Promise<number> {

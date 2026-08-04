@@ -599,6 +599,65 @@ router.post('/generate-strategy-notes', verifyCronSecret, async (req: Request, r
   }
 });
 
+// POST /api/cron/clickup-archived-sync
+// Triggered by Render Cron Job
+//
+// ClickUp omits archived tasks from list responses unless asked for explicitly,
+// so the incremental and full passes never see a task once it's archived and its
+// pulse_tasks row keeps is_archived=false indefinitely. This pass fetches them
+// deliberately. It is additive — it does not touch the 15-minute or weekly syncs.
+//
+// Covers both mechanisms, which are independent and can both apply to one task
+// (deliverables commonly carry both): ClickUp's `archived` flag, and a list
+// status named "Archived".
+//
+// ALWAYS DRY-RUN FIRST: ?dryRun=1 reports exactly which rows would change and
+// writes nothing.
+//
+// Render Cron Job Configuration:
+// - Name: clickup-archived-sync
+// - Schedule: 0 9 * * * (daily 09:00 UTC — after the weekly full sync window)
+// - Command: curl -fsS -X POST "https://your-app.onrender.com/api/cron/clickup-archived-sync?secret=$CRON_SECRET"
+router.post('/clickup-archived-sync', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+
+  try {
+    if (!syncConfig.clickup.apiToken) {
+      res.status(503).json({ error: 'ClickUp integration not configured' });
+      return;
+    }
+    if (!process.env.BACKEND_API_KEY) {
+      res.status(503).json({ error: 'Database proxy not configured' });
+      return;
+    }
+
+    console.log(`[Cron] ClickUp archived sync starting (dryRun=${dryRun})`);
+
+    const syncService = new ClickUpCronSyncService();
+    const result = await syncService.syncArchivedTasks({ dryRun });
+
+    const durationMs = Date.now() - startTime;
+    console.log(
+      `[Cron] ClickUp archived sync ${dryRun ? '(DRY RUN) ' : ''}complete: ` +
+      `${result.archived_tasks_found} archived tasks across ${result.lists_scanned} lists, ` +
+      `${result.would_change} would change, ${result.already_correct} already correct, ` +
+      `${result.not_in_db} not in DB, ${result.updated} written (${durationMs}ms)`
+    );
+
+    res.json({ success: true, ...result, duration_ms: durationMs, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('[Cron] ClickUp archived sync failed:', error);
+    res.status(500).json({
+      success: false,
+      dry_run: dryRun,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 // POST /api/cron/recover-deliverables
 // Triggered by Render Cron Job
 //

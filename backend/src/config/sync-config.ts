@@ -104,7 +104,11 @@ export const STATUS_MAPPINGS: Record<string, Record<string, string>> = {
     'review': 'working',
     'done': 'delivered',
     'complete': 'delivered',
-    'closed': 'delivered'
+    'closed': 'delivered',
+    // Without this, a ClickUp status of "Archived" falls through mapStatus's
+    // default and is recorded as 'not_started' — i.e. archived work shows up as
+    // active and not yet started.
+    'archived': 'archived'
   },
   Goals: {
     'proposed': 'not_started',
@@ -112,7 +116,8 @@ export const STATUS_MAPPINGS: Record<string, Record<string, string>> = {
     'needs attention': 'at_risk',
     'off track': 'blocked',
     'closed': 'delivered',
-    'achieved': 'delivered'
+    'achieved': 'delivered',
+    'archived': 'archived'
   }
 };
 

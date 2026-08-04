@@ -639,8 +639,12 @@ router.post('/clickup-archived-sync', verifyCronSecret, async (req: Request, res
     const limitLists = req.query.limitLists ? Number(req.query.limitLists) : undefined;
     const folderId = (req.query.folderId as string) || undefined;
 
+    // Inserts are opt-in only. Default behaviour never creates rows for tasks
+    // that aren't already tracked.
+    const allowInserts = req.query.allowInserts === '1';
+
     const syncService = new ClickUpCronSyncService();
-    const result = await syncService.syncArchivedTasks({ dryRun, limitLists, folderId });
+    const result = await syncService.syncArchivedTasks({ dryRun, limitLists, folderId, allowInserts });
 
     const durationMs = Date.now() - startTime;
     console.log(

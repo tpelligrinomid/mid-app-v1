@@ -96,8 +96,12 @@ export interface ArchivedSyncResult {
   would_change: number;
   /** rows already correct — skipped, not rewritten */
   already_correct: number;
-  /** archived in ClickUp but no pulse_tasks row (will be inserted) */
+  /** archived in ClickUp but no pulse_tasks row */
   not_in_db: number;
+  /** of those, how many were skipped rather than inserted (update-only mode) */
+  skipped_no_row: number;
+  /** false = update-only; rows are never created for untracked tasks */
+  allow_inserts: boolean;
   /** rows actually written (0 on a dry run) */
   updated: number;
   /** existing pulse_tasks rows seen per scanned folder — 0 everywhere means the lookup is broken, not that data is missing */
@@ -854,9 +858,20 @@ export class ClickUpCronSyncService {
    * @param options.dryRun report what would change without writing anything
    */
   async syncArchivedTasks(
-    options: { dryRun?: boolean; limitLists?: number; folderId?: string } = {}
+    options: {
+      dryRun?: boolean;
+      limitLists?: number;
+      folderId?: string;
+      /** Opt-in only. Default is update-only: never create rows for tasks we don't already track. */
+      allowInserts?: boolean;
+    } = {}
   ): Promise<ArchivedSyncResult> {
     const dryRun = options.dryRun ?? false;
+    // Update-only by default. Archived tasks with no pulse_tasks row are
+    // overwhelmingly never-synced template/checklist tasks; inserting them
+    // would grow the table with history we never tracked, which is a different
+    // change from "reflect that a tracked task was archived".
+    const allowInserts = options.allowInserts ?? false;
     // Bounded modes exist so the pass can be reviewed interactively. A full run
     // walks every list of every active contract against ClickUp sequentially,
     // which takes longer than an HTTP client will wait — fine for the Render
@@ -872,6 +887,8 @@ export class ClickUpCronSyncService {
       would_change: 0,
       already_correct: 0,
       not_in_db: 0,
+      skipped_no_row: 0,
+      allow_inserts: allowInserts,
       updated: 0,
       existing_rows_seen: 0,
       changes: [],
@@ -967,6 +984,10 @@ export class ClickUpCronSyncService {
 
           if (!existing) {
             result.not_in_db++;
+            if (!allowInserts) {
+              result.skipped_no_row++;
+              continue; // update-only: never insert a task we don't already track
+            }
           } else {
             result.would_change++;
           }

@@ -901,17 +901,32 @@ export class ClickUpCronSyncService {
 
         // Compare against what we currently hold so a dry run can show exactly
         // which rows would change, and a live run can report real deltas.
+        //
+        // ONE query per list, not per task. Querying per task is an N+1 that
+        // turns into thousands of sequential edge-function round-trips and
+        // exceeds the HTTP timeout before returning.
         const existingById = new Map<string, { is_archived: boolean; status: string }>();
-        for (const task of archivedTasks) {
-          const { data } = await dbProxy.select<Array<{ is_archived: boolean; status: string }>>(
-            'pulse_tasks',
-            {
-              columns: 'clickup_task_id, is_archived, status',
-              filters: { clickup_task_id: task.id }
+        try {
+          const { data: existingRows } = await dbProxy.select<
+            Array<{ clickup_task_id: string; is_archived: boolean; status: string }>
+          >('pulse_tasks', {
+            columns: 'clickup_task_id, is_archived, status',
+            filters: { clickup_list_id: list.id }
+          });
+          for (const row of existingRows || []) {
+            if (row?.clickup_task_id) {
+              existingById.set(row.clickup_task_id, {
+                is_archived: row.is_archived,
+                status: row.status
+              });
             }
-          );
-          const row = data?.[0];
-          if (row) existingById.set(task.id, row);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push({ context: `existing rows for list ${list.id}`, error: message });
+          // Without current state we can't classify changes; skip rather than
+          // write blind or report misleading dry-run counts.
+          continue;
         }
 
         const toWrite: Record<string, unknown>[] = [];

@@ -106,6 +106,10 @@ export interface ArchivedSyncResult {
   updated: number;
   /** existing pulse_tasks rows seen per scanned folder — 0 everywhere means the lookup is broken, not that data is missing */
   existing_rows_seen: number;
+  /** lists skipped because current state could not be read */
+  lists_skipped: number;
+  /** archived tasks in those skipped lists — counted as found but never classified or written */
+  tasks_unevaluated: number;
   changes: Array<{
     clickup_task_id: string;
     name: string;
@@ -891,6 +895,8 @@ export class ClickUpCronSyncService {
       allow_inserts: allowInserts,
       updated: 0,
       existing_rows_seen: 0,
+      lists_skipped: 0,
+      tasks_unevaluated: 0,
       changes: [],
       errors: []
     };
@@ -966,7 +972,11 @@ export class ClickUpCronSyncService {
           const message = error instanceof Error ? error.message : 'Unknown error';
           result.errors.push({ context: `existing rows for list ${list.id}`, error: message });
           // Without current state we can't classify changes; skip rather than
-          // write blind or report misleading dry-run counts.
+          // write blind or report misleading dry-run counts. Counted so the
+          // summary shows the shortfall instead of it only being visible by
+          // noticing the totals don't reconcile.
+          result.lists_skipped++;
+          result.tasks_unevaluated += archivedTasks.length;
           continue;
         }
 

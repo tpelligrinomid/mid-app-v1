@@ -647,12 +647,29 @@ router.post('/clickup-archived-sync', verifyCronSecret, async (req: Request, res
     const result = await syncService.syncArchivedTasks({ dryRun, limitLists, folderId, allowInserts });
 
     const durationMs = Date.now() - startTime;
+    // Include the shortfall explicitly. A partially-skipped run previously read
+    // identically to a clean one — the only clue was that the counts didn't
+    // sum to archived_tasks_found.
+    const accounted =
+      result.would_change + result.already_correct + result.not_in_db + result.tasks_unevaluated;
+
     console.log(
       `[Cron] ClickUp archived sync ${dryRun ? '(DRY RUN) ' : ''}complete: ` +
       `${result.archived_tasks_found} archived tasks across ${result.lists_scanned} lists, ` +
       `${result.would_change} would change, ${result.already_correct} already correct, ` +
-      `${result.not_in_db} not in DB, ${result.updated} written (${durationMs}ms)`
+      `${result.not_in_db} not in DB, ${result.updated} written ` +
+      `| errors=${result.errors.length} lists_skipped=${result.lists_skipped} ` +
+      `unevaluated=${result.tasks_unevaluated} ` +
+      `| accounted=${accounted}/${result.archived_tasks_found}` +
+      `${accounted === result.archived_tasks_found ? '' : ' <-- SHORTFALL'} (${durationMs}ms)`
     );
+
+    if (result.errors.length) {
+      console.warn(
+        `[Cron] ClickUp archived sync had ${result.errors.length} error(s):`,
+        JSON.stringify(result.errors.slice(0, 20))
+      );
+    }
 
     res.json({ success: true, ...result, duration_ms: durationMs, timestamp: new Date().toISOString() });
   } catch (error) {

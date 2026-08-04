@@ -100,13 +100,17 @@ export interface ArchivedSyncResult {
   not_in_db: number;
   /** rows actually written (0 on a dry run) */
   updated: number;
+  /** existing pulse_tasks rows seen per scanned folder — 0 everywhere means the lookup is broken, not that data is missing */
+  existing_rows_seen: number;
   changes: Array<{
     clickup_task_id: string;
     name: string;
     list_name: string;
     contract_id: string | null;
-    current_is_archived: boolean;
-    current_status: string;
+    /** false when no pulse_tasks row exists yet — the upsert would insert */
+    in_db: boolean;
+    current_is_archived: boolean | null;
+    current_status: string | null;
     new_is_archived: boolean;
     new_status: string;
   }>;
@@ -869,6 +873,7 @@ export class ClickUpCronSyncService {
       already_correct: 0,
       not_in_db: 0,
       updated: 0,
+      existing_rows_seen: 0,
       changes: [],
       errors: []
     };
@@ -927,8 +932,11 @@ export class ClickUpCronSyncService {
             Array<{ clickup_task_id: string; is_archived: boolean; status: string }>
           >('pulse_tasks', {
             columns: 'clickup_task_id, is_archived, status',
-            filters: { clickup_list_id: list.id }
+            // Keyed on folder, not list: a task that moved lists keeps its
+            // folder, so a list-keyed lookup would report it as missing.
+            filters: { clickup_folder_id: folder.clickup_folder_id }
           });
+          result.existing_rows_seen += (existingRows || []).length;
           for (const row of existingRows || []) {
             if (row?.clickup_task_id) {
               existingById.set(row.clickup_task_id, {
@@ -952,25 +960,32 @@ export class ClickUpCronSyncService {
           const existing = existingById.get(task.id);
           const newStatus = transformed.status as string;
 
-          if (!existing) {
-            result.not_in_db++;
-          } else if (existing.is_archived === true && existing.status === newStatus) {
+          if (existing && existing.is_archived === true && existing.status === newStatus) {
             result.already_correct++;
             continue; // nothing to do — skip the write entirely
+          }
+
+          if (!existing) {
+            result.not_in_db++;
           } else {
             result.would_change++;
-            if (result.changes.length < 200) {
-              result.changes.push({
-                clickup_task_id: task.id,
-                name: task.name,
-                list_name: list.name,
-                contract_id: folder.contract_id,
-                current_is_archived: existing.is_archived,
-                current_status: existing.status,
-                new_is_archived: true,
-                new_status: newStatus
-              });
-            }
+          }
+
+          // Record every task that would be written, including ones with no
+          // current row. Reporting only matched rows made a dry run that found
+          // 40 archived tasks list none of them, which is useless for review.
+          if (result.changes.length < 200) {
+            result.changes.push({
+              clickup_task_id: task.id,
+              name: task.name,
+              list_name: list.name,
+              contract_id: folder.contract_id,
+              in_db: !!existing,
+              current_is_archived: existing ? existing.is_archived : null,
+              current_status: existing ? existing.status : null,
+              new_is_archived: true,
+              new_status: newStatus
+            });
           }
 
           toWrite.push(transformed);

@@ -129,6 +129,12 @@ Show strategy, guest booking, recording coordination, audio and video editing,
 production, show notes, clip creation and repurposing.
 Not: a blog post written from an episode (Content).
 
+NAMING PATTERN — always PODCAST & VIDEO:
+A task named "<task id> - <Show Name> - <Person Name>" (an alphanumeric id,
+then the show, then a guest's name) is a podcast episode record. Classify it
+PODCAST & VIDEO even when the name carries no other signal and there is no
+description. Do not infer a different category from surrounding tasks.
+
 TECHNOLOGY
 Tech stack setup, software license management, tool configuration and
 administration where the work is billed as technology spend rather than
@@ -192,6 +198,8 @@ When two categories seem equally valid, apply in this order:
 "Reply triage — outbound responses week of 3/12" -> OUTBOUND
 "Schedule and publish 8 social posts" -> ORGANIC SOCIAL
 "Edit podcast episode 42" -> PODCAST & VIDEO
+"86dx3dek6 - Robotics Invest - Anne De Leeuw" -> PODCAST & VIDEO
+"86dx3c35q - Robotics Invest - Adam Lloyd Cohen" -> PODCAST & VIDEO
 "Cut 6 clips from episode 42" -> PODCAST & VIDEO
 "Blog post from episode 42 transcript" -> CONTENT
 "Technical SEO audit" -> SEARCH & DISCOVERY

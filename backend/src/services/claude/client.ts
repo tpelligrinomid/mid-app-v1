@@ -176,3 +176,77 @@ export async function sendCachedRequest(
     usage: result.usage,
   };
 }
+
+interface StructuredRequestOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  /** JSON Schema the response must conform to */
+  schema: Record<string, unknown>;
+  /** Mark the system prompt for prompt caching */
+  cacheSystemPrompt?: boolean;
+}
+
+/**
+ * Send a message constrained to a JSON Schema via structured outputs.
+ *
+ * The API guarantees the response parses and matches the schema, so callers
+ * don't need to strip markdown fences or validate enum membership by hand —
+ * an out-of-set value is structurally impossible when the schema uses an enum.
+ *
+ * Note on caching: `cacheSystemPrompt` is silently ineffective below the model's
+ * minimum cacheable prefix (4096 tokens on Haiku 4.5). No error, just no hits.
+ */
+export async function sendStructured<T = unknown>(
+  systemPrompt: string,
+  userMessage: string,
+  options: StructuredRequestOptions
+): Promise<{ parsed: T; usage: CachedRequestResult['usage'] }> {
+  const apiKey = getApiKey();
+  const {
+    model = 'claude-haiku-4-5',
+    maxTokens = 8192,
+    temperature = 0,
+    schema,
+    cacheSystemPrompt = false,
+  } = options;
+
+  const response = await withRetry(async () => {
+    const res = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: cacheSystemPrompt
+          ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+          : systemPrompt,
+        output_config: { format: { type: 'json_schema', schema } },
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Claude API ${res.status}: ${errorText.substring(0, 300)}`);
+    }
+    return res;
+  });
+
+  const result = await response.json() as {
+    content: { type: string; text: string }[];
+    usage: CachedRequestResult['usage'];
+  };
+
+  const textBlock = result.content.find((b) => b.type === 'text');
+  if (!textBlock?.text) {
+    throw new Error('Claude returned no text block for a structured request');
+  }
+
+  return { parsed: JSON.parse(textBlock.text) as T, usage: result.usage };
+}

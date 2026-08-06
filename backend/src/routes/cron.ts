@@ -8,6 +8,7 @@ import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
 import { recoverStuckDeliverables, diagnoseDeliverables, recoverDeliverable } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
+import { backfillServiceCategories } from '../services/clickup/service-category.js';
 
 const router = Router();
 
@@ -595,6 +596,85 @@ router.post('/generate-strategy-notes', verifyCronSecret, async (req: Request, r
       success: false,
       error: message,
       duration: `${duration}ms`
+    });
+  }
+});
+
+// POST /api/cron/clickup-service-category
+// Triggered by Render Cron Job
+//
+// Classifies parent tasks in Deliverables lists of ACTIVE contracts and writes
+// the "Service Category" dropdown custom field back to ClickUp.
+//
+// THIS WRITES TO CLICKUP — the only cron here that does. There is no undo.
+// Tasks that already have a value are never touched.
+//
+// ALWAYS DRY-RUN FIRST, and scope the first live run to one contract:
+//   ?dryRun=1&folderId=<folder>   review proposed categories
+//   ?folderId=<folder>            live, single contract
+//   ?maxWrites=N                  per-run write cap (default 400)
+//
+// Runs are bounded on purpose: the first backfill is thousands of tasks and
+// ClickUp allows ~100 req/min. Already-classified tasks are skipped, so
+// successive runs resume with no cursor state.
+//
+// Render Cron Job Configuration:
+// - Name: clickup-service-category
+// - Schedule: 20 7 * * *  and  20 19 * * *  (twice daily, off-minutes so it
+//   never overlaps the */15 sync or the 0 9 archived sweep)
+// - Command: curl -fsS -X POST "https://your-app.onrender.com/api/cron/clickup-service-category?secret=$CRON_SECRET"
+router.post('/clickup-service-category', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+
+  try {
+    if (!syncConfig.clickup.apiToken) {
+      res.status(503).json({ error: 'ClickUp integration not configured' });
+      return;
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+      res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      return;
+    }
+    if (!process.env.BACKEND_API_KEY) {
+      res.status(503).json({ error: 'Database proxy not configured' });
+      return;
+    }
+
+    const folderId = (req.query.folderId as string) || undefined;
+    const maxWrites = req.query.maxWrites ? Number(req.query.maxWrites) : undefined;
+    const limitLists = req.query.limitLists ? Number(req.query.limitLists) : undefined;
+
+    console.log(`[Cron] Service category backfill starting (dryRun=${dryRun})`);
+
+    const result = await backfillServiceCategories({ dryRun, folderId, maxWrites, limitLists });
+    const durationMs = Date.now() - startTime;
+
+    console.log(
+      `[Cron] Service category backfill ${dryRun ? '(DRY RUN) ' : ''}complete: ` +
+      `${result.lists_scanned} lists, ${result.parent_tasks_seen} parent tasks, ` +
+      `${result.candidates} candidates, ${result.classified} classified, ` +
+      `${result.written} written, ${result.unclassified} unclassified, ` +
+      `${result.remaining} remaining ` +
+      `| errors=${result.errors.length} lists_skipped=${result.lists_skipped} (${durationMs}ms)`
+    );
+
+    if (result.errors.length) {
+      console.warn(
+        `[Cron] Service category backfill had ${result.errors.length} error(s):`,
+        JSON.stringify(result.errors.slice(0, 20))
+      );
+    }
+
+    res.json({ success: true, ...result, duration_ms: durationMs, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('[Cron] Service category backfill failed:', error);
+    res.status(500).json({
+      success: false,
+      dry_run: dryRun,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
     });
   }
 });

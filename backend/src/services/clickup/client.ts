@@ -139,6 +139,43 @@ export class ClickUpClient {
   /**
    * Get time entries for a team within a date range
    */
+  /**
+   * Get custom field definitions for a list.
+   * GET /v2/list/{list_id}/field
+   *
+   * Dropdown options live at type_config.options[] as { id (UUID), name, label, orderindex }.
+   * Setting a dropdown value requires the option's UUID, not its label or orderindex.
+   */
+  async getListCustomFields(listId: string) {
+    const response = await this.client.get(`/list/${listId}/field`);
+    return (response.data.fields || []) as Array<{
+      id: string;
+      name: string;
+      type: string;
+      type_config?: {
+        options?: Array<{
+          id: string;
+          name?: string;
+          label?: string;
+          orderindex?: number;
+        }>;
+      };
+    }>;
+  }
+
+  /**
+   * Set a custom field value on a task.
+   * POST /v2/task/{task_id}/field/{field_id}
+   *
+   * WRITES TO CLICKUP. For dropdown fields `value` must be the option UUID.
+   * There is no undo — callers are responsible for confirming the field is
+   * currently empty before calling this.
+   */
+  async setTaskCustomField(taskId: string, fieldId: string, value: string) {
+    const response = await this.client.post(`/task/${taskId}/field/${fieldId}`, { value });
+    return response.data;
+  }
+
   async getTeamTimeEntries(teamId: string, startDate: Date, endDate: Date) {
     const params = {
       start_date: startDate.getTime().toString(),

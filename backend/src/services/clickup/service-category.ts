@@ -27,7 +27,14 @@ import { detectListType, mapStatus, shouldSkipList, syncConfig } from '../../con
 import { dbProxy } from '../../utils/db-proxy.js';
 import { sendStructured } from '../claude/client.js';
 
+/**
+ * Haiku is the default on cost. It follows the taxonomy well on empty-task
+ * backfill, but its answer for a given task shifts with batch composition, and
+ * in larger batches it has been observed contradicting explicit examples in the
+ * prompt. Overridable per-run so the two can be compared on real data.
+ */
 const CLASSIFIER_MODEL = 'claude-haiku-4-5';
+const ALLOWED_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5']);
 const CLASSIFY_BATCH_SIZE = 20;
 const SERVICE_CATEGORY_FIELD_NAME = 'service category';
 
@@ -319,6 +326,7 @@ export interface ServiceCategoryResult {
   remaining: number;
   max_writes: number;
   option_labels: string[];
+  model: string;
   audit_mode: boolean;
   overwrite_mode: boolean;
   audit_agree: number;
@@ -404,7 +412,8 @@ async function classifyBatch(
   tasks: ClickUpTaskLite[],
   contractName: string,
   listName: string,
-  allowedLabels: string[]
+  allowedLabels: string[],
+  model: string = CLASSIFIER_MODEL
 ): Promise<Map<string, string>> {
   const schema = {
     type: 'object',
@@ -443,7 +452,7 @@ async function classifyBatch(
   const { parsed } = await sendStructured<{
     results: Array<{ task_id: string; category: string }>;
   }>(SERVICE_CATEGORY_PROMPT, userMessage, {
-    model: CLASSIFIER_MODEL,
+    model,
     schema,
     temperature: 0,
     cacheSystemPrompt: true,
@@ -484,7 +493,11 @@ export async function backfillServiceCategories(options: {
    * exist -- run with dryRun first and read the disagreement list.
    */
   overwrite?: boolean;
+  /** Override the classifier model for a comparison run. Ignored if unrecognised. */
+  model?: string;
 } = {}): Promise<ServiceCategoryResult> {
+  const model =
+    options.model && ALLOWED_MODELS.has(options.model) ? options.model : CLASSIFIER_MODEL;
   const overwrite = options.overwrite ?? false;
   const audit = overwrite ? true : (options.audit ?? false);
   // audit alone is always read-only; overwrite honours dryRun like a normal run.
@@ -514,6 +527,7 @@ export async function backfillServiceCategories(options: {
     remaining: 0,
     max_writes: maxWrites,
     option_labels: [],
+    model,
     audit_mode: audit,
     overwrite_mode: overwrite,
     audit_agree: 0,
@@ -667,7 +681,8 @@ export async function backfillServiceCategories(options: {
             batch,
             folder.contract_name || folder.contract_id,
             list.name,
-            labels
+            labels,
+            model
           );
         } catch (error) {
           result.errors.push({

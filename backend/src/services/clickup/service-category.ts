@@ -273,6 +273,11 @@ interface ClickUpTaskLite {
 export interface ServiceCategoryResult {
   dry_run: boolean;
   folders_scanned: number;
+  /** Total active contracts with a folder, before chunking. */
+  folders_total: number;
+  folder_offset: number;
+  /** Offset to pass next to continue the walk, or null when finished. */
+  next_folder_offset: number | null;
   lists_scanned: number;
   lists_skipped: number;
   parent_tasks_seen: number;
@@ -391,17 +396,24 @@ export async function backfillServiceCategories(options: {
   folderId?: string;
   maxWrites?: number;
   limitLists?: number;
+  folderOffset?: number;
+  folderLimit?: number;
 } = {}): Promise<ServiceCategoryResult> {
   const dryRun = options.dryRun ?? false;
   const maxWrites = options.maxWrites ?? 400;
   const limitLists = options.limitLists;
   const onlyFolder = options.folderId;
+  const folderOffset = Math.max(0, options.folderOffset ?? 0);
+  const folderLimit = options.folderLimit;
 
   const client = new ClickUpClient(syncConfig.clickup.apiToken!);
 
   const result: ServiceCategoryResult = {
     dry_run: dryRun,
     folders_scanned: 0,
+    folders_total: 0,
+    folder_offset: folderOffset,
+    next_folder_offset: null,
     lists_scanned: 0,
     lists_skipped: 0,
     parent_tasks_seen: 0,
@@ -422,9 +434,22 @@ export async function backfillServiceCategories(options: {
     filters: { contract_status: 'active' },
   });
 
-  const folders = (allFolders || []).filter(
+  const allMatching = (allFolders || []).filter(
     (f) => f.clickup_folder_id && (!onlyFolder || f.clickup_folder_id === onlyFolder)
   );
+
+  // A scan of every active contract outruns the proxy's connection window
+  // (observed: dropped at 455s), so callers can walk it in chunks. A contract
+  // added mid-walk could be missed; the next run picks it up.
+  const folders =
+    folderLimit === undefined
+      ? allMatching.slice(folderOffset)
+      : allMatching.slice(folderOffset, folderOffset + folderLimit);
+
+  result.folders_total = allMatching.length;
+  result.folder_offset = folderOffset;
+  result.next_folder_offset =
+    folderOffset + folders.length < allMatching.length ? folderOffset + folders.length : null;
 
   let budgetSpent = 0;
 
@@ -486,7 +511,11 @@ export async function backfillServiceCategories(options: {
             client.getTasksFromList(list.id, {
               archived: false,
               includeClosed: true,
-              subtasks: true,
+              // Parent tasks only. ClickUp omits subtasks unless asked, and we
+              // discard every one below, so requesting them just pages through
+              // thousands of rows to throw them away. The task.parent guard
+              // below stays as defense in depth.
+              subtasks: false,
               page,
             })
           )) as ClickUpTaskLite[];

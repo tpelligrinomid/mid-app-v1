@@ -290,12 +290,16 @@ export interface ServiceCategoryResult {
   remaining: number;
   max_writes: number;
   option_labels: string[];
+  audit_mode: boolean;
+  audit_agree: number;
+  audit_disagree: number;
   proposals: Array<{
     task_id: string;
     name: string;
     contract_id: string;
     proposed_category: string;
     written: boolean;
+    existing_category?: string;
   }>;
   errors: Array<{ context: string; error: string }>;
 }
@@ -305,21 +309,33 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Locate the Service Category field on a list and map label -> option UUID. */
 function resolveServiceCategoryField(
   fields: Awaited<ReturnType<ClickUpClient['getListCustomFields']>>
-): { fieldId: string; optionsByLabel: Map<string, string> } | null {
+): {
+  fieldId: string;
+  optionsByLabel: Map<string, string>;
+  labelsById: Map<string, string>;
+  labelsByIndex: Map<number, string>;
+} | null {
   const field = fields.find(
     (f) => (f.name || '').trim().toLowerCase() === SERVICE_CATEGORY_FIELD_NAME
   );
   if (!field) return null;
 
   const optionsByLabel = new Map<string, string>();
-  for (const opt of field.type_config?.options || []) {
+  const labelsById = new Map<string, string>();
+  const labelsByIndex = new Map<number, string>();
+  (field.type_config?.options || []).forEach((opt: any, idx: number) => {
     // ClickUp populates `name` for dropdowns and `label` for labels fields.
     const label = (opt.label ?? opt.name ?? '').trim();
-    if (label && opt.id) optionsByLabel.set(label.toUpperCase(), opt.id);
-  }
+    if (!label) return;
+    if (opt.id) {
+      optionsByLabel.set(label.toUpperCase(), opt.id);
+      labelsById.set(opt.id, label);
+    }
+    labelsByIndex.set(typeof opt.orderindex === 'number' ? opt.orderindex : idx, label);
+  });
   if (optionsByLabel.size === 0) return null;
 
-  return { fieldId: field.id, optionsByLabel };
+  return { fieldId: field.id, optionsByLabel, labelsById, labelsByIndex };
 }
 
 /**
@@ -333,6 +349,25 @@ function needsCategory(task: ClickUpTaskLite, fieldId: string): boolean {
   if (!entry) return true;
   if (!('value' in entry)) return true;
   return entry.value === null || entry.value === undefined || entry.value === '';
+}
+
+/**
+ * Read a task's current Service Category back as a human label.
+ *
+ * ClickUp returns a dropdown value as the option UUID, but older fields and
+ * some API paths return the numeric orderindex instead, so both are handled.
+ * Returns null when the field is empty or the value maps to nothing.
+ */
+function readExistingLabel(
+  task: ClickUpTaskLite,
+  resolved: { fieldId: string; labelsById: Map<string, string>; labelsByIndex: Map<number, string> }
+): string | null {
+  const entry = (task.custom_fields || []).find((f) => f.id === resolved.fieldId);
+  const v = entry && 'value' in entry ? entry.value : undefined;
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'string') return resolved.labelsById.get(v) ?? null;
+  if (typeof v === 'number') return resolved.labelsByIndex.get(v) ?? null;
+  return null;
 }
 
 async function classifyBatch(
@@ -398,8 +433,17 @@ export async function backfillServiceCategories(options: {
   limitLists?: number;
   folderOffset?: number;
   folderLimit?: number;
+  /**
+   * Audit mode: classify tasks that ALREADY have a Service Category and report
+   * where the model disagrees with the stored value. Never writes -- it forces
+   * dryRun, because the whole point is to inspect values we deliberately do not
+   * overwrite (they may be human corrections, or they may be ClickUp AI guesses,
+   * and this is how we tell the difference).
+   */
+  audit?: boolean;
 } = {}): Promise<ServiceCategoryResult> {
-  const dryRun = options.dryRun ?? false;
+  const audit = options.audit ?? false;
+  const dryRun = audit ? true : (options.dryRun ?? false);
   const maxWrites = options.maxWrites ?? 400;
   const limitLists = options.limitLists;
   const onlyFolder = options.folderId;
@@ -425,6 +469,9 @@ export async function backfillServiceCategories(options: {
     remaining: 0,
     max_writes: maxWrites,
     option_labels: [],
+    audit_mode: audit,
+    audit_agree: 0,
+    audit_disagree: 0,
     proposals: [],
     errors: [],
   };
@@ -530,7 +577,8 @@ export async function backfillServiceCategories(options: {
             // Order matters: test emptiness first so skipped_by_status counts
             // only tasks the gate is actually withholding, not the already-
             // classified ones it would have skipped regardless.
-            if (!needsCategory(task, resolved.fieldId)) continue;
+            const isEmpty = needsCategory(task, resolved.fieldId);
+            if (audit ? isEmpty : !isEmpty) continue;
 
             const mapped = mapStatus(task.status?.status, 'Deliverables');
             if (!CLASSIFIABLE_STATUSES.has(mapped)) {
@@ -602,12 +650,19 @@ export async function backfillServiceCategories(options: {
           }
 
           result.classified++;
+          const existing = audit ? readExistingLabel(task, resolved) : null;
+          if (audit) {
+            if (existing && existing.toUpperCase() === label.toUpperCase()) result.audit_agree++;
+            else result.audit_disagree++;
+          }
+
           const proposal = {
             task_id: task.id,
             name: task.name,
             contract_id: folder.contract_id,
             proposed_category: label,
             written: false,
+            ...(audit ? { existing_category: existing ?? '(unreadable)' } : {}),
           };
 
           if (!dryRun) {

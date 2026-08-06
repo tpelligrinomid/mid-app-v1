@@ -149,7 +149,14 @@ ORGANIC SOCIAL
 Organic channel strategy, post creation and scheduling, community management,
 comment and DM response, employee advocacy programs, social listening.
 Not: paid amplification of a post (Paid media).
-Not: the copy if the task is purely writing (Content).
+
+DEFAULT WHEN THE DELIVERABLE IS SOCIAL POSTS: a task whose deliverable is social
+posts is ORGANIC SOCIAL even when it carries no verb -- "<Conference> Social
+Posts", "Develop Social Posts - <Event>", "Social Post - <Person>". Do not split
+near-identical task names between Organic social and Content.
+Tag CONTENT only when the task is explicitly copywriting ("Write social copy
+for X"), or when a larger written asset leads and social rides along
+("March Blog & Social Posts" is Content -- the blog leads).
 
 PODCAST & VIDEO
 Show strategy, guest booking, recording coordination, audio and video editing,
@@ -192,6 +199,9 @@ When two categories seem equally valid, apply in this order:
    "Write LinkedIn posts" is Content. "Schedule and post to LinkedIn" is
    Organic social. "Design the LinkedIn ad" is Design. "Launch the LinkedIn
    ad campaign" is Paid media.
+   When there is NO verb at all, the medium decides: a bare "<Event> Social
+   Posts" is Organic social, not Content. Consistency matters more than the
+   split here -- these recur monthly and must not alternate.
 
 4. Cold beats owned.
    Anything on alternative or burner domains is Outbound, regardless of what
@@ -236,6 +246,12 @@ When two categories seem equally valid, apply in this order:
 "Write cold sequence for cybersecurity vertical" -> CONTENT
 "Reply triage — outbound responses week of 3/12" -> OUTBOUND
 "Schedule and publish 8 social posts" -> ORGANIC SOCIAL
+"NPPC 2025 Conference Social Posts" -> ORGANIC SOCIAL
+"HousingWire AI Summit Social Posts" -> ORGANIC SOCIAL
+"Develop Social Posts - NAMFS" -> ORGANIC SOCIAL
+"Social Post - Jeff Young" -> ORGANIC SOCIAL
+"Write social copy for product launch" -> CONTENT
+"March Blog & Social Posts" -> CONTENT
 "Edit podcast episode 42" -> PODCAST & VIDEO
 "86dx3dek6 - Robotics Invest - Anne De Leeuw" -> PODCAST & VIDEO
 "86dx3c35q - Robotics Invest - Adam Lloyd Cohen" -> PODCAST & VIDEO
@@ -291,6 +307,7 @@ export interface ServiceCategoryResult {
   max_writes: number;
   option_labels: string[];
   audit_mode: boolean;
+  overwrite_mode: boolean;
   audit_agree: number;
   audit_disagree: number;
   proposals: Array<{
@@ -441,9 +458,24 @@ export async function backfillServiceCategories(options: {
    * and this is how we tell the difference).
    */
   audit?: boolean;
+  /**
+   * Overwrite mode: like audit, but actually writes the corrected value where
+   * the model disagrees with what is stored. Agreements are never rewritten, so
+   * this only ever touches values it considers wrong.
+   *
+   * This deliberately breaks the "never touch an existing value" invariant. That
+   * rule was there to protect human corrections, but auditing showed ~22% of
+   * stored values are wrong in a systematic way (blog posts tagged Strategy),
+   * which is a machine's error pattern, not a person's. We cannot tell a human
+   * correction from a ClickUp AI guess, so this WILL clobber human edits if any
+   * exist -- run with dryRun first and read the disagreement list.
+   */
+  overwrite?: boolean;
 } = {}): Promise<ServiceCategoryResult> {
-  const audit = options.audit ?? false;
-  const dryRun = audit ? true : (options.dryRun ?? false);
+  const overwrite = options.overwrite ?? false;
+  const audit = overwrite ? true : (options.audit ?? false);
+  // audit alone is always read-only; overwrite honours dryRun like a normal run.
+  const dryRun = audit && !overwrite ? true : (options.dryRun ?? false);
   const maxWrites = options.maxWrites ?? 400;
   const limitLists = options.limitLists;
   const onlyFolder = options.folderId;
@@ -470,6 +502,7 @@ export async function backfillServiceCategories(options: {
     max_writes: maxWrites,
     option_labels: [],
     audit_mode: audit,
+    overwrite_mode: overwrite,
     audit_agree: 0,
     audit_disagree: 0,
     proposals: [],
@@ -651,9 +684,27 @@ export async function backfillServiceCategories(options: {
 
           result.classified++;
           const existing = audit ? readExistingLabel(task, resolved) : null;
+          const agrees = !!(existing && existing.toUpperCase() === label.toUpperCase());
           if (audit) {
-            if (existing && existing.toUpperCase() === label.toUpperCase()) result.audit_agree++;
+            if (agrees) result.audit_agree++;
             else result.audit_disagree++;
+          }
+
+          // Nothing to do when the stored value already matches. Skipping here
+          // (rather than writing an identical value) keeps the write budget
+          // spent only on actual corrections.
+          if (audit && agrees) {
+            if (result.proposals.length < 300) {
+              result.proposals.push({
+                task_id: task.id,
+                name: task.name,
+                contract_id: folder.contract_id,
+                proposed_category: label,
+                written: false,
+                existing_category: existing ?? '(unreadable)',
+              });
+            }
+            continue;
           }
 
           const proposal = {

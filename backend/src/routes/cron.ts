@@ -645,13 +645,14 @@ router.post('/clickup-service-category', verifyCronSecret, async (req: Request, 
     const maxWrites = req.query.maxWrites ? Number(req.query.maxWrites) : undefined;
     const limitLists = req.query.limitLists ? Number(req.query.limitLists) : undefined;
     const audit = req.query.audit === '1' || req.query.audit === 'true';
+    const overwrite = req.query.overwrite === '1' || req.query.overwrite === 'true';
     const folderOffset = req.query.folderOffset ? Number(req.query.folderOffset) : undefined;
     const folderLimit = req.query.folderLimit ? Number(req.query.folderLimit) : undefined;
 
     console.log(`[Cron] Service category backfill starting (dryRun=${dryRun})`);
 
     const result = await backfillServiceCategories({
-      dryRun, folderId, maxWrites, limitLists, folderOffset, folderLimit, audit,
+      dryRun, folderId, maxWrites, limitLists, folderOffset, folderLimit, audit, overwrite,
     });
     const durationMs = Date.now() - startTime;
 

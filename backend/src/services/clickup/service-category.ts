@@ -59,6 +59,12 @@ Roadmapping, quarterly and 90-day planning, campaign strategy, competitive
 analysis, positioning work, recommendations, interpreting results.
 Not: building the deliverable that came out of the thinking.
 
+PLANNING DOCUMENTS ARE ALWAYS STRATEGY, whatever domain they plan — content
+plans, campaign plans, ABM plans, media plans, launch plans, roadmaps. This
+holds whether we lead the plan or collaborate with the client on it;
+collaborating on a plan is still strategy work. Writing the plan is Strategy.
+Building the thing the plan describes is that thing's category.
+
 MARKETING OPERATIONS
 CRM administration, marketing automation configuration, workflow and lifecycle
 build, lead scoring and routing, list and data hygiene, field and property
@@ -151,8 +157,11 @@ When two categories seem equally valid, apply in this order:
 1. Producing something beats coordinating it.
    A task that creates a deliverable is never Account management.
 
-2. Building beats planning.
+2. Building beats planning — except the plan itself.
    If the task produced an artifact, tag the artifact's skill, not Strategy.
+   The exception is a planning document: the plan IS the strategy artifact.
+   "Develop Content Plan Document" is Strategy, not Content.
+   "Write the blog posts in the content plan" is Content.
 
 3. The medium beats the message.
    "Write LinkedIn posts" is Content. "Schedule and post to LinkedIn" is
@@ -184,6 +193,9 @@ When two categories seem equally valid, apply in this order:
 "Manage ABM" -> MARKETING OPERATIONS
 "Set up ABM" -> MARKETING OPERATIONS
 "Q3 planning session prep" -> STRATEGY
+"Develop Content Plan Document" -> STRATEGY
+"Develop ABM Plan Document" -> STRATEGY
+"Collaborate with client on Q4 media plan" -> STRATEGY
 "Monthly client status call" -> ACCOUNT MANAGEMENT
 "Build Q3 performance dashboard in Databox" -> ANALYTICS & REPORTING
 "Pull and format monthly reporting" -> ANALYTICS & REPORTING

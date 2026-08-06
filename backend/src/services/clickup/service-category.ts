@@ -23,7 +23,7 @@
  */
 
 import { ClickUpClient, fetchWithRetry } from './client.js';
-import { detectListType, shouldSkipList, syncConfig } from '../../config/sync-config.js';
+import { detectListType, mapStatus, shouldSkipList, syncConfig } from '../../config/sync-config.js';
 import { dbProxy } from '../../utils/db-proxy.js';
 import { sendStructured } from '../claude/client.js';
 
@@ -33,6 +33,25 @@ const SERVICE_CATEGORY_FIELD_NAME = 'service category';
 
 /** ClickUp allows ~100 req/min. 700ms between writes keeps us under with headroom. */
 const WRITE_THROTTLE_MS = 700;
+
+/**
+ * Only classify work that has actually started.
+ *
+ * A task sitting in "planned" usually has no description written yet, so the
+ * model would be reading a bare title and guessing. That guess is permanent —
+ * a task with a value is never revisited — so a cheap wrong answer now costs
+ * more than waiting for the task to be worked.
+ *
+ * Compared against mapStatus() rather than the raw ClickUp string so every
+ * board variant is covered: working/in progress -> working, and
+ * delivered/complete/closed -> delivered.
+ *
+ * This deliberately also excludes 'blocked' (waiting on client / on hold) and
+ * 'archived'. Waiting-on-client work has usually been started and may well have
+ * a usable description; skipped_by_status reports how many are being held back
+ * so the call can be made on real numbers.
+ */
+const CLASSIFIABLE_STATUSES = new Set(['working', 'delivered']);
 
 export const SERVICE_CATEGORY_PROMPT = `You are classifying marketing agency tasks into a single service category.
 
@@ -100,6 +119,8 @@ Not: the copy inside it. Not: the front-end build that follows.
 DEVELOPMENT
 Front-end build, page and template implementation, code changes, integrations,
 custom functionality, site maintenance, plugin work, technical fixes.
+Includes ongoing website management and upkeep — "manage web", "website
+maintenance", and recurring monthly site management tasks are DEVELOPMENT.
 Not: the design that preceded it.
 
 PAID MEDIA
@@ -156,6 +177,10 @@ When two categories seem equally valid, apply in this order:
 
 1. Producing something beats coordinating it.
    A task that creates a deliverable is never Account management.
+   "Manage <thing>" takes the category of the thing being managed, not Account
+   management: "Manage web" is Development, "Manage ABM" is Marketing
+   operations, "Manage guest outreach" is Digital PR. Account management is
+   coordinating PEOPLE — calls, scheduling, handoffs — not owning a workstream.
 
 2. Building beats planning — except the plan itself.
    If the task produced an artifact, tag the artifact's skill, not Strategy.
@@ -190,6 +215,8 @@ When two categories seem equally valid, apply in this order:
 "Design landing page for gated report" -> DESIGN
 "Landing page copy — compliance guide" -> CONTENT
 "Set up conversion tracking on new landing page" -> MARKETING OPERATIONS
+"Manage web" -> DEVELOPMENT
+"Manage web - February" -> DEVELOPMENT
 "Manage ABM" -> MARKETING OPERATIONS
 "Set up ABM" -> MARKETING OPERATIONS
 "Q3 planning session prep" -> STRATEGY
@@ -249,6 +276,8 @@ export interface ServiceCategoryResult {
   lists_scanned: number;
   lists_skipped: number;
   parent_tasks_seen: number;
+  /** Uncategorized parent tasks held back by the status gate, keyed by raw ClickUp status. */
+  skipped_by_status: Record<string, number>;
   candidates: number;
   classified: number;
   written: number;
@@ -376,6 +405,7 @@ export async function backfillServiceCategories(options: {
     lists_scanned: 0,
     lists_skipped: 0,
     parent_tasks_seen: 0,
+    skipped_by_status: {},
     candidates: 0,
     classified: 0,
     written: 0,
@@ -467,7 +497,20 @@ export async function backfillServiceCategories(options: {
             if (task.parent) continue; // parent tasks only
             if (task.archived) continue;
             result.parent_tasks_seen++;
-            if (needsCategory(task, resolved.fieldId)) candidates.push(task);
+
+            // Order matters: test emptiness first so skipped_by_status counts
+            // only tasks the gate is actually withholding, not the already-
+            // classified ones it would have skipped regardless.
+            if (!needsCategory(task, resolved.fieldId)) continue;
+
+            const mapped = mapStatus(task.status?.status, 'Deliverables');
+            if (!CLASSIFIABLE_STATUSES.has(mapped)) {
+              const raw = (task.status?.status || '(none)').toLowerCase();
+              result.skipped_by_status[raw] = (result.skipped_by_status[raw] || 0) + 1;
+              continue;
+            }
+
+            candidates.push(task);
           }
           page++;
         }

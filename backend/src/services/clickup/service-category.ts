@@ -88,6 +88,9 @@ MARKETING OPERATIONS
 CRM administration, marketing automation configuration, workflow and lifecycle
 build, lead scoring and routing, list and data hygiene, field and property
 management, system integrations, tracking and tag implementation, form setup.
+Includes standing up and configuring marketing tools for the client -- "<Tool>
+Set Up" is Marketing operations unless the tool clearly serves another
+discipline (reporting tool -> Analytics, outbound tool -> Outbound).
 Not: dashboards or reports built on the data (Analytics & reporting).
 
 ANALYTICS & REPORTING
@@ -170,9 +173,16 @@ PODCAST & VIDEO even when the name carries no other signal and there is no
 description. Do not infer a different category from surrounding tasks.
 
 TECHNOLOGY
-Tech stack setup, software license management, tool configuration and
-administration where the work is billed as technology spend rather than
-service delivery.
+Tech stack line items ONLY -- software licenses, seats, and subscriptions billed
+as technology spend rather than service delivery. In practice these are tasks
+named "Tech stack [Month]" or explicit license/seat management.
+
+NOT tool setup or configuration. Standing a tool up FOR a client takes the
+category of the work that tool does, not Technology: "Swan Set Up" is Marketing
+operations, "Set up Databox" is Analytics & reporting, "Set up HeyReach
+sequences" is Outbound. If the task is configuring software to do marketing
+work, it is that marketing discipline. Technology is the line item, not the
+labour.
 
 DIGITAL PR
 Media relations, link building, contributed article placement, podcast
@@ -261,6 +271,9 @@ When two categories seem equally valid, apply in this order:
 "Fix broken internal links" -> SEARCH & DISCOVERY
 "Clean duplicate contacts in HubSpot" -> MARKETING OPERATIONS
 "Add HeyReach seats" -> TECHNOLOGY
+"Tech stack [July]" -> TECHNOLOGY
+"Swan Set Up" -> MARKETING OPERATIONS
+"Set up Databox" -> ANALYTICS & REPORTING
 "Pitch guest post to industry publication" -> DIGITAL PR
 "Manage guest outreach" -> DIGITAL PR
 "Competitive positioning analysis" -> STRATEGY

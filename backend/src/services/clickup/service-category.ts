@@ -392,7 +392,15 @@ function resolveServiceCategoryField(
  * a legitimately-set option as empty.
  */
 function needsCategory(task: ClickUpTaskLite, fieldId: string): boolean {
-  const entry = (task.custom_fields || []).find((f) => f.id === fieldId);
+  // No custom_fields array at all means we did not get field data for this
+  // task, NOT that its fields are empty. Treating the two the same would make
+  // every task in a partial response look uncategorized and let the backfill
+  // write over real values -- silently, since the counts would look normal.
+  // ClickUp always returns an entry per list field, so this should not happen;
+  // when it does, skipping is the safe direction (the next run picks it up).
+  if (!Array.isArray(task.custom_fields) || task.custom_fields.length === 0) return false;
+
+  const entry = task.custom_fields.find((f) => f.id === fieldId);
   if (!entry) return true;
   if (!('value' in entry)) return true;
   return entry.value === null || entry.value === undefined || entry.value === '';

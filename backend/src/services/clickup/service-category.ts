@@ -512,6 +512,15 @@ export async function backfillServiceCategories(options: {
   overwrite?: boolean;
   /** Override the classifier model for a comparison run. Ignored if unrecognised. */
   model?: string;
+  /**
+   * Skip the first N candidates in each list before applying the write budget.
+   *
+   * maxWrites bounds how many tasks are CLASSIFIED, not just written, and the
+   * candidate order is stable -- so on a list bigger than the budget, rerunning
+   * reclassifies the same prefix forever and the tail is never reached. This
+   * walks past it.
+   */
+  candidateOffset?: number;
 } = {}): Promise<ServiceCategoryResult> {
   const model =
     options.model && ALLOWED_MODELS.has(options.model) ? options.model : CLASSIFIER_MODEL;
@@ -522,6 +531,7 @@ export async function backfillServiceCategories(options: {
   const maxWrites = options.maxWrites ?? 400;
   const limitLists = options.limitLists;
   const onlyFolder = options.folderId;
+  const candidateOffset = Math.max(0, options.candidateOffset ?? 0);
   const folderOffset = Math.max(0, options.folderOffset ?? 0);
   const folderLimit = options.folderLimit;
 
@@ -681,13 +691,14 @@ export async function backfillServiceCategories(options: {
 
       // Respect the per-run write budget; anything beyond it is reported as
       // remaining and picked up by the next run.
+      const pool = candidateOffset > 0 ? candidates.slice(candidateOffset) : candidates;
       const budgetLeft = Math.max(0, maxWrites - budgetSpent);
       if (budgetLeft === 0) {
-        result.remaining += candidates.length;
+        result.remaining += pool.length;
         continue;
       }
-      const toProcess = candidates.slice(0, budgetLeft);
-      result.remaining += candidates.length - toProcess.length;
+      const toProcess = pool.slice(0, budgetLeft);
+      result.remaining += pool.length - toProcess.length;
 
       for (let i = 0; i < toProcess.length; i += CLASSIFY_BATCH_SIZE) {
         const batch = toProcess.slice(i, i + CLASSIFY_BATCH_SIZE);

@@ -310,6 +310,7 @@ interface ClickUpTaskLite {
   description?: string;
   parent?: string | null;
   archived?: boolean;
+  date_updated?: string | number;
   status?: { status?: string };
   tags?: Array<{ name?: string }>;
   custom_fields?: Array<{ id: string; name?: string; value?: unknown }>;
@@ -336,6 +337,9 @@ export interface ServiceCategoryResult {
   max_writes: number;
   option_labels: string[];
   model: string;
+  /** Tasks that already had a value and were reconsidered because they changed. */
+  refreshed: number;
+  refresh_within_hours: number;
   audit_mode: boolean;
   overwrite_mode: boolean;
   audit_agree: number;
@@ -521,6 +525,23 @@ export async function backfillServiceCategories(options: {
    * walks past it.
    */
   candidateOffset?: number;
+  /**
+   * Reconsider tasks that ALREADY have a category when ClickUp's date_updated is
+   * within this many hours. Defaults to 24; pass 0 to restore empty-only.
+   *
+   * This is what keeps the field consistent without a full re-sweep. Task
+   * templates stamp a default category (985 tasks arrived tagged Strategy, 79%
+   * of them wrong), and an empty-only backfill can never correct them because
+   * they are never empty. Reclassifying on change catches them the moment they
+   * are created or touched.
+   *
+   * Deliberately NOT a blanket every-run overwrite. A task's answer depends on
+   * which tasks share its classification batch, so re-running the full set would
+   * let an unrelated new task flip a settled category -- categories changing on
+   * work nobody touched. Scoping to genuinely-changed tasks bounds that to
+   * tasks that were edited anyway.
+   */
+  refreshUpdatedWithinHours?: number;
 } = {}): Promise<ServiceCategoryResult> {
   const model =
     options.model && ALLOWED_MODELS.has(options.model) ? options.model : CLASSIFIER_MODEL;
@@ -531,6 +552,10 @@ export async function backfillServiceCategories(options: {
   const maxWrites = options.maxWrites ?? 400;
   const limitLists = options.limitLists;
   const onlyFolder = options.folderId;
+  const refreshHours = Math.max(0, options.refreshUpdatedWithinHours ?? 24);
+  // Overwrite mode sweeps every valued task, so the recency window does not apply.
+  const refreshSince =
+    !audit && refreshHours > 0 ? Date.now() - refreshHours * 3600_000 : null;
   const candidateOffset = Math.max(0, options.candidateOffset ?? 0);
   const folderOffset = Math.max(0, options.folderOffset ?? 0);
   const folderLimit = options.folderLimit;
@@ -555,6 +580,8 @@ export async function backfillServiceCategories(options: {
     max_writes: maxWrites,
     option_labels: [],
     model,
+    refreshed: 0,
+    refresh_within_hours: audit ? 0 : refreshHours,
     audit_mode: audit,
     overwrite_mode: overwrite,
     audit_agree: 0,
@@ -665,7 +692,15 @@ export async function backfillServiceCategories(options: {
             // only tasks the gate is actually withholding, not the already-
             // classified ones it would have skipped regardless.
             const isEmpty = needsCategory(task, resolved.fieldId);
-            if (audit ? isEmpty : !isEmpty) continue;
+            if (audit) {
+              if (isEmpty) continue;
+            } else if (!isEmpty) {
+              // Already categorised: only reconsider it if it genuinely changed.
+              if (refreshSince === null) continue;
+              const du = Number(task.date_updated || 0);
+              if (!du || du < refreshSince) continue;
+              result.refreshed++;
+            }
 
             const mapped = mapStatus(task.status?.status, 'Deliverables');
             if (!CLASSIFIABLE_STATUSES.has(mapped)) {
@@ -739,9 +774,11 @@ export async function backfillServiceCategories(options: {
           }
 
           result.classified++;
-          const existing = audit ? readExistingLabel(task, resolved) : null;
+          // Read the stored value in every mode: a refreshed task has one, and
+          // rewriting an identical value would burn budget and churn the row.
+          const existing = readExistingLabel(task, resolved);
           const agrees = !!(existing && existing.toUpperCase() === label.toUpperCase());
-          if (audit) {
+          if (existing) {
             if (agrees) result.audit_agree++;
             else result.audit_disagree++;
           }
@@ -749,7 +786,7 @@ export async function backfillServiceCategories(options: {
           // Nothing to do when the stored value already matches. Skipping here
           // (rather than writing an identical value) keeps the write budget
           // spent only on actual corrections.
-          if (audit && agrees) {
+          if (agrees) {
             if (result.proposals.length < 300) {
               result.proposals.push({
                 task_id: task.id,
@@ -769,7 +806,7 @@ export async function backfillServiceCategories(options: {
             contract_id: folder.contract_id,
             proposed_category: label,
             written: false,
-            ...(audit ? { existing_category: existing ?? '(unreadable)' } : {}),
+            ...(existing ? { existing_category: existing } : {}),
           };
 
           if (!dryRun) {

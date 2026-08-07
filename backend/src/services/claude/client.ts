@@ -49,6 +49,16 @@ interface SendMessageOptions {
 /**
  * Send a message to Claude and return the response text.
  */
+/**
+ * Newer models (Sonnet 5, Opus 5, Fable 5, Opus 4.8/4.7) reject `temperature`
+ * with a 400 -- it is deprecated there. Callers pass temperature: 0 for
+ * determinism, which is the default behaviour on those models anyway, so the
+ * parameter is simply omitted rather than made every caller model-aware.
+ */
+function supportsTemperature(model: string): boolean {
+  return !/^claude-(sonnet-5|opus-5|fable-5|mythos-5|opus-4-8|opus-4-7)/.test(model);
+}
+
 export async function sendMessage(
   systemPrompt: string,
   userMessage: string,
@@ -72,7 +82,7 @@ export async function sendMessage(
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
-        temperature,
+        ...(supportsTemperature(model) ? { temperature } : {}),
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       }),
@@ -145,7 +155,7 @@ export async function sendCachedRequest(
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
-        temperature,
+        ...(supportsTemperature(model) ? { temperature } : {}),
         system: [
           {
             type: 'text',
@@ -222,7 +232,7 @@ export async function sendStructured<T = unknown>(
       body: JSON.stringify({
         model,
         max_tokens: maxTokens,
-        temperature,
+        ...(supportsTemperature(model) ? { temperature } : {}),
         system: cacheSystemPrompt
           ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
           : systemPrompt,

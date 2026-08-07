@@ -28,12 +28,21 @@ import { dbProxy } from '../../utils/db-proxy.js';
 import { sendStructured } from '../claude/client.js';
 
 /**
- * Haiku is the default on cost. It follows the taxonomy well on empty-task
- * backfill, but its answer for a given task shifts with batch composition, and
- * in larger batches it has been observed contradicting explicit examples in the
- * prompt. Overridable per-run so the two can be compared on real data.
+ * Sonnet 5 over Haiku on taxonomy adherence, measured on 83 real tasks.
+ *
+ * Haiku returned CONTENT for "Social Post - Jeff Young" -- a task written
+ * verbatim in the prompt as -> ORGANIC SOCIAL -- and was wrong on 4 further
+ * calls Sonnet got right (Update Swan.ai script, Update Website Content,
+ * June Blog Social Posts, 2025 GEM Meets the Camino). Sonnet also disagreed
+ * with already-stored values on 4/83 against Haiku's 8/83, so it churns less.
+ *
+ * Three identical Haiku runs agreed 83/83, so this was never sampling noise --
+ * it is instruction-following, and no amount of prompt tuning reliably fixes it.
+ * The backfill is ~3,720 permanent writes for a few dollars' difference.
+ *
+ * Overridable per-run via model= for future comparisons.
  */
-const CLASSIFIER_MODEL = 'claude-haiku-4-5';
+const CLASSIFIER_MODEL = 'claude-sonnet-5';
 const ALLOWED_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5']);
 const CLASSIFY_BATCH_SIZE = 20;
 const SERVICE_CATEGORY_FIELD_NAME = 'service category';

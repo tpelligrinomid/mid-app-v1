@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { ClickUpClient, fetchWithRetry } from './client.js';
 import { syncConfig } from '../../config/sync-config.js';
 import { dbProxy } from '../../utils/db-proxy.js';
@@ -8,7 +9,7 @@ interface ClickUpTask {
   name: string;
   description?: string;
   points?: number;
-  time_estimate?: number;
+  time_estimate?: number | null;
   parent?: string;
   custom_fields?: Array<{
     id: string;
@@ -22,8 +23,19 @@ interface ProcessSyncResults {
   items_synced: number;
   items_deactivated: number;
   items_embedded: number;
+  /** Items whose ClickUp payload carried a non-null time_estimate. */
+  time_estimates_present: number;
+  /** Items whose estimate had to be recovered via a task-detail call. */
+  time_estimates_hydrated: number;
   errors: Array<{ context: string; error: string }>;
 }
+
+/**
+ * Ceiling on task-detail calls per list when the list response omits time_estimate.
+ * ClickUp allows ~100 req/min; this keeps a degraded run bounded instead of stalling
+ * the whole sync behind rate-limit backoff.
+ */
+const HYDRATE_LIMIT_PER_LIST = 100;
 
 /**
  * Phase order mapping.
@@ -72,10 +84,14 @@ export class ProcessLibrarySyncService {
       items_synced: 0,
       items_deactivated: 0,
       items_embedded: 0,
+      time_estimates_present: 0,
+      time_estimates_hydrated: 0,
       errors: [],
     };
 
     const seenClickUpIds = new Set<string>();
+    const syncId = uuidv4();
+    await this.logSyncStart(syncId);
 
     try {
       // 1. Get all folders in the Process Library space
@@ -118,11 +134,19 @@ export class ProcessLibrarySyncService {
       const deactivated = await this.deactivateUnseen(seenClickUpIds);
       results.items_deactivated = deactivated;
 
-      console.log(`[Process Library Sync] Complete: ${results.items_synced} synced, ${results.items_deactivated} deactivated, ${results.items_embedded} embedded, ${results.errors.length} errors`);
+      console.log(
+        `[Process Library Sync] Complete: ${results.items_synced} synced, ` +
+        `${results.items_deactivated} deactivated, ${results.items_embedded} embedded, ` +
+        `${results.time_estimates_present}/${results.items_synced} with time estimates ` +
+        `(${results.time_estimates_hydrated} hydrated), ${results.errors.length} errors`
+      );
+
+      await this.logSyncComplete(syncId, 'success', results);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       results.errors.push({ context: 'sync', error: message });
       console.error('[Process Library Sync] Fatal error:', message);
+      await this.logSyncComplete(syncId, 'failed', results, message);
     }
 
     return results;
@@ -162,6 +186,8 @@ export class ProcessLibrarySyncService {
 
       // Batch upsert
       if (filteredTasks.length > 0) {
+        await this.hydrateTimeEstimates(filteredTasks, results);
+
         const records = filteredTasks.map(task =>
           this.transformTask(task, folder, list, phase, phase_order)
         );
@@ -202,6 +228,49 @@ export class ProcessLibrarySyncService {
       page++;
       if (page > 100) hasMore = false;
     }
+  }
+
+  /**
+   * Recover time estimates the list endpoint did not return.
+   *
+   * ClickUp distinguishes two things this sync must not confuse. `time_estimate: null`
+   * is a real answer -- the process has no estimate set -- and writing NULL for it is
+   * correct. An absent key means the list response simply did not carry the field, and
+   * that is the only case worth spending a task-detail call on.
+   *
+   * Written this way the fallback is self-disabling: when the list payload includes the
+   * field (the normal case) it issues no extra requests at all, so a daily sync of ~140
+   * processes stays a handful of calls rather than one per row.
+   */
+  private async hydrateTimeEstimates(
+    tasks: ClickUpTask[],
+    results: ProcessSyncResults
+  ): Promise<void> {
+    const missing = tasks.filter(task => task.time_estimate === undefined);
+
+    if (missing.length > HYDRATE_LIMIT_PER_LIST) {
+      console.warn(
+        `[Process Library Sync] ${missing.length} tasks missing time_estimate, ` +
+        `hydrating only the first ${HYDRATE_LIMIT_PER_LIST} this run`
+      );
+    }
+
+    for (const task of missing.slice(0, HYDRATE_LIMIT_PER_LIST)) {
+      try {
+        const detail = await fetchWithRetry(
+          () => this.client.getTask(task.id)
+        ) as { time_estimate?: number | null };
+
+        task.time_estimate = detail?.time_estimate ?? null;
+        if (task.time_estimate) results.time_estimates_hydrated++;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.errors.push({ context: `time_estimate:${task.id}`, error: message });
+        console.warn(`[Process Library Sync] Could not hydrate estimate for ${task.name}:`, message);
+      }
+    }
+
+    results.time_estimates_present += tasks.filter(task => task.time_estimate != null).length;
   }
 
   private hasMidPointsMenu(task: ClickUpTask): boolean {
@@ -305,6 +374,67 @@ export class ProcessLibrarySyncService {
       title: task.name,
       content,
     });
+  }
+
+  /**
+   * Register the run in pulse_sync_state / pulse_sync_logs.
+   *
+   * The tasks and invoice syncs have always done this; the process library never did,
+   * which is why it could quietly stop running for six months with nothing to show a
+   * stale last_sync_at. Entity type mirrors the folder it syncs so the existing
+   * /api/pulse/sync views pick it up without change.
+   */
+  private async logSyncStart(syncId: string): Promise<void> {
+    await dbProxy.insert('pulse_sync_logs', {
+      id: syncId,
+      service: 'clickup',
+      entity_type: 'process_library',
+      sync_mode: 'full',
+      status: 'started',
+      started_at: new Date().toISOString(),
+    });
+
+    await dbProxy.upsert('pulse_sync_state', {
+      service: 'clickup',
+      entity_type: 'process_library',
+      sync_mode: 'full',
+      status: 'running',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'service,entity_type' });
+  }
+
+  private async logSyncComplete(
+    syncId: string,
+    status: 'success' | 'failed',
+    results: ProcessSyncResults,
+    errorMessage?: string
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    await dbProxy.update('pulse_sync_logs', {
+      status,
+      records_processed: results.items_synced,
+      error_message: errorMessage || null,
+      completed_at: now,
+    }, { id: syncId });
+
+    const stateUpdate: Record<string, unknown> = {
+      service: 'clickup',
+      entity_type: 'process_library',
+      sync_mode: 'full',
+      status: status === 'success' ? 'completed' : 'failed',
+      last_sync_at: now,
+      records_processed: results.items_synced,
+      error_message: errorMessage || null,
+      updated_at: now,
+    };
+
+    if (status === 'success') {
+      stateUpdate.last_successful_sync_at = now;
+      stateUpdate.last_full_sync_at = now;
+    }
+
+    await dbProxy.upsert('pulse_sync_state', stateUpdate, { onConflict: 'service,entity_type' });
   }
 
   /**

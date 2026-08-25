@@ -8,6 +8,13 @@
  */
 
 import { update as edgeFnUpdate, select } from '../../utils/edge-functions.js';
+import { PROGRAM_MATRIX } from '../../config/roadmap-model.js';
+import {
+  buildOptions,
+  loadEligibleLibrary,
+  validateOptions,
+  type RoadmapOptionInput,
+} from './program-roadmap.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
 import type { GenerationState, ResearchInputs } from './types.js';
@@ -24,6 +31,8 @@ export interface GenerateOptions {
   researchInputs?: ResearchInputs;
   previousRoadmapId?: string;
   pointsBudget?: number;
+  /** Program roadmap: priced options from the generation form. */
+  roadmapOptions?: RoadmapOptionInput[];
   seedTopics?: string[];
   maxCrawlPages?: number;
   // ABM fields
@@ -212,6 +221,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     researchInputs,
     previousRoadmapId,
     pointsBudget: pointsBudgetOverride,
+    roadmapOptions,
     seedTopics,
     maxCrawlPages,
     targetSegments,
@@ -348,6 +358,102 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
 
       console.log(
         `[Deliverable Generation] Submitted content plan "${title}" (job ${cpJobId}, run ${cpRunId}), awaiting webhook callback`
+      );
+      return;
+    }
+
+    // Program roadmaps: hours-based, one document carrying 1-3 priced options.
+    // Entirely separate from the points path below, which is untouched.
+    if (deliverableType === 'program_roadmap') {
+      if (!roadmapOptions?.length) {
+        throw new Error('A program roadmap needs at least one option (tier, programs, budget).');
+      }
+
+      const contractRow = await select<{ dollar_per_hour: number | null; customer_display_type: string | null }>(
+        'contracts',
+        {
+          select: 'dollar_per_hour,customer_display_type',
+          filters: { contract_id: contractId },
+          single: true,
+        }
+      );
+      const dollarPerHour = contractRow?.dollar_per_hour ?? null;
+
+      // Every option is checked before anything is generated. Refusing here costs one
+      // round trip; refusing after six generation calls costs all of them.
+      const errors = validateOptions(roadmapOptions, dollarPerHour);
+      if (errors.length) {
+        throw new Error(['Cannot generate this roadmap:', ...errors.map(e => '- ' + e)].join(String.fromCharCode(10)));
+      }
+
+      const [researchData, previousRoadmap, context] = await Promise.all([
+        resolvePriorResearch(contractId, deliverableId),
+        resolvePreviousRoadmap(contractId, deliverableId, previousRoadmapId),
+        assembleContext(contractId, title, primaryMeetingIds),
+      ]);
+
+      // Throws when a selected technology is billable with no client price. Deliberate:
+      // contributing 0 would under-quote silently, which is the failure that survives
+      // review.
+      const { options, technology } = await buildOptions(contractId, roadmapOptions, dollarPerHour!);
+
+      const soldPrograms = [...new Set(options.flatMap(o => o.programs))];
+      const library = await loadEligibleLibrary(soldPrograms);
+
+      const techWarnings = Object.values(technology).flatMap(t => t.warnings);
+
+      console.log(
+        `[Deliverable Generation] Program roadmap context for "${title}":`,
+        {
+          options: options.map(o => `${o.label} (${o.program_hours}h)`),
+          rate: dollarPerHour,
+          has_research: !!researchData,
+          has_previous_roadmap: !!previousRoadmap,
+          transcript_count: context.primary_meetings.length,
+          library_items: library.length,
+          technology_warnings: techWarnings.length,
+        }
+      );
+
+      if (techWarnings.length) {
+        console.warn('[Deliverable Generation] Technology warnings:', techWarnings);
+      }
+
+      const { jobId: prJobId, triggerRunId: prRunId } = await submitDeliverable({
+        deliverable_type: deliverableType,
+        contract_id: contractId,
+        title,
+        instructions,
+        client: researchInputs?.client,
+        metadata: { deliverable_id: deliverableId },
+        ...(researchData && { research: researchData }),
+        transcripts: context.primary_meetings.map(m => m.transcript),
+        hourly_rate: dollarPerHour!,
+        roadmap_options: options,
+        program_matrix: PROGRAM_MATRIX,
+        process_library_hours: library,
+        ...(previousRoadmap && { previous_roadmap: previousRoadmap }),
+      });
+
+      await updateGenerationState(deliverableId, {
+        status: 'submitted',
+        job_id: prJobId,
+        trigger_run_id: prRunId,
+        submitted_at: new Date().toISOString(),
+        context_summary: {
+          meetings_count: context.primary_meetings.length + context.other_meetings.length,
+          notes_count: context.notes.length,
+          processes_count: library.length,
+          // Resolved technology is stored for display and never sent to the generator --
+          // it never becomes a row and never consumes hours, so shipping it would be pure
+          // token cost on every call.
+          technology: technology as unknown as Record<string, unknown>,
+        },
+      });
+
+      console.log(
+        `[Deliverable Generation] Submitted program roadmap "${title}" ` +
+        `(job ${prJobId}, run ${prRunId}, ${options.length} option(s)), awaiting webhook callback`
       );
       return;
     }

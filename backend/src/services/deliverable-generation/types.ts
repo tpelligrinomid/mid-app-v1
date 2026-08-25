@@ -44,6 +44,33 @@ export interface DeliverableSubmission {
   process_library?: Array<{ task: string; description: string; stage: string; points: number }>;
   /** Roadmap: monthly points budget from contract */
   points_budget?: number;
+  /** Program roadmap: contract blended rate, one value across every option */
+  hourly_rate?: number;
+  /** Program roadmap: the priced options to generate. 1-3, ascending tier order. */
+  roadmap_options?: Array<{
+    option_id: string;
+    label: string;
+    tier: string;
+    programs: string[];
+    program_allocation: Record<string, string>;
+    monthly_budget: number;
+    technology_monthly: number;
+    technology_one_time: number;
+    total_monthly: number;
+    hours_available: number;
+    overhead_hours: number;
+    program_hours: number;
+  }>;
+  /** Program roadmap: category eligibility per program, enforced per option by MM */
+  program_matrix?: Record<string, string[]>;
+  /** Program roadmap: library items, union of all options' eligible categories */
+  process_library_hours?: Array<{
+    task: string;
+    description: string;
+    stage: string;
+    service_category: string;
+    baseline_hours: number;
+  }>;
   /** ABM plan: target account segments */
   target_segments?: Array<{ segment_name: string; description: string; estimated_account_count: number; tier: string }>;
   /** ABM plan: offers mapped to funnel stages */
@@ -115,6 +142,20 @@ export interface GenerateDeliverableRequest {
   previous_roadmap_id?: string;
   /** Roadmap: monthly points budget (overrides contract default) */
   points_budget?: number;
+  /**
+   * Program roadmap: 1-3 priced options the client chooses between. Each is a complete
+   * scenario; they are alternatives and are never summed. The blended rate is not an
+   * option field -- it comes from contracts.dollar_per_hour and is the same for all.
+   */
+  roadmap_options?: Array<{
+    option_id?: string;
+    label?: string;
+    tier: 'execute' | 'perform' | 'grow';
+    programs: Array<'authority' | 'reach' | 'pursuit'>;
+    monthly_budget: number;
+    /** Selections from the Pulse tech stack catalog, priced at client price. */
+    technology_ids?: string[];
+  }>;
   /** SEO audit: topic seeds for crawl prioritization */
   seed_topics?: string[];
   /** SEO audit: max pages to crawl per domain */
@@ -196,6 +237,11 @@ export interface GenerationState {
       meetings_count: number;
       notes_count: number;
       processes_count: number;
+      /**
+       * Program roadmap only: technology resolved per option, kept for display.
+       * Never sent to the generator -- it becomes no rows and consumes no hours.
+       */
+      technology?: Record<string, unknown>;
     };
   };
 }

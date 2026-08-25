@@ -58,20 +58,26 @@ Two columns already exist and need no work:
   validation at generation time rather than a migration.
 - `customer_display_type` — `'points' | 'hours' | 'none'`, already drives client display.
 
-New:
+New — one column only:
 
 ```sql
 ALTER TABLE contracts
-  ADD COLUMN IF NOT EXISTS pricing_model text DEFAULT 'points',   -- 'points' | 'programs'
-  ADD COLUMN IF NOT EXISTS tier text,                             -- 'execute' | 'perform' | 'grow'
-  ADD COLUMN IF NOT EXISTS programs text[];                       -- {'authority','reach','pursuit'}
+  ADD COLUMN IF NOT EXISTS pricing_model text DEFAULT 'points';   -- 'points' | 'programs'
 ```
 
 `pricing_model` selects the generation path. Defaulting to `'points'` means every
 existing contract keeps its current behaviour with no data migration.
 
-`tier` and `programs` are written by the strategist at roadmap submission and persisted
-on approval, so downstream reporting knows what was sold.
+**Tier and programs are deliberately NOT on the contract.** They are generation inputs,
+not contract attributes — a single roadmap presents several priced options and the client
+chooses. Recording them on the contract before that choice would be recording a decision
+nobody has made.
+
+*Known consequence:* nothing in the database will say which programs an account is
+running, so portfolio questions ("how many clients run Pursuit?") stay answerable only by
+inference from task service categories, the way the sizing analysis does it today. If that
+becomes a real reporting need, the place to record it is the approved option — not the
+contract, and not before approval.
 
 ### `compass_process_library`
 
@@ -112,6 +118,50 @@ that deviation invisible — this is the main thing hours buy back.
 `service_category`** — five categories sit in more than one program, so the category
 cannot name the program that paid for it. The eligibility matrix constrains what is
 allowed; it does not derive.
+
+---
+
+## Roadmap options
+
+A roadmap is generated from **one or more options**, each a complete priced scenario. The
+strategist supplies a row per option:
+
+| Field | Notes |
+|---|---|
+| `tier` | `execute` \| `perform` \| `grow` |
+| `programs` | Which programs this option runs |
+| `monthly_budget` | The fee this option assumes |
+| `hourly_rate` | Blended rate for this option; defaults to $125 |
+
+Rate is per option rather than per roadmap so a higher option can assume a
+senior-weighted team: *"$6,000 at $125 buys 48 hours; $9,000 at $150 buys 60 hours with a
+senior strategist and a developer."* Both are honest, and the difference is visible.
+
+Options are **alternatives, not phases.** They are not summed — each is a complete plan
+for the same engagement at a different investment, and the client picks one. The output
+must make that unmistakable, or someone will read three options as a $22,000 proposal.
+
+### Validation across options
+
+Every option is validated **before** any generation runs, and generation refuses if any
+option fails. Partially generating and silently dropping an invalid option would present
+a two-option proposal where three were asked for, with nothing saying why.
+
+Each option is checked independently against the hard rules below, plus one that only
+exists because options are explicit:
+
+| Rule | Message |
+|---|---|
+| Tier does not match budget band | "$4,000 is Execute. Grow starts at $12,000." |
+
+The bands are $4,000–5,900 Execute, $6,000–11,900 Perform, $12,000+ Grow. This is the
+retainer model's "tiers are arithmetic, not policy" made enforceable — a strategist who
+wants Grow treatment raises the budget rather than relabelling the tier.
+
+### After the client chooses
+
+The selected option is what becomes the plan of record. Nothing is written back to the
+contract at generation time; the choice is recorded on the approved deliverable.
 
 ---
 
@@ -230,17 +280,21 @@ New submission fields on `DeliverableSubmission`, mirroring the roadmap block th
 already assembles `research`, `transcripts`, `process_library`, and `previous_roadmap`:
 
 ```ts
-/** Program roadmap: hours available per month, after overhead reserve */
-hours_budget?: number;
-/** Program roadmap: contract blended rate, for value display */
-hourly_rate?: number;
-/** Program roadmap: tier gates program count and archetype breadth */
-tier?: 'execute' | 'perform' | 'grow';
-/** Program roadmap: programs sold, chosen by the strategist at submission */
-programs?: Array<'authority' | 'reach' | 'pursuit'>;
-/** Program roadmap: reserved monthly hours for strategy + account management */
-overhead_hours?: number;
-/** Program roadmap: library items with baseline hours, filtered to eligible categories */
+/** Program roadmap: the priced options to generate, one plan each */
+roadmap_options?: Array<{
+  option_id: string;
+  label: string;                     // "Execute — Authority" etc, shown to the client
+  tier: 'execute' | 'perform' | 'grow';
+  programs: Array<'authority' | 'reach' | 'pursuit'>;
+  monthly_budget: number;
+  hourly_rate: number;
+  hours_available: number;           // monthly_budget / hourly_rate
+  overhead_hours: number;            // reserved for strategy + account management
+  program_hours: number;             // hours_available - overhead_hours
+}>;
+/** Program roadmap: category eligibility per program, so options are enforced per option */
+program_matrix?: Record<'authority' | 'reach' | 'pursuit', string[]>;
+/** Program roadmap: library items with baseline hours, union of all options' eligible categories */
 process_library_hours?: Array<{
   task: string;
   description: string;
@@ -249,6 +303,11 @@ process_library_hours?: Array<{
   baseline_hours: number;
 }>;
 ```
+
+The backend sends the **union** of items eligible across all options, plus the matrix.
+Master Marketer applies the matrix per option, so a Reach-only option cannot draw an
+Authority category even though that category is present in the payload for another
+option.
 
 The backend filters `process_library_hours` to categories eligible for the sold programs
 before submitting. Master Marketer never sees ineligible items, so it cannot propose
@@ -269,19 +328,41 @@ with hours replacing points and the fields above added per row.
 
 ```jsonc
 {
-  "total_hours_budget": 266.4,
-  "hourly_rate": 125,
-  "tier": "perform",
-  "programs": ["authority", "reach"],
-  "months": [
+  "options_are_alternatives": true,     // never summed; the client picks one
+  "options": [
     {
-      "month": 1,
-      "hours_available": 38.2,
-      "hours_allocated": 37.4,
-      "tasks": [ /* row schema above */ ],
-      "flags": [
-        { "level": "soft", "code": "ramp_month", "message": "12.5 hrs of one-time setup; production is roughly half a steady-state month." }
+      "option_id": "opt_execute_authority",
+      "label": "Execute — Authority",
+      "tier": "execute",
+      "programs": ["authority"],
+      "monthly_budget": 4000,
+      "hourly_rate": 125,
+      "hours_available": 32.0,
+      "overhead_hours": 9.8,
+      "program_hours": 22.2,
+      "months": [
+        {
+          "month": 1,
+          "hours_available": 22.2,
+          "hours_allocated": 21.5,
+          "tasks": [ /* row schema above */ ],
+          "flags": [
+            { "level": "soft", "code": "ramp_month", "message": "12.5 hrs of setup; production is roughly half a steady-state month." }
+          ]
+        }
       ]
+    },
+    {
+      "option_id": "opt_perform_authority_reach",
+      "label": "Perform — Authority + Reach",
+      "tier": "perform",
+      "programs": ["authority", "reach"],
+      "monthly_budget": 6000,
+      "hourly_rate": 125,
+      "hours_available": 48.0,
+      "overhead_hours": 9.8,
+      "program_hours": 38.2,
+      "months": [ /* ... */ ]
     }
   ]
 }
@@ -301,6 +382,9 @@ save. The hours version is the same table with four changes:
 3. **Total budget band** shows hours available, hours allocated, and variance — plus the
    dollar value at the contract rate, since that is the number under discussion
 4. **Flags render inline** on the row or month they belong to
+5. **Options are a top-level switch** — tabs or a comparison view above the month tables,
+   each carrying its own capacity band. The UI must never show a combined total across
+   options; they are alternatives, and a summed figure would misrepresent the proposal.
 
 Technology rows never appear — technology is billed outside the fee and never consumes
 hours.
@@ -316,11 +400,11 @@ the strategist can see what standard was.
 
 ## Sequencing
 
-1. Migration: `pricing_model`, `tier`, `programs` on contracts
+1. Migration: `pricing_model` on contracts — one column
 2. Eligibility matrix as configuration
 3. `processor.ts` branch + payload assembly
 4. Master Marketer `/api/generate/program-roadmap`
-5. Lovable editing UI
+5. Lovable: option input rows on the generation form, option switch in the viewer, editing UI
 
 **No ClickUp work and no data migration.** The library already carries everything the
 generator needs — hours, service category, description. `dollar_per_hour` is set per
@@ -341,3 +425,8 @@ step.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
+- **How many options is too many?** Three reads as a proposal; six reads as indecision,
+  and multiplies generation cost by six. Worth a cap.
+- **Does an option carry its own narrative**, or is the roadmap's prose shared with only
+  the plans differing? Shared prose is cheaper and reads better; per-option narrative
+  makes the trade-off between options explicit.

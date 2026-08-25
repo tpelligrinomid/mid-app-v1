@@ -198,34 +198,53 @@ the client pays. Every option carries three numbers:
 | | |
 |---|---|
 | `monthly_budget` | Services |
-| `technology_monthly` | Platform and licence cost |
+| `technology_monthly` | Platform cost at **client price** |
 | **`total_monthly`** | What the client actually pays |
 
-**The strategist supplies the cost; the generator supplies the requirement.** There is no
-tool catalogue in the system and no price list, so the generator must not invent figures.
-What it can do is name the tooling each option's programs imply — outbound needs sending
-infrastructure and enrichment; paid needs ad platform access; reporting needs a dashboard
-tool — so the strategist has a checklist to price rather than a blank field.
+#### Selected from the catalog, not typed
 
-Line items are optional but preferred, because the retainer model commits to showing the
-client what is running and who holds each contract:
+Pulse already holds a Tech Stack Catalog — 73 technologies with vendor, category, internal
+cost, client price, cadence and status — and catalog items can be attached to contracts,
+which is what the client sees in their portal. The roadmap generation form picks from that
+catalog per option. Nothing is typed free-hand and nothing is invented by the generator.
 
-```ts
-technology?: {
-  estimated_monthly: number;
-  line_items?: Array<{
-    name: string;                       // "HeyReach", "Clay", "Databox"
-    monthly_cost: number;
-    billed_by: 'mid' | 'client';        // who holds the contract
-    required_for: string;               // "Pursuit — outbound sequencing"
-  }>;
-}
-```
+**Client price, never internal cost.** The catalog carries both and they are not close —
+AHREFs is $350 internal against $50 client price; Buzzsprout is $25 against $50. The
+client-facing total sums **client price only**. Internal cost is a margin figure and must
+never reach a client-facing proposal.
 
-`billed_by` matters: a tool the client holds directly is a cost they carry but not one on
-your invoice, and conflating the two is what made technology invisible under the old
-model. The retainer model's Fix 2 exists precisely because $35,184/mo across 32 retainers
-sat inside monthly fees where nobody could see it.
+**Items with no client price are agency-absorbed and excluded from the option total.**
+Several catalog rows — Apify, Bitscale, ChatGPT, Claude — carry a dash in the client price
+column. They are tools the agency runs on its own account. Summing them into a client's
+quoted total would add your own overhead to their invoice: selecting Bitscale for a
+Pursuit option would silently add $799.
+
+**Cadence has to be normalised.** The catalog carries a cadence per item. Anything not
+already monthly is converted to a monthly equivalent before it enters `technology_monthly`,
+so options remain comparable.
+
+On approval, the selected option's catalog items become the contract's tech stack
+assignment — which is what makes the portal view match what was sold.
+
+#### Blocking dependency
+
+**The backend cannot read the catalog today.** The `backend-proxy` edge function enforces
+a server-side table allowlist, and every tech stack table is rejected by it — probing ten
+candidate names returned `"Table 'x' is not allowed"` in each case, independent of whether
+the table exists.
+
+Two things are needed before this can be built, both outside this repo:
+
+1. The catalog and contract-assignment table names, which are Lovable-built and appear
+   nowhere in this repo's schema or migrations
+2. Those tables added to the edge function's `ALLOWED_TABLES`
+
+Note that `docs/edge-function-code-process-library.txt` is a stale snapshot of that
+function — it omits `pulse_tasks`, which the backend reads successfully — so the deployed
+allowlist is the only authority.
+
+Until then, `technology_monthly` can be entered as a single figure per option and the
+catalog picker added afterwards. The option schema below does not change when it is.
 
 ### Validation across options
 
@@ -377,7 +396,13 @@ roadmap_options?: Array<{
   tier: 'execute' | 'perform' | 'grow';
   programs: Array<'authority' | 'reach' | 'pursuit'>;
   monthly_budget: number;            // services only
-  technology_monthly: number;        // billed separately; never consumes hours
+  technology_monthly: number;        // sum of selected catalog items at CLIENT price
+  technology_items?: Array<{         // catalog selection; omitted until allowlisted
+    catalog_id: string;
+    name: string;
+    vendor: string;
+    client_price_monthly: number;    // never internal cost
+  }>;
   total_monthly: number;             // monthly_budget + technology_monthly
   hours_available: number;           // monthly_budget / hourly_rate — services only
   overhead_hours: number;            // reserved for strategy + account management
@@ -546,7 +571,6 @@ category, description. Nothing at any step touches an existing contract.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **Is a tool catalogue worth building?** Today the strategist prices technology per
-  option by hand. A catalogue of tools with standard monthly costs and `billed_by` would
-  make the estimate consistent and let the generator propose figures rather than only
-  requirements — but it is a real piece of work and nothing is blocked without it.
+- **Catalog table names and allowlisting** — needed before the technology picker can be
+  built. See the blocking dependency above. Everything else in this spec can be built
+  without it.

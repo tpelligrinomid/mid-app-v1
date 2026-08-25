@@ -787,34 +787,6 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
   }
 });
 
-// GET /api/cron/schema-probe
-//
-// Temporary read-only diagnostic. Lists which of a set of candidate tables exist and
-// what columns they carry, so a spec can name real fields instead of guessing at a
-// Lovable-built schema this repo has never seen. Remove once the names are recorded.
-router.get('/schema-probe', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
-  const candidates = String(req.query.tables || '').split(',').map(t => t.trim()).filter(Boolean);
-  const out: Record<string, unknown> = {};
-
-  for (const table of candidates) {
-    try {
-      const { data, error } = await dbProxy.select<Array<Record<string, unknown>>>(table, {});
-      if (error) { out[table] = { exists: false, error: error.message.slice(0, 160) }; continue; }
-      const rows = data || [];
-      out[table] = {
-        exists: true,
-        row_seen: rows.length,
-        columns: rows.length ? Object.keys(rows[0]).sort() : '(table empty — columns unknown)',
-        sample: rows.length ? rows[0] : null,
-      };
-    } catch (err) {
-      out[table] = { exists: false, error: err instanceof Error ? err.message.slice(0, 160) : 'unknown' };
-    }
-  }
-
-  res.json({ success: true, probed: candidates.length, results: out });
-});
-
 // POST /api/cron/process-library-service-category
 //
 // Same taxonomy and prompt as clickup-service-category, run over the Process

@@ -147,6 +147,42 @@ Options are **alternatives, not phases.** They are not summed — each is a comp
 for the same engagement at a different investment, and the client picks one. The output
 must make that unmistakable, or someone will read three options as a $22,000 proposal.
 
+### What varies between options
+
+Most of a roadmap describes the client and does not change with the investment. Only the
+plan does.
+
+| Section | Scope | Why |
+|---|---|---|
+| Executive Summary | Shared + recommendation | See below |
+| Overview | Shared | About the client |
+| Target Market | Shared | About the client |
+| Brand Story | Shared | About the client |
+| Products & Solutions | Shared | About the client |
+| Competition | Shared | About the client |
+| **Goals** | **Per option** | What you can commit to depends on what is bought |
+| **Roadmap Phases** | **Per option** | Sequence changes with capacity |
+| **Quarterly Initiatives** | **Per option** | |
+| **Annual Plan** | **Per option** | The monthly task rows |
+| **Hours Plan** | **Per option** | Replaces Points Plan on this path |
+
+**Goals being per-option is the most important line in this table.** It is what stops a
+roadmap promising the same outcomes at three different prices — the exact failure the
+retainer model opens with. It also makes the accountability ladder concrete: Execute goals
+are delivery goals, Perform adds the leading indicators we control, Grow owns the plan and
+the measurement behind it. Three options with identical goals would be three prices for
+one promise.
+
+**Executive Summary needs a decision.** The body is shared, but the retainer model says
+the AGE should end on a determination — *"Your roadmap requires $9,000 a month. That's
+Perform."* If that sentence belongs in the roadmap, the summary carries a short
+recommendation block naming the options and which one is recommended, and is therefore not
+purely shared. Recommended, but it is a judgement about how the proposal should read.
+
+**Generation cost.** Shared sections are generated once, not once per option. Three
+options is closer to 1.5× a single roadmap than 3×, because the expensive work — synthesis
+of research into target market, competition, and brand story — does not repeat.
+
 ### Validation across options
 
 Every option is validated **before** any generation runs, and generation refuses if any
@@ -338,6 +374,17 @@ with hours replacing points and the fields above added per row.
 {
   "hourly_rate": 125,                   // one rate, every option
   "options_are_alternatives": true,     // never summed; the client picks one
+
+  // Generated once. Describes the client, not the investment.
+  "shared": {
+    "executive_summary": { "body": "…", "recommended_option_id": "opt_perform_authority_reach" },
+    "overview": "…",
+    "target_market": { /* … */ },
+    "brand_story": "…",
+    "products_solutions": { /* … */ },
+    "competition": { /* … */ }
+  },
+
   "options": [
     {
       "option_id": "opt_execute_authority",
@@ -348,17 +395,25 @@ with hours replacing points and the fields above added per row.
       "hours_available": 32.0,
       "overhead_hours": 9.8,
       "program_hours": 22.2,
-      "months": [
-        {
-          "month": 1,
-          "hours_available": 22.2,
-          "hours_allocated": 21.5,
-          "tasks": [ /* row schema above */ ],
-          "flags": [
-            { "level": "soft", "code": "ramp_month", "message": "12.5 hrs of setup; production is roughly half a steady-state month." }
-          ]
-        }
-      ]
+
+      "goals": { /* OKRs scaled to what this option can commit to */ },
+      "roadmap_phases": [ /* … */ ],
+      "quarterly_initiatives": [ /* … */ ],
+      "hours_plan": { /* … */ },
+
+      "annual_plan": {
+        "months": [
+          {
+            "month": 1,
+            "hours_available": 22.2,
+            "hours_allocated": 21.5,
+            "tasks": [ /* row schema above */ ],
+            "flags": [
+              { "level": "soft", "code": "ramp_month", "message": "12.5 hrs of setup; production is roughly half a steady-state month." }
+            ]
+          }
+        ]
+      }
     },
     {
       "option_id": "opt_perform_authority_reach",
@@ -369,7 +424,8 @@ with hours replacing points and the fields above added per row.
       "hours_available": 48.0,
       "overhead_hours": 9.8,
       "program_hours": 38.2,
-      "months": [ /* ... */ ]
+      "goals": { /* … */ },
+      "annual_plan": { "months": [ /* … */ ] }
     }
   ]
 }
@@ -389,9 +445,12 @@ save. The hours version is the same table with four changes:
 3. **Total budget band** shows hours available, hours allocated, and variance — plus the
    dollar value at the contract rate, since that is the number under discussion
 4. **Flags render inline** on the row or month they belong to
-5. **Options are a top-level switch** — tabs or a comparison view above the month tables,
-   each carrying its own capacity band. The UI must never show a combined total across
-   options; they are alternatives, and a summed figure would misrepresent the proposal.
+5. **Options switch only the plan sections.** Executive Summary through Competition render
+   once; Goals, Roadmap Phases, Quarterly Initiatives, Annual Plan and Hours Plan switch
+   with the selected option. In the contents sidebar the shared sections stay put and the
+   option-scoped ones re-render, so the reader is not made to feel they changed document.
+   The UI must never show a combined total across options; they are alternatives, and a
+   summed figure would misrepresent the proposal.
 
 Technology rows never appear — technology is billed outside the fee and never consumes
 hours.
@@ -430,6 +489,7 @@ category, description. Nothing at any step touches an existing contract.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **Does an option carry its own narrative**, or is the roadmap's prose shared with only
-  the plans differing? Shared prose is cheaper and reads better; per-option narrative
-  makes the trade-off between options explicit.
+- **Does the Executive Summary carry a recommendation** naming which option we advise, or
+  does it present the options neutrally? The retainer model's "the roadmap names the
+  number" argues for a recommendation; presenting neutrally puts the choice entirely with
+  the client.

@@ -12,6 +12,7 @@
 import { select } from '../../utils/edge-functions.js';
 import {
   COMMITMENT_TERMS,
+  OVERHEAD_CATEGORY,
   OVERHEAD_HOURS,
   PROGRAM_MATRIX,
   TIER_BANDS,
@@ -442,12 +443,24 @@ export async function resolveTechnology(
  *
  * Filtered on hours rather than points: this path never reads the points column, and an
  * item with no estimate has nothing to plan against.
+ *
+ * Strategy & account management is always included regardless of the programs sold -- see
+ * the carve-out below.
  */
 export async function loadEligibleLibrary(programs: Program[]): Promise<LibraryItem[]> {
   const eligible = new Set<string>();
   for (const program of programs) {
     for (const category of PROGRAM_MATRIX[program] || []) eligible.add(category);
   }
+
+  // Strategy & account management is in no program's matrix, because it is not sold as one.
+  // But overhead is planned as ordinary rows, so the generator has to receive those items --
+  // Facilitate Client Meetings and the Develop ... Plan Document set -- or it cannot emit the
+  // coordination rows the plan requires and every option trips overhead_under_reserved.
+  //
+  // Unconditional: it runs under every engagement regardless of what was bought, and
+  // program_matrix enforcement exempts it for the same reason.
+  eligible.add(OVERHEAD_CATEGORY);
 
   const rows = await select<LibraryRow[]>('compass_process_library', {
     select: 'name,description,phase,service_category,time_estimate_ms',

@@ -292,7 +292,12 @@ export const FLAG_CODES = {
     scope: 'option' as const,
   },
   ramp_month: {
-    description: 'Month one carrying heavy setup; roughly half a steady-state month of production',
+    /**
+     * Describes OUTPUT, not hours. Now that overhead is planned and setup can span months
+     * one and two, month one allocates to a normal percentage -- it simply ships fewer
+     * deliverables, because setup and planning consume the production budget.
+     */
+    description: 'Month one ships fewer deliverables: setup and planning consume production capacity',
     scope: 'month' as const,
   },
   goal_commitment_mismatch: {

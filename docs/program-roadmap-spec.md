@@ -3,7 +3,7 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
-**v5 — this document supersedes every addendum and correction note.** Those were a
+**v6 — this document supersedes every addendum and correction note.** Those were a
 mistake: five delta documents across two repos, citing commits neither side could resolve.
 This file is the single current statement. Read it; ignore the rest.
 
@@ -230,9 +230,20 @@ Which categories a program may draw from. Configuration, exposed as data.
 | Email & nurture | | ● | |
 | Outbound | | | ● |
 
-Strategy & account management runs under every engagement and is never sold on its own — it
-is the overhead reserve, not a program category. Digital PR is subcontracted and billed
-separately; it never consumes hours.
+**Strategy & account management is in no program's column, because it is not sold as one.
+It is still planned, and its library items are always sent.**
+
+The generator emits coordination rows, so it must receive the items to emit them —
+`Facilitate Client Meetings` and the thirteen `Develop — Plan Document` items. The payload
+therefore carves them out unconditionally: they join `process_library_hours` regardless of
+which programs were sold, and `program_matrix` enforcement exempts them.
+
+Without that carve-out the filter drops every overhead item before submission, the generator
+cannot emit a coordination row for a task it never received, and every option trips
+`overhead_under_reserved`.
+
+Digital PR is subcontracted and billed separately; it never consumes hours and is not
+carved out.
 
 **Category granularity.** ClickUp stores 15 categories; this matrix uses 12. Roll up at
 display time — `SEARCH & DISCOVERY` into Content, `ACCOUNT MANAGEMENT` into Strategy — and
@@ -504,7 +515,9 @@ program_matrix?: Record<'authority' | 'reach' | 'pursuit', string[]>;
 process_library_hours?: Array<{
   task: string;
   description: string;
-  stage: string;
+  /** Enum, not free text: a bad value should fail at the boundary rather than
+   *  produce a row the viewer cannot group. */
+  stage: 'Foundation' | 'Execution' | 'Analysis';
   service_category: string;
   baseline_hours: number;
 }>;
@@ -674,7 +687,7 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
   level: 'soft',
   code,
   message,
-  scope: 'month' | 'option' | 'document',
+  scope: 'row' | 'month' | 'option' | 'document',
   severity?: 'review' | 'notice',
   option_ids?: string[],
 }
@@ -748,7 +761,7 @@ Execute is one program run **deliberately narrow**, not one program spread acros
 categories. Authority has five; free composition at 22.2 hours gives each about four and
 produces nothing.
 
-Each archetype is stated in **three classes**, because a flat task list leaves the generator
+Each archetype is stated in **four classes**, because a flat task list leaves the generator
 guessing which rows are fixed and which flex — and it will guess differently between two
 options in the same document.
 
@@ -756,7 +769,8 @@ options in the same document.
 
 | Class | Cadence | Tasks |
 |---|---|---|
-| setup | month 1 only | per library, for the categories in play |
+| setup | months 1–2, as capacity allows | The relevant `Develop — Plan Document` — e.g. Develop Content Plan Document 18.75 |
+| overhead | every month | Facilitate Client Meetings 5.00 |
 | recurring | every month | Manage content 0.75 · Manage SEO 5.00 · Manage performance reporting 1.00 |
 | production | scales to fill | Develop SEO blog post 5.08 · Optimize existing SEO article 4.58 |
 
@@ -764,32 +778,44 @@ options in the same document.
 
 | Class | Cadence | Tasks |
 |---|---|---|
-| setup | month 1 only | Set up paid media 5.5 · Set up performance reporting 7.0 |
+| setup | months 1–2, as capacity allows | Set up paid media 5.5 · Set up performance reporting 7.0 · optionally Develop Paid Media Plan Document 16.0 |
+| overhead | every month | Facilitate Client Meetings 5.00 |
 | recurring | every month | Manage paid media 4.00 · Manage performance reporting 1.00 |
 | production | scales to fill | Google Ads text ad package 5.33 · Image ad creative package 9.83 |
 
+**Setup spans months one and two rather than landing wholly in month one**, and a plan
+document may be split across them as work in progress. Confined to month one, Execute /
+Authority is unbuildable: plan document 18.75 + overhead 5.00 + recurring 6.75 is 30.50 of
+32.0, leaving 1.5 hours against a smallest production item of 4.58 — **zero deliverables at
+95% allocated**, while steady months run three blog posts and an optimization.
+
 The split makes both required behaviours mechanical:
 
-- **Month one** = setup + recurring + whatever production fits. Without this the arithmetic
-  is impossible: Execute / Reach setup is 12.5 hours and the steady-state shape is 20.16,
-  which is 32.7 against 22.2 of capacity. The archetype cannot run in month one, and
-  something has to give principled ground.
+- **Month one** = setup + overhead + recurring + whatever production fits, against the full
+  32.0. For Execute / Reach that is 12.5 + 5.00 + 5.00 = 22.5 fixed, leaving 9.5 — one
+  deliverable where a steady month runs two or three. That is the ramp.
 - **Higher in the band** = more production, same recurring, **same categories**. This is what
   "more room and the same shape" means in practice.
 
 **Production scaling to fill is a requirement, not a suggestion.** An Execute engagement at
-38.1 program hours running a fixed 21.5 sits at 56% allocated and would trip
-`month_under_capacity` every month of its life.
+the top of the band running a fixed steady-state composition would sit far below capacity and
+trip `month_under_capacity` every month of its life.
 
 Perform (38.2+) composes more freely. Grow (86.2+) can run full breadth.
 
 ### Month one
 
 Setup work is heavy relative to Execute's capacity. An Execute / Reach engagement opens with
-`Set up paid media` (5.5h) and `Set up performance reporting` (7.0h) — 12.5 hours, **56% of the
-month's program capacity.** Month one therefore delivers roughly half a steady-state month of
-production. That is the ramp period in the arithmetic rather than a fault, and the generator
-says so in the narrative so the SOW can carry it.
+`Set up paid media` (5.5h) and `Set up performance reporting` (7.0h) — 12.5 hours, **39% of
+the month's 32.0 capacity**, before 5.0 of coordination and 5.0 of recurring work on top.
+
+**The ramp shows up in deliverables, not in allocation.** Month one still allocates to a
+normal percentage — around 87% for Execute / Reach — because setup and planning fill the
+hours. What it ships is one deliverable against two or three in a steady month.
+
+That is why `ramp_month`'s message describes output rather than hours, and why suppressing
+`month_under_capacity` under `ramp_month` is a safety rather than a necessity: at 87% month
+one clears that threshold on its own.
 
 ---
 

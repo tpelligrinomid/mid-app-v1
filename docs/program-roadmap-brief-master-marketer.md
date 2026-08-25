@@ -60,7 +60,7 @@ baseline, and targets increase monotonically with tier. Both are now flag codes
 | `maxDuration` sized for four calls | Noted as yours to raise |
 | Month-over-capacity can't be a pre-generation refusal | Now a **repair loop** against the offending option, never a refusal |
 | `ramp_month` + `month_under_capacity` double-fire | `month_under_capacity` is suppressed when `ramp_month` fires |
-| Thin-spread needs a granularity decision | Counts run on the **12 rolled-up** categories, not the 16 |
+| Thin-spread needs a granularity decision | Counts run on the **12 rolled-up** categories, not the 15 |
 | `program` unverifiable, content-share flag self-satisfying | Each option carries a `program_allocation` map, decided once; row `program` derives from it |
 | Don't send `technology_items` | Removed. You get `technology_monthly` and `total_monthly` only |
 | `previous_roadmap` undefined for options | Backend flattens the **selected option** into the flat shape before submitting, and passes nothing when none is selected |

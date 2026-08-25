@@ -62,8 +62,14 @@ six months. Recompute if the library changes materially.
 conversion constant exists only to translate figures originally expressed in points, such as
 the overhead reserve.
 
-Publish these, the tier bands, and the eligibility matrix as **data the frontend can read**.
-A second hardcoded copy in the UI will drift from the backend's.
+These, the tier bands, the eligibility matrix, the commitment ladder and the flag
+vocabulary are all published at **`GET /api/compass/roadmap-config`**, served from
+`backend/src/config/roadmap-model.ts`. That module is the single definition: backend
+validation and flag computation import it directly, the frontend fetches it, and Master
+Marketer receives the relevant slice inside the generation payload.
+
+A second hardcoded copy in the UI would drift, and the first symptom is a roadmap that
+passes the generation form and is refused on submit.
 
 ---
 
@@ -177,11 +183,11 @@ Strategy & account management runs under every engagement and is never sold on i
 is the overhead reserve, not a program category. Digital PR is subcontracted and billed
 separately; it never consumes hours.
 
-**Category granularity.** ClickUp stores 16 categories; this matrix uses 12. Roll up at
+**Category granularity.** ClickUp stores 15 categories; this matrix uses 12. Roll up at
 display time — `SEARCH & DISCOVERY` into Content, `ACCOUNT MANAGEMENT` into Strategy — and
 keep the stored value at full granularity.
 
-**Category counts are made on the rollup, not the 16.** The thin-spread flag below depends
+**Category counts are made on the rollup, not the 15.** The thin-spread flag below depends
 on it: at Execute the threshold is ~3 categories, and counting Search & Discovery separately
 from Content would make the Execute/Authority archetype flag itself.
 

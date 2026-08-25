@@ -19,6 +19,7 @@ import reportsRouter from './routes/pulse/reports.js';
 import statusReportsRouter from './routes/compass/status-reports.js';
 import deliverablesRouter from './routes/compass/deliverables.js';
 import processLibraryRouter from './routes/compass/process-library.js';
+import roadmapConfigRouter from './routes/compass/roadmap-config.js';
 import contentRouter from './routes/compass/content.js';
 import chatRouter from './routes/compass/chat.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
@@ -121,6 +122,7 @@ app.use('/api/compass/deliverables', authMiddleware, deliverablesRouter);
 
 // Compass process library (require authentication)
 app.use('/api/compass/process-library', authMiddleware, processLibraryRouter);
+app.use('/api/compass/roadmap-config', authMiddleware, roadmapConfigRouter);
 
 // Compass content module (require authentication)
 app.use('/api/compass/content', authMiddleware, contentRouter);

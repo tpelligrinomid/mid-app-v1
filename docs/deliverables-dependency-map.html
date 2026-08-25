@@ -1,0 +1,436 @@
+<title>Deliverables & Dependencies</title>
+<style>
+  :root {
+    --paper: #F1F5F4;
+    --card: #FFFFFF;
+    --ink: #17201E;
+    --muted: #5A6763;
+    --faint: #84948F;
+    --border: #E0E7E4;
+    --border-strong: #CBD6D2;
+    --req: #147063;
+    --req-soft: #E1F0ED;
+    --rec: #B0742C;
+    --rec-soft: #F6ECDD;
+    --rail: #147063;
+    --shadow: 0 1px 2px rgba(20,40,36,.04), 0 8px 24px -16px rgba(20,40,36,.18);
+    --mono: "SFMono-Regular", "SF Mono", "Cascadia Code", "Consolas", "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0D1413;
+      --card: #141D1B;
+      --ink: #E9EFED;
+      --muted: #97A6A1;
+      --faint: #67766F;
+      --border: #232F2C;
+      --border-strong: #2E3D39;
+      --req: #38B39E;
+      --req-soft: #123029;
+      --rec: #D59B57;
+      --rec-soft: #2E2617;
+      --rail: #38B39E;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -18px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #F1F5F4; --card: #FFFFFF; --ink: #17201E; --muted: #5A6763; --faint: #84948F;
+    --border: #E0E7E4; --border-strong: #CBD6D2; --req: #147063; --req-soft: #E1F0ED;
+    --rec: #B0742C; --rec-soft: #F6ECDD; --rail: #147063;
+    --shadow: 0 1px 2px rgba(20,40,36,.04), 0 8px 24px -16px rgba(20,40,36,.18);
+  }
+  :root[data-theme="dark"] {
+    --paper: #0D1413; --card: #141D1B; --ink: #E9EFED; --muted: #97A6A1; --faint: #67766F;
+    --border: #232F2C; --border-strong: #2E3D39; --req: #38B39E; --req-soft: #123029;
+    --rec: #D59B57; --rec-soft: #2E2617; --rail: #38B39E;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -18px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 64px) clamp(18px, 4vw, 44px) 80px;
+  }
+
+  /* ---- Header ---- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--req);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(28px, 4.4vw, 42px);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    font-weight: 640;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: clamp(15px, 1.6vw, 17px);
+    color: var(--muted);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  /* ---- Legend ---- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    align-items: center;
+    margin: 26px 0 0;
+    padding: 14px 18px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    font-size: 13.5px;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+  .chip.req { background: var(--req-soft); color: var(--req); font-weight: 600; }
+  .chip.rec { background: transparent; color: var(--rec); border: 1px dashed var(--rec); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.req { background: var(--req); }
+  .dot.rec { background: transparent; border: 1.5px solid var(--rec); }
+
+  /* ---- Build order strip ---- */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 40px 0 8px;
+  }
+  .tier {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 16px 18px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+  .tier::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--rail);
+    opacity: .55;
+  }
+  .tier .tno {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .tier .tname {
+    font-size: 15px;
+    font-weight: 620;
+    margin: 3px 0 8px;
+  }
+  .tier .tlist { font-size: 13px; color: var(--muted); margin: 0; }
+  .flow-note {
+    font-size: 12.5px;
+    color: var(--faint);
+    margin: 10px 2px 0;
+    font-family: var(--mono);
+    letter-spacing: .02em;
+  }
+
+  /* ---- Table ---- */
+  .table-scroll { overflow-x: auto; margin: 30px 0 0; border-radius: 14px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 680px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  thead th {
+    text-align: left;
+    font-size: 11.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-strong);
+    background: color-mix(in srgb, var(--card) 88%, var(--paper));
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 15px 18px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    font-size: 14px;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.foundation td { background: color-mix(in srgb, var(--req-soft) 40%, var(--card)); }
+
+  .d-name { font-weight: 620; font-size: 14.5px; letter-spacing: -.01em; }
+  .d-key {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 5px;
+    margin-top: 7px;
+    border: 1px solid var(--border-strong);
+    color: var(--faint);
+  }
+  .cell-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .why { color: var(--muted); font-size: 13px; max-width: 34ch; }
+  .em { color: var(--req); font-weight: 600; }
+  .none { color: var(--faint); font-family: var(--mono); font-size: 12.5px; }
+  sup.mark { color: var(--req); font-family: var(--mono); font-weight: 700; font-size: 11px; }
+
+  /* ---- Notes ---- */
+  .notes {
+    margin: 34px 0 0;
+    padding: 20px 22px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+  .notes h2 {
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+  .notes ul { margin: 0; padding-left: 20px; }
+  .notes li { font-size: 13.5px; color: var(--muted); margin-bottom: 8px; }
+  .notes li:last-child { margin-bottom: 0; }
+  .notes code, .why code, .d-name code {
+    font-family: var(--mono);
+    font-size: .88em;
+    background: color-mix(in srgb, var(--paper) 60%, var(--card));
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .tbd { color: var(--rec); font-weight: 600; }
+
+  footer {
+    margin-top: 30px;
+    font-size: 12px;
+    color: var(--faint);
+    text-align: center;
+    font-family: var(--mono);
+    letter-spacing: .03em;
+  }
+
+  @media (max-width: 620px) {
+    .tiers { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Strategy Operations · Reference</p>
+  <h1>Deliverables &amp; their dependencies</h1>
+  <p class="lede">What each deliverable needs before it can be done well. <strong class="em">Required</strong> means we shouldn't start without it; <strong style="color:var(--rec)">Recommended</strong> means it's not blocking, but the output is noticeably stronger with it.</p>
+
+  <div class="legend">
+    <span class="item"><span class="dot req"></span> Required — a hard prerequisite</span>
+    <span class="item"><span class="dot rec"></span> Recommended — better with, not blocking</span>
+    <span class="item"><sup class="mark">◆</sup> Enforced in the platform today</span>
+  </div>
+
+  <div class="tiers">
+    <div class="tier">
+      <div class="tno">Tier 0 · Foundation</div>
+      <div class="tname">Inputs everything draws on</div>
+      <p class="tlist">Research · Brand Voice</p>
+    </div>
+    <div class="tier">
+      <div class="tno">Tier 1 · Direction</div>
+      <div class="tname">Sequences the work</div>
+      <p class="tlist">SEO Audit · Roadmap</p>
+    </div>
+    <div class="tier">
+      <div class="tno">Tier 2 · Execution</div>
+      <div class="tname">Plans built on the above</div>
+      <p class="tlist">Content Plan · Content Ops · ABM Plan · Messaging Plan</p>
+    </div>
+  </div>
+  <p class="flow-note">research + brand voice → roadmap → plans &amp; ops</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:24%">Deliverable</th>
+          <th style="width:20%">Requires</th>
+          <th style="width:22%">Recommended</th>
+          <th style="width:34%">Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="foundation">
+          <td>
+            <div class="d-name">Research</div>
+            <span class="d-key">research</span>
+            <div class="badge">Foundation</div>
+          </td>
+          <td><span class="none">— none</span></td>
+          <td><span class="none">— none</span></td>
+          <td class="why">The evidence base. Everything downstream cites it, so it comes first.</td>
+        </tr>
+
+        <tr class="foundation">
+          <td>
+            <div class="d-name">Brand Voice</div>
+            <span class="d-key">brand_voice&nbsp;· setting</span>
+            <div class="badge">Foundation</div>
+          </td>
+          <td><span class="none">— none</span></td>
+          <td><span class="none">— none</span></td>
+          <td class="why">Tone, positioning &amp; messaging guardrails. A settings input rather than a produced deliverable, but a prerequisite for anything written.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">SEO Audit</div>
+            <span class="d-key">seo_audit</span>
+          </td>
+          <td><span class="none">— none</span></td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">research</span></div>
+          </td>
+          <td class="why">Largely standalone. Feeds the roadmap and sharpens the content plan when it's available.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">Roadmap</div>
+            <span class="d-key">roadmap</span>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip req">research</span></div>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">seo_audit</span><span class="chip rec">brand_voice</span></div>
+          </td>
+          <td class="why">Turns research into a sequenced plan of work. Can't be prioritized without the research behind it.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">Content Plan</div>
+            <span class="d-key">content_plan</span>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip req">research</span><span class="chip req">roadmap <sup class="mark">◆</sup></span></div>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">seo_audit</span><span class="chip rec">brand_voice</span></div>
+          </td>
+          <td class="why">Built off the roadmap's priorities. SEO shapes topics; brand voice keeps the output on-tone.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">Content Ops</div>
+            <span class="d-key">content_ops&nbsp;· process</span>
+          </td>
+          <td><span class="none">— none</span></td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">research</span><span class="chip rec">roadmap</span><span class="chip rec">brand_voice</span></div>
+          </td>
+          <td class="why">Runs day-to-day production. Not blocked by the three, but noticeably smoother with all of them in place.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">ABM Plan</div>
+            <span class="d-key">abm_plan</span>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip req">research</span><span class="chip req">roadmap <sup class="mark">◆</sup></span></div>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">brand_voice</span><span class="chip rec">messaging_plan</span></div>
+          </td>
+          <td class="why">Account-based execution built on the roadmap. Messaging keeps the outreach consistent across accounts.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">Messaging Plan</div>
+            <span class="d-key">messaging_plan</span>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip req">brand_voice</span></div>
+          </td>
+          <td>
+            <div class="cell-chips"><span class="chip rec">research</span></div>
+          </td>
+          <td class="why">Defines positioning &amp; core messages. Leans on brand voice; research grounds the claims.</td>
+        </tr>
+
+        <tr>
+          <td>
+            <div class="d-name">Points Plan</div>
+            <span class="d-key">points_plan</span>
+          </td>
+          <td colspan="2"><span class="tbd">To confirm with the team →</span></td>
+          <td class="why">In the platform, but its dependency rules aren't documented. Flagging rather than guessing.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="notes">
+    <h2>Notes &amp; assumptions</h2>
+    <ul>
+      <li><strong>Confirmed in the platform <sup class="mark">◆</sup>:</strong> <code>content_plan</code> and <code>abm_plan</code> already require a <code>roadmap</code> before they can be generated, and the pipeline auto-creates <code>research</code> + <code>roadmap</code> as prerequisites. Those are enforced today, not conventions.</li>
+      <li><strong>Foundation inputs:</strong> <code>brand_voice</code> and <code>content_ops</code> aren't formal deliverable types in the platform — they're a settings input and a process. They're included here because they drive quality.</li>
+      <li><strong>My inferences (please correct):</strong> the recommended pairings for <code>seo_audit</code>, <code>messaging_plan</code>, and <code>abm_plan</code> reflect best-practice sequencing, not enforced rules. Adjust to match how your team actually works.</li>
+      <li><strong>Generic output types</strong> — <code>plan</code>, <code>brief</code>, <code>presentation</code>, <code>other</code> — are formats/containers rather than strategic deliverables, so they carry no dependencies of their own.</li>
+      <li><strong>Open item:</strong> <code>points_plan</code> dependencies are undefined here — tell me the rule and I'll slot it in.</li>
+    </ul>
+  </div>
+
+  <footer>Grounded in the platform's deliverable types · draft for strategy review</footer>
+</div>

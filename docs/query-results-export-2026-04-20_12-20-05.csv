@@ -1,0 +1,13 @@
+column_default;column_name;data_type;is_nullable
+gen_random_uuid();amendment_id;uuid;NO
+;contract_id;uuid;NO
+;deal_id;text;YES
+;amendment_type;USER-DEFINED;NO
+;amendment_description;text;YES
+;amount;numeric;YES
+'draft'::text;amendment_status;text;YES
+;document_url;text;YES
+;effective_date;date;YES
+;created_by;uuid;YES
+now();created_at;timestamp with time zone;NO
+now();updated_at;timestamp with time zone;NO

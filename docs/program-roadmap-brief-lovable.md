@@ -1,134 +1,119 @@
-# Brief for Lovable — Program Roadmap (hours-based)
+# Brief for Lovable — Program Roadmap (v2)
 
-**This is a review request, not a build request.** Read it, tell me what's wrong, what's
-missing, and what conflicts with what you've already built. Nothing gets built until the
-backend, Master Marketer and you all agree.
-
-Full spec: `docs/program-roadmap-spec.md`.
+**Your review is accepted in full.** Every item you raised is now in the spec, including all
+nine in your "what we need to proceed" table. This brief replaces the first one; build
+against `docs/program-roadmap-spec.md` v2.
 
 ---
 
-## What this is
+## Your nine items, answered
 
-A second kind of roadmap, priced in **hours** instead of points. It runs **alongside** the
-existing points roadmap — it does not replace it.
-
-- Existing clients stay on points. Their roadmaps, allotments and views do not change.
-- New engagements use hours. Routing is by the existing `contracts.customer_display_type`:
-  `'hours'` → new path, `'points'` and `'none'` → current path.
-- No schema change on contracts. `customer_display_type` and `dollar_per_hour` already
-  exist.
-
-The point of the change: points froze both the rate ($100/pt) and the effort (whatever the
-menu said). Hours let both flex per client — a heavier client gets a higher rate or more
-hours on a task. "Your custom report took 16 hours" is something a client can verify;
-"your custom report is 10 points" is not.
+| # | Item | Answer |
+|---|---|---|
+| 1 | Roadmap hours authored, never re-derived through `useDisplayUnits` | **Confirmed and written into the spec as a hard rule.** See below. |
+| 2 | `"schema": "program_roadmap_v1"` discriminator | **Adopted.** The viewer branches on `schema`, never on the contract. |
+| 3 | Which option downstream generators read | **Your proposed rule, adopted verbatim:** `selected_option_id` ?? `recommended_option_id` ?? refuse. Never `options[0]`. |
+| 4 | Tier bands + eligibility matrix exposed as data | **Backend will publish them**, along with the constants (0.78, 9.8, $129). No second hardcoded copy. |
+| 5 | Closed vocabulary for flag `code` values | **Published — eight codes, in the spec.** Backend computes and owns them. |
+| 6 | Technology price resolution order | **Assignment override wins, catalog default is the fallback** — `COALESCE(assignment, catalog)` on every field. Backend resolves. |
+| 7 | `one_time` cadence handled separately | **Adopted.** New `technology_one_time` field per option; `total_monthly` stays strictly monthly. |
+| 8 | Month as number + optional label | **Adopted.** `month: 1` plus `month_label: "Month 1"`. |
+| 9 | Library hygiene pass | **Now step 1 of sequencing**, ahead of any build. Both you and Master Marketer flagged it as blocking quality. |
 
 ---
 
-## Three things change in the UI
+## The points-as-ledger architecture is confirmed and written down
 
-### 1. Generation input form — options
+You were right, and it's now stated explicitly in the spec so nobody re-litigates it:
 
-A roadmap is generated from **1–3 options**, each a complete priced scenario the client
-chooses between. The strategist adds a row per option:
+1. ClickUp records hours. 2. The team converts to points via a ClickUp calculated field.
+3. Points sync to the database; invoices, credits, task logs and burden all reconcile in
+points. 4. The frontend converts points back to hours at display time using the contract rate.
 
-| Field | Notes |
-|---|---|
-| `tier` | Execute / Perform / Grow |
-| `programs` | Authority, Reach, Pursuit — multi-select |
-| `monthly_budget` | The **service** fee |
-| technology | Multi-select from the Pulse tech stack catalog (`technologies` table) |
+**The program roadmap is an estimate instrument and changes none of that.** Billing continues
+to run on the points ledger.
 
-The blended hourly rate is **not** per option — it comes from `contracts.dollar_per_hour`
-and is the same across all options.
-
-Validation before submitting (backend enforces too, but the form should catch it):
-
-- Tier must match the budget band: $4,000–5,900 Execute, $6,000–11,900 Perform, $12,000+ Grow
-- Execute = 1 program, Perform = 2, Grow = 3
-- Pursuit is never available at Execute, and never sold alone at any tier
-- `dollar_per_hour` must be set on the contract
-- Maximum 3 options
-
-### 2. Viewer — shared sections vs per-option sections
-
-Most of the roadmap describes the client and does not change with the investment. Only the
-plan does.
-
-| Section | Scope |
-|---|---|
-| Executive Summary | Shared, but ends with a recommendation naming an option |
-| Overview, Target Market, Brand Story, Products & Solutions, Competition | **Shared** |
-| Goals, Roadmap Phases, Quarterly Initiatives, Annual Plan, **Hours Plan** | **Per option** |
-
-The option switch changes only the per-option sections. The shared ones stay put rather
-than re-rendering, so someone toggling options is watching the plan change against a fixed
-picture of their business — not feeling they changed document.
-
-"Points Plan" becomes "Hours Plan" on this path.
-
-**Options are alternatives, never phases.** Never show a summed total across options —
-three options are not a $22,000 proposal.
-
-`selected_option_id` may be set after the SOW is signed; when present the viewer collapses
-to that option with a way back to the comparison. It is a label only and must not trigger
-any write to the contract or its technology.
-
-### 3. Editing — same as today, in hours
-
-Your current editing UI is the right shape already — editable task, description, stage and
-value per row, Add Task, Add Month, delete, in-memory tracking until save. Four changes:
-
-- **Pts → Hrs**, one decimal place
-- **Month header** shows `hours allocated / hours available`, not a bare total, so going
-  over is visible while editing
-- **Total band** shows hours available, hours allocated, variance, and the dollar value at
-  the contract rate
-- **Flags render inline** on the row or month they belong to
-
-Each row carries `baseline_hours` (from the process library) as well as `hours`. Show the
-baseline quietly beside the field so the strategist can see what standard was.
-
-**When an edit pushes a month over capacity, let it go red — do not block the keystroke.**
-The number they're reaching for is usually right; what needs to happen is a budget
-conversation, not a rejected input.
+Which makes your 1.1 concern a hard rule in the spec: **roadmap hours are authored on the
+document and must never pass through `useDisplayUnits`.** That helper answers a billing
+question (`points × 100 / rate` = 0.80 h/pt at $125); the library's 0.78 answers an effort
+question. Both are right about different things, and any screen mixing them quotes two numbers
+for one task. Centralising the constants in `src/lib/hoursModel.ts` is the right call — the
+backend will publish them so that module reads rather than hardcodes.
 
 ---
 
-## Technology
+## What changed since v1 that affects you
 
-Every option shows three money figures: **services**, **technology**, **total**. Showing
-the service fee alone makes a Pursuit option look cheaper than it is, because outbound
-needs sending infrastructure that Authority doesn't.
+**Tier bands are now hours, not dollars.** Master Marketer found that at $175 an Execute
+contract buys 22.9 capacity hours against 32 at $125 — two contracts on one tier differing by
+40%, with the archetypes not fitting at all. Bands are now capacity hours (Execute 32–47.9,
+Perform 48–95.9, Grow 96+), so form validation checks `monthly_budget / dollar_per_hour`
+against an hours band, not a dollar band. Published pricing says "from $4,000", so the floor
+rising with the rate breaks no promise.
 
-Technology never consumes hours — `hours_available` derives from the service fee only.
+**`annual_plan` and `hours_plan` are separate sections** — my error in v1, which merged them.
+`annual_plan` is the 12-month Gantt; `hours_plan` holds the editable rows and mirrors
+`points_plan` field for field. Your `PointsPlanEditor` binds to a shape it already knows.
 
-Rules for the picker and the totals:
+**Three months of rows, twelve months of Gantt.** Matches the points path.
 
-- Price from **`default_client_price`**, never `default_internal_cost`. They diverge —
-  Factors.ai is $450 internal against $600 client price. Internal cost must never appear
-  in anything client-facing.
-- Include an item only when **`is_client_billable`** is true. Do not infer this from a
-  blank price.
-- **`is_agency_plan` does not mean non-billable** — n8n is an agency plan billed on at
-  $50. Excluding agency plans would under-quote.
-- Multiply by **`quantity`**, and normalise **cadence** to monthly.
-- `payment_sources` is which agency card pays. Internal finance — **never surface it to a
-  client.**
+**Goals carry `commitment_type`** — `'output' | 'leading_indicator' | 'business_outcome'`,
+constrained by tier. This needs to exist in the viewer, not just the schema: it's what makes
+the difference between options legible to a client rather than three prices for one promise.
 
-Selecting technology on an option does **not** create `contract_technologies` rows. There
-is no approval step on a deliverable (statuses are `planned` / `working` /
-`waiting_on_client` / `delivered`), and acceptance happens in the deal room and SOW. The
-roadmap is a sales artifact and writes nothing back.
+**Executive summary generates last** and carries `recommended_option_id` plus a rationale —
+which is also the fallback your downstream-generator rule depends on.
 
 ---
 
-## What I'd like back
+## Your technology corrections, all adopted
 
-1. What conflicts with what you've already built?
-2. Is the shared-vs-per-option split workable in the current viewer, or does it need
-   restructuring?
-3. Anything in the technology rules that doesn't match how the catalog actually behaves in
-   the UI — you know that data better than I do.
-4. Anything here that is more work than it looks, or that you'd do differently.
+`client_billable_override` was in the spec already but missing from the brief you read — sorry,
+that's on me. The full resolution order is now explicit in both. Your three additions are in:
+
+- **`is_active`** filtered from the picker
+- **`one_time` cadence** reported as a separate `technology_one_time` figure, never amortised
+- **A billable item with a null client price fails loudly**, never contributes $0
+
+Everything else you confirmed as correct stayed as written.
+
+---
+
+## Effort items acknowledged
+
+The **dual-shape adapter** is called out in the spec as the largest single frontend item,
+roughly the size of the viewer changes themselves, touching the renderer, markdown export,
+public share view and client viewer. Legacy documents wrap as a single unnamed option; program
+roadmaps pass through. No migration of stored documents.
+
+**Markdown export contains all options, clearly delimited** — your recommendation, adopted,
+since it feeds LLMs and SOW drafting where the comparison is the point.
+
+**The TOC re-derivation** is named as the fiddly part of the viewer work rather than assumed to
+fall out of the section change.
+
+Your snapshot point is now a spec rule: `hourly_rate`, `hours_available`, `hours_allocated`
+and `overhead_hours` are **read from the document, never recomputed**. A viewer deriving
+capacity from `monthly_budget / dollar_per_hour` would rewrite a signed roadmap the moment the
+contract rate changed.
+
+---
+
+## Suggested sequence
+
+Your proposed order stands: **adapter → viewer option switch → generation form + technology
+picker → hours editing UI.**
+
+The backend will have the bands, matrix, constants and flag vocabulary published as data before
+you need them for form validation — say the word if you want that earlier than the adapter
+work, and I'll move it up.
+
+---
+
+## What I'd still like from you
+
+1. Does the hours-band change alter your form validation work materially — you're now checking
+   a derived capacity figure rather than a raw dollar amount.
+2. Is `commitment_type` renderable in the goals table without restructuring it?
+3. Anything in the eight flag codes you'd want split, merged, or renamed before the backend
+   fixes the vocabulary.

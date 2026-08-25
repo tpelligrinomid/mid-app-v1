@@ -3,6 +3,10 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
+**v2** — incorporates the Master Marketer and Lovable review responses
+(`program-roadmap-review-response.md`, `program-roadmap-review-response-from-lovable.md`)
+and the four decisions taken against them.
+
 ---
 
 ## Scope
@@ -12,37 +16,85 @@ roadmap; nothing about the points path changes.
 migration, no backfill, no change to their output.
 
 **What the generator produces is a draft scope of work, not a final plan.** It reads the
-research, transcripts, and instructions, draws tasks from the process library, and
-proposes hours per task. The strategist then edits task descriptions and hours row by
-row — the same affordance the points roadmap already has.
+research, transcripts, and instructions, draws tasks from the process library, and proposes
+hours per task. The strategist then edits task descriptions and hours row by row — the same
+affordance the points roadmap already has.
 
-The generator's job is therefore *not* to be precisely right. It is to produce a
-defensible starting point and to make it impossible to ship an incoherent one. Every
-constraint below exists to serve that second half.
+The generator's job is therefore *not* to be precisely right. It is to produce a defensible
+starting point and to make it impossible to ship an incoherent one. Every constraint below
+serves that second half.
+
+### Points remain the system's ledger
+
+Worth stating plainly, because it governs what "pricing in hours" does and does not mean:
+
+1. ClickUp records **hours** on tasks.
+2. The team converts those to **points** in ClickUp via a calculated field.
+3. Points sync to the database. Invoices, credits, task logs and burden all reconcile in
+   points.
+4. The frontend converts points back to **hours** at display time, using the contract's
+   rate, for contracts set to `'hours'`.
+
+The program roadmap does not change any of that. **It is an estimate instrument.** Billing
+continues to run on the points ledger.
+
+The direct consequence, and a hard rule for the frontend: **roadmap hours are authored on
+the document and must never be re-derived through `useDisplayUnits`.** That helper answers
+"what did the client buy in hours at their rate" — a billing conversion of
+`points × 100 / rate`, which is 0.80 h/pt at $125. The library's effort constant is 0.78.
+Both are correct about different questions, and a screen that mixes them quotes two numbers
+for one task.
 
 ---
 
 ## Measured constants
 
-Derived from the live process library (71 in-scope items) and 39 active recurring
-contracts over six months. Recompute rather than assume if the library changes materially.
+From the live process library (71 in-scope items) and 39 active recurring contracts over
+six months. Recompute if the library changes materially.
 
-| Constant | Value | Source |
+| Constant | Value | Use |
 |---|---|---|
-| Hours per point | `0.78` | Library, Foundation/Execution/Analysis items |
-| Monthly overhead (Strategy + AM) | `9.8 hrs` | 12.6 observed points × 0.78 |
+| Hours per point | `0.78` | Converting legacy points-denominated figures only |
+| Monthly overhead reserve | `9.8 hrs` | 12.6 observed points × 0.78; near-constant at every tier |
 | Points/hours break-even rate | `$129/hr` | Where hours bill the same as the old $100 point |
 
-At a $125 blended rate:
+**Task hours come from `compass_process_library.time_estimate_ms`, not from 0.78.** The
+conversion constant exists only to translate figures originally expressed in points, such as
+the overhead reserve.
 
-| Tier | Fee | Capacity | Overhead | Program hours |
-|---|---|---|---|---|
-| Execute | $4,000 | 32.0 | 9.8 | **22.2** |
-| Perform | $6,000 | 48.0 | 9.8 | **38.2** |
-| Grow | $12,000 | 96.0 | 9.8 | **86.2** |
+Publish these, the tier bands, and the eligibility matrix as **data the frontend can read**.
+A second hardcoded copy in the UI will drift from the backend's.
 
-Overhead is roughly constant in absolute hours, so its share falls as the fee rises —
-31% / 20% / 10%, against the retainer model's predicted 30 / 20 / 12.
+---
+
+## Tier bands are hours, not dollars
+
+A tier is defined by the capacity it buys, not the fee.
+`capacity_hours = monthly_budget ÷ dollar_per_hour`.
+
+| Tier | Capacity hours | Program hours | Programs |
+|---|---|---|---|
+| Execute | 32 – 47.9 | 22.2 – 38.1 | 1 |
+| Perform | 48 – 95.9 | 38.2 – 86.1 | 2 |
+| Grow | 96+ | 86.2+ | 3 |
+
+Which prices out, at the same tier, as:
+
+| Tier | @ $125 | @ $150 | @ $175 |
+|---|---|---|---|
+| Execute | from $4,000 | from $4,800 | from $5,600 |
+| Perform | from $6,000 | from $7,200 | from $8,400 |
+| Grow | from $12,000 | from $14,400 | from $16,800 |
+
+**Why hours and not dollars.** Under dollar bands, Execute at $175 buys 22.9 capacity hours
+against 32 at $125 — two contracts on the same tier differing by 40% in delivered work, and
+the Execute archetypes below would not fit at all at the higher rate. Hours bands hold the
+scope promise constant and let a harder account cost more for it, which is what the rate
+variable is for. Published pricing reads "from $4,000", so a higher floor at a higher rate
+breaks no promise.
+
+The rate is **fixed per contract** on `contracts.dollar_per_hour`. It never varies between
+the options on a roadmap.
 
 ---
 
@@ -52,59 +104,43 @@ Overhead is roughly constant in absolute hours, so its share falls as the fee ri
 
 **No schema change. Both fields already exist.**
 
-- `customer_display_type` — `'points' | 'hours' | 'none'`. This *is* the pricing model,
-  and it already selects what the client sees. `'hours'` routes to the program roadmap;
-  `'points'` and `'none'` keep the existing points path, so every contract on the book
-  today is unaffected by default.
-- `dollar_per_hour` — the blended rate, set per contract. Not backfilled: existing
-  contracts stay on points and never need one, and the generator refuses to run without
-  it, which is a validation at generation time rather than a migration.
+- `customer_display_type` — `'points' | 'hours' | 'none'`. Gates **generation**: `'hours'`
+  offers the program roadmap form. It does **not** gate rendering — see the schema
+  discriminator below.
+- `dollar_per_hour` — the blended rate. Set per new-model contract at creation, defaulting
+  to $125. Not backfilled: existing contracts stay on points and never need one. The
+  generator refuses without it, which is a validation at generation time, not a migration.
 
-**One rate per contract, not per option.** The rate reflects how demanding an account is
-to serve — seniority required, review depth, system complexity — and is a judgement made
-once, at contract level. It does not vary between the options on a roadmap.
+**Tier and programs are deliberately NOT on the contract.** They are generation inputs — a
+roadmap presents several priced options and the client chooses, so recording them beforehand
+would record a decision nobody has made.
 
-That is a deliberate limit on explanation. The blended rate already covers every skill
-set; the tier minimums already enforce "two programs costs at least this much". Making
-the rate move between options too would mean explaining to a client why their hourly rate
-changes with the size of the plan, which is one variable more than the model can carry.
-
-*Edge case worth knowing:* a contract priced in hours but set to `'none'` display would
-route to the points path. If you ever need to price in hours while hiding the unit from
-the client, that is the point at which display and pricing have to separate into two
-fields.
-
-**Tier and programs are deliberately NOT on the contract.** They are generation inputs —
-a roadmap presents several priced options and the client chooses, so recording them
-beforehand would record a decision nobody has made.
-
-*Deferred by decision:* with programs off the contract, nothing in the database says
-which programs an account runs, so portfolio questions ("how many clients run Pursuit?")
-stay answerable only by inference from task service categories, the way the sizing
-analysis does today. Accepted for now; if it becomes a real reporting need, the place to
-record it is the approved option.
+*Deferred by decision:* nothing in the database will say which programs an account runs, so
+portfolio questions stay answerable only by inference from task service categories, the way
+the sizing analysis does today.
 
 ### `compass_process_library`
 
-`time_estimate_ms` is the baseline effort and is already synced (81 of 85 items
-populated, rolled up from subtasks to match ClickUp's displayed total).
-`service_category` is already synced and classified.
+No schema change. `time_estimate_ms` (81 of 85 items, rolled up from subtasks to match
+ClickUp's displayed total) and `service_category` (all 85, migration 019) are both synced.
 
-**No new field is needed.** Everything in the process library is a deliverable —
-`Manage ABM` produces notes and a record of work the same as `Develop SEO blog post`
-produces an article. There is no ongoing-versus-artifact split to encode, and scheduling
-is simply which months a row appears in.
+**Hygiene pass required before generation quality can be trusted** — both reviewers flagged
+this as blocking rather than cosmetic:
+
+- `Set up ABM` exists twice at 9h and 18.08h
+- Four active items carry no estimate
+
+A generator drawing from that library produces a defensible-looking number from an
+undefended row.
 
 ### Roadmap rows
-
-Each generated task row carries **both** numbers:
 
 ```ts
 {
   task: string,
   description: string,
   stage: 'Foundation' | 'Execution' | 'Analysis',
-  service_category: string,        // rolled up for display, stored at full granularity
+  service_category: string,        // stored at full granularity, rolled up for display
   program: 'authority' | 'reach' | 'pursuit' | 'overhead',
   process_id: string | null,       // null when the strategist added a custom row
   baseline_hours: number,          // from the library, never overwritten
@@ -113,197 +149,16 @@ Each generated task row carries **both** numbers:
 }
 ```
 
-Storing `baseline_hours` alongside `hours` costs nothing now and buys two things: the
-strategist can see how far a row has moved from standard, and after a few quarters you
-can measure which library items are systematically adjusted upward and by how much. The
-library then corrects itself from real use rather than a manual re-estimate. Points made
-that deviation invisible — this is the main thing hours buy back.
-
-`program` is assigned explicitly per row. **It is never inferred from
-`service_category`** — five categories sit in more than one program, so the category
-cannot name the program that paid for it. The eligibility matrix constrains what is
-allowed; it does not derive.
-
----
-
-## Roadmap options
-
-A roadmap is generated from **one or more options**, each a complete priced scenario. The
-strategist supplies a row per option:
-
-| Field | Notes |
-|---|---|
-| `tier` | `execute` \| `perform` \| `grow` |
-| `programs` | Which programs this option runs |
-| `monthly_budget` | The **service** fee this option assumes |
-| `technology_monthly` | Estimated platform cost, billed separately from services |
-
-**Maximum three options.** Three reads as a proposal; more reads as indecision, and
-multiplies generation cost with it.
-
-The rate is not an option field — it comes from the contract and is the same across every
-option. Options differ only in what is bought, never in what an hour costs.
-
-Options are **alternatives, not phases.** They are not summed — each is a complete plan
-for the same engagement at a different investment, and the client picks one. The output
-must make that unmistakable, or someone will read three options as a $22,000 proposal.
-
-### What varies between options
-
-Most of a roadmap describes the client and does not change with the investment. Only the
-plan does.
-
-| Section | Scope | Why |
-|---|---|---|
-| Executive Summary | Shared + recommendation | See below |
-| Overview | Shared | About the client |
-| Target Market | Shared | About the client |
-| Brand Story | Shared | About the client |
-| Products & Solutions | Shared | About the client |
-| Competition | Shared | About the client |
-| **Goals** | **Per option** | What you can commit to depends on what is bought |
-| **Roadmap Phases** | **Per option** | Sequence changes with capacity |
-| **Quarterly Initiatives** | **Per option** | |
-| **Annual Plan** | **Per option** | The monthly task rows |
-| **Hours Plan** | **Per option** | Replaces Points Plan on this path |
-
-**Goals being per-option is the most important line in this table.** It is what stops a
-roadmap promising the same outcomes at three different prices — the exact failure the
-retainer model opens with. It also makes the accountability ladder concrete: Execute goals
-are delivery goals, Perform adds the leading indicators we control, Grow owns the plan and
-the measurement behind it. Three options with identical goals would be three prices for
-one promise.
-
-**Executive Summary carries a recommendation.** The body is shared, but it ends on a
-determination rather than a menu, as the retainer model requires — *"Your roadmap requires
-$9,000 a month plus roughly $600 in platform. That's Perform."* The summary therefore
-names every option, states which one is recommended, and gives the reason. It quotes
-**total** monthly investment, services plus technology, since that is the number the
-client actually decides on.
-
-**Generation cost.** Shared sections are generated once, not once per option. Three
-options is closer to 1.5× a single roadmap than 3×, because the expensive work — synthesis
-of research into target market, competition, and brand story — does not repeat.
-
-### Technology
-
-Technology is billed as a separate line item and **never consumes hours**. It still has to
-appear per option, because the tooling a program needs is not the same across programs —
-Pursuit requires sending domains, inbox warming, enrichment and rotation before anything
-sends, where Authority needs almost none of it.
-
-Comparing options on the service fee alone would therefore hide a real difference in what
-the client pays. Every option carries three numbers:
-
-| | |
-|---|---|
-| `monthly_budget` | Services |
-| `technology_monthly` | Platform cost at **client price** |
-| **`total_monthly`** | What the client actually pays |
-
-#### Selected from the catalog, not typed
-
-Pulse holds the catalog and the per-contract assignments. Both are now allowlisted in
-`backend-proxy` and readable from the backend.
-
-| Table | Rows | Purpose |
-|---|---|---|
-| `technologies` | 73 | The catalog. Defaults per tool. |
-| `contract_technologies` | 227 | Assignments to a contract, with optional overrides |
-| `payment_sources` | 3 | Which agency card pays. **Internal finance, not client billing.** |
-
-`payment_sources` holds agency cards — "MiD Tech Stack Card (Mercury)", "Tristan Expenses"
-— so it answers *which of our cards is charged*, not *who holds the contract*. It has no
-bearing on what a client is quoted and must not be surfaced in a client-facing roadmap.
-The client-billable question is answered by `is_client_billable` alone.
-
-#### Resolving an option's technology cost
-
-Assignments inherit from the catalog: in the live data `client_price`, `billing_cadence`,
-`client_billable_override` and `internal_cost` are almost always null, and the override
-columns are the exception rather than the rule. So every field resolves as
-`COALESCE(assignment, catalog default)`.
-
-```
-for each technology on the option:
-    billable = COALESCE(ct.client_billable_override, t.is_client_billable)
-    if not billable                              -> skip   # agency-absorbed
-    if ct.status != 'active' or ct.deactivated_on -> skip
-    price   = COALESCE(ct.client_price, t.default_client_price)
-    if price is null                             -> skip
-    cadence = COALESCE(ct.billing_cadence, t.default_billing_cadence)
-    monthly = to_monthly(price, cadence) * COALESCE(ct.quantity, 1)
-    technology_monthly += monthly
-```
-
-Four things in that sequence are easy to get wrong and each has a real cost:
-
-**`is_client_billable`, not a missing price.** The flag is authoritative. Inferring
-billability from a blank price column would mis-handle tools that carry a default price
-but are not billed on.
-
-**`default_client_price`, never `default_internal_cost`.** The catalog carries both and
-they diverge — Factors.ai is $450 internal against $600 client price. Internal cost is a
-margin figure and must never reach a client-facing proposal.
-
-**`quantity`.** The cost is price × quantity. Assignments default to 1, so this is
-invisible until the first multi-seat tool, at which point the quote is silently short.
-
-**Cadence normalisation.** `to_monthly` converts anything not already monthly, so options
-stay comparable.
-
-**`is_agency_plan` is not the same as non-billable.** n8n is an agency plan *and*
-client-billable at $50 — an agency-wide contract whose cost is passed through per client.
-Excluding agency plans would under-quote.
-
-Nothing here creates `contract_technologies` rows. The resolution above reads the catalog
-to price an option; assigning technology to a contract is a billing change and happens
-through the SOW process, not from a proposal document.
-
-### Validation across options
-
-Every option is validated **before** any generation runs, and generation refuses if any
-option fails. Partially generating and silently dropping an invalid option would present
-a two-option proposal where three were asked for, with nothing saying why.
-
-Each option is checked independently against the hard rules below, plus one that only
-exists because options are explicit:
-
-| Rule | Message |
-|---|---|
-| Tier does not match budget band | "$4,000 is Execute. Grow starts at $12,000." |
-| More than three options | "A roadmap carries at most three options." |
-
-The bands are $4,000–5,900 Execute, $6,000–11,900 Perform, $12,000+ Grow. This is the
-retainer model's "tiers are arithmetic, not policy" made enforceable — a strategist who
-wants Grow treatment raises the budget rather than relabelling the tier.
-
-### The roadmap never writes back
-
-**There is no approval step on a deliverable.** The statuses are `planned`, `working`,
-`waiting_on_client`, `delivered` — and `delivered` means the document reached the client,
-not that they accepted the deal. Acceptance happens in the deal room, the contract, and
-the SOW, which are separate vehicles.
-
-So the roadmap writes nothing to `contracts` and nothing to `contract_technologies`, ever.
-It is a sales artifact. A document that can be regenerated, edited, and re-sent must not
-be able to change what a client is billed — and with no approval event to hang it on,
-there is no safe moment to do so even if it were wanted.
-
-`contract_technologies` rows are created through whatever process handles a signed SOW
-today. The roadmap's technology selection is an estimate for the proposal, nothing more.
-
-**One display-only exception.** A roadmap that still shows three options a year later
-leaves nobody able to tell which one became real. The strategist may mark
-`selected_option_id` on the deliverable once the SOW is signed; the viewer then collapses
-to that option. It is a label — it triggers nothing, changes no billing, and can be
-changed or cleared freely.
+Storing `baseline_hours` beside `hours` lets the strategist see how far a row has moved from
+standard, and lets you measure over a few quarters which library items are systematically
+adjusted upward. The library then corrects itself from real use. Points made that deviation
+invisible — this is the main thing hours buy back.
 
 ---
 
 ## Eligibility matrix
 
-Which categories a program may draw from. Configuration, not code.
+Which categories a program may draw from. Configuration, exposed as data.
 
 | Service category | Authority | Reach | Pursuit |
 |---|:---:|:---:|:---:|
@@ -318,59 +173,420 @@ Which categories a program may draw from. Configuration, not code.
 | Email & nurture | | ● | |
 | Outbound | | | ● |
 
-Strategy & account management runs under every engagement and is never sold on its own —
-it is the overhead reserve, not a program category. Digital PR is subcontracted and
-billed separately; it never consumes hours.
+Strategy & account management runs under every engagement and is never sold on its own — it
+is the overhead reserve, not a program category. Digital PR is subcontracted and billed
+separately; it never consumes hours.
 
 **Category granularity.** ClickUp stores 16 categories; this matrix uses 12. Roll up at
-display time — `SEARCH & DISCOVERY` into Content, `ACCOUNT MANAGEMENT` into Strategy —
-and keep the underlying value at full granularity. Splitting SEO back out later then
-costs nothing.
+display time — `SEARCH & DISCOVERY` into Content, `ACCOUNT MANAGEMENT` into Strategy — and
+keep the stored value at full granularity.
+
+**Category counts are made on the rollup, not the 16.** The thin-spread flag below depends
+on it: at Execute the threshold is ~3 categories, and counting Search & Discovery separately
+from Content would make the Execute/Authority archetype flag itself.
+
+### `program_allocation`
+
+Five categories sit in more than one program, so a row's `program` is an assignment, not a
+derivation — and nothing downstream can verify it. Since the content-share flag is computed
+off that field, a generator free to label rows could satisfy the flag by labelling.
+
+Each option therefore carries a **`program_allocation` map**, decided once, from which
+row-level `program` is derived:
+
+```jsonc
+"program_allocation": { "Content": "authority", "Design": "authority", "Paid media": "reach" }
+```
+
+Fewer degrees of freedom, and the allocation itself becomes reviewable.
+
+---
+
+## Roadmap options
+
+A roadmap is generated from **one to three options**, each a complete priced scenario.
+
+| Field | Notes |
+|---|---|
+| `tier` | `execute` \| `perform` \| `grow` |
+| `programs` | Which programs this option runs |
+| `monthly_budget` | The **service** fee this option assumes |
+| technology | Multi-select from the Pulse catalog |
+
+**Maximum three options.** Three reads as a proposal; more reads as indecision and
+multiplies generation cost with it.
+
+The rate is not an option field — it comes from the contract and is identical across every
+option. Options differ only in what is bought, never in what an hour costs.
+
+Options are **alternatives, not phases.** They are never summed. Three options are not a
+$22,000 proposal, and any UI that totals them says otherwise.
+
+### What varies between options
+
+| Section | Scope |
+|---|---|
+| `executive_summary` | Shared, generated **last**, carries the recommendation |
+| `overview`, `target_market`, `brand_story`, `products_and_solutions`, `competition` | **Shared** |
+| `goals`, `roadmap_phases`, `quarterly_initiatives`, `annual_plan`, `hours_plan` | **Per option** |
+
+**Goals being per-option is the most important line in this table.** Identical goals across
+three prices would be three prices for one promise — the failure the retainer model opens
+with. See the commitment ladder below, which makes it structural rather than a matter of
+prompt tone.
+
+**Shared sections generate once.** Three options costs roughly 1.5× a single roadmap, not
+3×, because the research synthesis does not repeat.
+
+### Validation across options
+
+Every option validates **before** any generation runs, and generation refuses if any option
+fails. Partially generating would present a two-option proposal where three were asked for,
+with nothing saying why.
+
+| Rule | Message |
+|---|---|
+| Tier does not match the capacity-hours band | "$4,000 at $175/hr is 22.9 hours — below Execute's 32." |
+| Program count exceeds tier | "Perform is two programs. Select which two." |
+| Pursuit at Execute | "Pursuit starts at Perform, paired with Authority or Reach." |
+| Pursuit sold alone at any tier | "Pursuit is never sold on its own." |
+| Category outside the sold programs' matrix | Names the category and the programs that include it |
+| `dollar_per_hour` unset | "Set the contract's hourly rate before generating." |
+| More than three options | "A roadmap carries at most three options." |
+
+**A month exceeding capacity is not in this table.** Allocation is the generator's output, so
+it can only be evaluated afterwards. It is a **repair loop against the offending option**,
+never a refusal — a six-call generation must not be discarded because one month is 0.4 hours
+over.
+
+### The roadmap never writes back
+
+**There is no approval step on a deliverable.** Statuses are `planned`, `working`,
+`waiting_on_client`, `delivered` — and `delivered` means the document reached the client,
+not that they accepted the deal. Acceptance happens in the deal room, contract and SOW.
+
+So the roadmap writes nothing to `contracts` and nothing to `contract_technologies`, ever. A
+document that can be regenerated, edited and re-sent must not be able to change what a
+client is billed, and with no approval event there is no safe moment to do it.
+
+**One display-only exception.** `selected_option_id` may be set on the deliverable once the
+SOW is signed; the viewer then collapses to that option. It is a label — it triggers
+nothing, changes no billing, and can be changed or cleared freely.
+
+### Which option downstream consumers read
+
+Content plan and ABM plan generation take the roadmap as source context, so "read the
+roadmap" is ambiguous with three options. The rule:
+
+```
+selected_option_id
+  ?? shared.executive_summary.recommended_option_id
+  ?? refuse, and tell the strategist to choose
+```
+
+**Never fall back to `options[0]`** — that silently plans against whichever option happens to
+be first, usually the cheapest.
+
+`previous_roadmap` needs the same resolution plus flattening: the existing helper slices each
+prior section at 3,000 characters, so a nested `options[]` blob arrives at the prompt cut
+mid-option as broken JSON. **The backend flattens the selected option's sections into the
+existing flat shape before submitting, and passes nothing when no option is selected.**
+
+---
+
+## Goals — the commitment ladder
+
+The goals schema is `business_outcome / metric / description / benchmark / annual_goal /
+data_source`. Nothing in it encodes *what class of commitment* a goal is, so "scale the goals
+to the tier" yields the same MQL goal at three different numbers — the failure the
+requirement exists to prevent, with different digits.
+
+Add a required field per goal:
+
+```ts
+commitment_type: 'output' | 'leading_indicator' | 'business_outcome'
+```
+
+| Tier | Permitted | Example |
+|---|---|---|
+| `execute` | `output` only | "24 published articles, 12 optimized" |
+| `perform` | `output` + `leading_indicator` | organic sessions, MQL volume, CPL |
+| `grow` | all three, plus measurement ownership | pipeline sourced, with attribution owned |
+
+An Execute option carrying a `business_outcome` goal is now a flag rather than a matter of
+tone. Two supporting rules:
+
+- **`benchmark` comes from the shared research synthesis**, so it is identical across options
+  and only the targets differ. Otherwise three options invent three baselines for one client.
+- **Targets increase monotonically with tier.** A Perform target at or below Execute's is a
+  flag.
+
+This field must exist in the viewer too, not only the schema.
+
+---
+
+## Technology
+
+Billed as a separate line item and **never consumes hours**. `hours_available` derives from
+`monthly_budget`, never `total_monthly`.
+
+It appears per option because the tooling a program needs differs — Pursuit requires sending
+domains, warming, enrichment and rotation before anything sends; Authority needs almost none
+of it. Comparing options on the service fee alone would make a Pursuit option look cheaper
+than it is.
+
+| | |
+|---|---|
+| `monthly_budget` | Services |
+| `technology_monthly` | Recurring platform cost at **client price** |
+| `technology_one_time` | Setup and implementation fees, reported separately |
+| **`total_monthly`** | `monthly_budget + technology_monthly` |
+
+### Tables
+
+| Table | Rows | Purpose |
+|---|---|---|
+| `technologies` | 73 | The catalog. Defaults per tool. |
+| `contract_technologies` | 227 | Assignments to a contract, with optional overrides |
+| `payment_sources` | 3 | Which agency card pays. **Internal finance, not client billing.** |
+
+`payment_sources` holds agency cards — "MiD Tech Stack Card (Mercury)" — so it answers *which
+of our cards is charged*, not *who holds the contract*. Owner/Admin-only in the UI already,
+and it must never reach a client-facing roadmap.
+
+### Resolution
+
+Assignments inherit from the catalog: in the live data the override columns are almost always
+null. Every field resolves as `COALESCE(assignment, catalog default)`.
+
+```
+for each technology on the option:
+    if not t.is_active                            -> skip   # retired tool
+    billable = COALESCE(ct.client_billable_override, t.is_client_billable)
+    if not billable                               -> skip   # agency-absorbed
+    if ct.status != 'active' or ct.deactivated_on -> skip
+    price   = COALESCE(ct.client_price, t.default_client_price)
+    if price is null                              -> FAIL LOUDLY, do not contribute 0
+    cadence = COALESCE(ct.billing_cadence, t.default_billing_cadence)
+    qty     = COALESCE(ct.quantity, 1)
+    if cadence == 'one_time':  technology_one_time += price * qty
+    else:                      technology_monthly  += to_monthly(price, cadence) * qty
+```
+
+Six things here are quietly wrong if missed, and each has a real cost:
+
+**`is_client_billable`, not a missing price.** The flag is authoritative.
+`client_billable_override` is the per-contract exception — a tool globally non-billable can
+still be billed to one account, which is exactly what that column was built for.
+
+**`default_client_price`, never `default_internal_cost`.** They diverge — Factors.ai is $450
+internal against $600 client price. Internal cost is a margin figure and must never reach a
+client-facing proposal.
+
+**`quantity`.** Cost is price × quantity. Everything defaults to 1, so this stays invisible
+until the first multi-seat tool, then the quote is silently short.
+
+**`is_agency_plan` is not non-billable.** n8n is an agency plan billed on at $50. Excluding
+agency plans under-quotes.
+
+**`is_active`.** The catalog carries retired tools. Filter them or strategists quote platforms
+you no longer run.
+
+**One-time cadence is not amortised.** Setup fees reported separately keep `total_monthly`
+strictly monthly and comparable across options.
+
+Nothing here creates `contract_technologies` rows. Assigning technology to a contract is a
+billing change and happens through the SOW process.
+
+---
+
+## Generation payload
+
+`processor.ts` branches on `customer_display_type`. The points path is untouched.
+
+```ts
+/** Program roadmap: contract blended rate, one value across every option */
+hourly_rate?: number;
+/** Program roadmap: the priced options to generate. 1–3, ascending tier order. */
+roadmap_options?: Array<{
+  option_id: string;
+  label: string;                     // "Execute — Authority", shown to the client
+  tier: 'execute' | 'perform' | 'grow';
+  programs: Array<'authority' | 'reach' | 'pursuit'>;
+  program_allocation: Record<string, 'authority' | 'reach' | 'pursuit'>;
+  monthly_budget: number;            // services only
+  technology_monthly: number;        // for the executive summary's total
+  total_monthly: number;
+  hours_available: number;           // monthly_budget / hourly_rate
+  overhead_hours: number;            // 9.8
+  program_hours: number;             // hours_available − overhead_hours
+}>;
+/** Program roadmap: category eligibility per program, enforced per option */
+program_matrix?: Record<'authority' | 'reach' | 'pursuit', string[]>;
+/** Program roadmap: library items, union of all options' eligible categories */
+process_library_hours?: Array<{
+  task: string;
+  description: string;
+  stage: string;
+  service_category: string;
+  baseline_hours: number;
+}>;
+```
+
+**Resolved technology line items are not sent.** They never become rows and never consume
+hours; the only generator need is the executive summary's total-investment sentence, which
+takes `technology_monthly` and `total_monthly`. The backend stores the resolved items on the
+deliverable for display. Sending them would be pure token cost on every call.
+
+The library is sent as a **union** across options; Master Marketer applies `program_matrix`
+per option so a Reach-only option cannot draw an Authority category present for another.
+
+---
+
+## Expected output
+
+**Three months of task rows; twelve months of Gantt.** The points path is quarterly and this
+matches it. Twelve months of hour-level rows across three options is 36 month-blocks — it
+strains the output ceiling, and it is detail nobody reads in a sales proposal and everybody
+maintains afterwards.
+
+`annual_plan` and `hours_plan` are **separate sections and always have been**:
+
+| Key | Shape | What it is |
+|---|---|---|
+| `annual_plan` | `categories[].initiatives[].months: boolean[12]` | The 12-month Gantt |
+| `hours_plan` | `months[].tasks[]`, totals | The editable task rows — mirrors `points_plan` |
+
+```jsonc
+{
+  "schema": "program_roadmap_v1",       // viewer branches on THIS, not the contract
+  "type": "program_roadmap",
+  "title": "…", "summary": "…", "metadata": { /* … */ },
+  "hourly_rate": 125,
+  "options_are_alternatives": true,
+  "selected_option_id": null,
+
+  "shared": {
+    "executive_summary": {
+      "body": "…",
+      "recommended_option_id": "opt_perform_authority_reach",
+      "recommendation_rationale": "…"
+    },
+    "overview": "…", "target_market": {}, "brand_story": "…",
+    "products_and_solutions": {}, "competition": {}
+  },
+
+  "options": [{
+    "option_id": "opt_execute_authority",
+    "label": "Execute — Authority",
+    "tier": "execute",
+    "programs": ["authority"],
+    "program_allocation": { "Content": "authority" },
+    "monthly_budget": 4000,
+    "technology_monthly": 150,
+    "technology_one_time": 0,
+    "total_monthly": 4150,
+    "hours_available": 32.0,
+    "overhead_hours": 9.8,
+    "program_hours": 22.2,
+
+    "goals": { /* commitment_type per goal */ },
+    "roadmap_phases": [],
+    "quarterly_initiatives": [],
+    "annual_plan": { "categories": [ /* 12-month Gantt */ ] },
+    "hours_plan": {
+      "section_description": "…",        // injected by the assembler, not generated
+      "total_hours": 64.5,
+      "months": [{
+        "month": 1,
+        "month_label": "Month 1",
+        "hours_available": 22.2,
+        "hours_allocated": 21.5,
+        "tasks": [ /* row schema above */ ],
+        "flags": []                       // attached by the backend, not the model
+      }]
+    }
+  }]
+}
+```
+
+**Key names match the existing roadmap family exactly** — `products_and_solutions`,
+`roadmap_phases`, `quarterly_initiatives`, `target_market`, `brand_story`, `competition`,
+`goals`. Divergence costs the viewer its section components and buys nothing.
+
+**`section_description` is injected from `ROADMAP_BOILERPLATE` by the assembler, per option.**
+The model never writes it; nobody should budget tokens for it or expect it to vary between
+options.
+
+**Month is a number with an optional display label**, so sorting is reliable. The points
+path's `"Month 1"` string stays as `month_label`.
+
+### Generation sequence
+
+The generator is four sequential calls today with accumulated context. The split:
+
+| Call | Produces | Scope |
+|---|---|---|
+| 1 | `target_market` + `brand_story` | shared — unchanged |
+| 2 | `products_and_solutions` + `competition` | shared — unchanged |
+| 3 … 3+N | `goals`, `roadmap_phases`, `quarterly_initiatives`, `annual_plan`, `hours_plan` | **once per option** |
+| last | `executive_summary` + recommendation | shared, short |
+
+Three options is six calls against today's four — where the ~1.5× estimate lands.
+`maxDuration` is sized for four and needs raising.
+
+**The executive summary runs last, not first.** It carries `recommended_option_id` and its
+rationale, which require every option to exist.
+
+**Options generate in ascending tier order, each seeing the ones before it.** Options
+generated blind to each other read as three unrelated plans and nothing makes the
+accountability ladder visible. Sequential generation is also what holds Perform's goals
+strictly above Execute's rather than hoping.
+
+### Output validation
+
+Roadmap output is currently unvalidated — `GeneratedRoadmapOutput` is a plain interface, the
+model's JSON is cast, and nothing checks `month_total` against its tasks. Survivable for
+points; not once those sums multiply by a rate into a client-facing dollar figure. **This path
+ships with a real output schema and a repair re-ask.**
 
 ---
 
 ## Guardrails
 
-Two classes. Hard rules refuse; soft rules flag and let the strategist decide.
+### Soft flags are computed by the backend
 
-### Hard — refuse to generate, with a message naming the fix
+Every soft flag except the ramp narrative is arithmetic over rows the generator has already
+emitted. Computed in the backend they are deterministic, identical on every regeneration, and
+their thresholds move without redeploying a prompt. A model computing them across thirty rows
+will flag two options differently for the same defect.
 
-| Rule | Message |
+Master Marketer keeps the **narrative** — month one saying in its phase text that it is a ramp
+period, so the SOW can carry it. The backend attaches `flags[]`.
+
+**Closed vocabulary.** The frontend styles on `code`, so the set is fixed:
+
+| `code` | Threshold |
 |---|---|
-| Program count exceeds tier | "$6,000 is Perform — two programs. Select which two." |
-| Pursuit selected at Execute | "Pursuit starts at Perform, paired with Authority or Reach." |
-| Pursuit selected alone at any tier | "Pursuit is never sold on its own." |
-| Category outside the sold programs' matrix | Names the category and the programs that would include it |
-| `dollar_per_hour` unset | "Set the contract's hourly rate before generating." |
-| Technology counted against capacity | Internal check — `hours_available` must derive from `monthly_budget`, never `total_monthly` |
-| Any month's allocated hours exceed capacity | Names the month and the overage |
+| `row_below_baseline` | `hours < baseline_hours × 0.5` with no `adjustment_reason` |
+| `month_thin_spread` | active rolled-up categories > `program_hours / 6` |
+| `overhead_under_reserved` | strategy + AM below `overhead_hours` |
+| `month_under_capacity` | allocated < 85% of available |
+| `content_share_off_pattern` | Authority <35% or >65%; Reach >45%; Pursuit >40% |
+| `ramp_month` | month 1 carrying heavy setup |
+| `goal_commitment_mismatch` | a goal's `commitment_type` exceeds what the tier permits |
+| `goal_target_not_monotonic` | a higher tier's target at or below a lower tier's |
 
-These are refusals, not warnings. The retainer model's core complaint is that scope gets
-negotiated deal by deal; a generator that declines is the only thing that makes the tiers
-real rather than advisory.
+Flags are `{ level: 'soft', code, message }` and never block.
 
-### Soft — generate, flag on the row or month
-
-| Flag | Threshold | Why |
-|---|---|---|
-| **Row scheduled well below its baseline** | `hours < baseline_hours × 0.5` and `adjustment_reason` is null | The direct guard against "one hour each". `Develop SEO blog post` at 1 hour against a 5.08-hour baseline will not produce the deliverable. Soft, because a shorter piece legitimately takes less — writing the reason answers the flag. Uses only what the library already knows, so it needs no new taxonomy. |
-| **Month spread too thin** | Active categories > `program_hours / 6` | Catches the case the tier gate cannot: nine categories at 2.4 hours each inside a single program. Six hours is roughly the smallest library item that produces something substantial. |
-| Overhead under-reserved | Strategy + AM < 9.8 hrs/month | Coordination is being borrowed against |
-| Month under capacity | Allocated < 85% of available | Unspent capacity accrues as rollover |
-| Breadth exceeds archetype | Active categories > tier's shape (see below) | Spread, not focus |
-| Content share off-pattern | Authority < 35% or > 65%; Reach > 45%; Pursuit > 40% | Retainer model's composition check |
-
-Soft flags must not block. The strategist may have a reason, and the goal is a draft they
-can defend — not a machine that says no.
+**`month_under_capacity` is suppressed when `ramp_month` fires.** An Execute/Reach month one
+runs 17.5 of 22.2 hours — 79% — which trips both for the same expected, documented situation.
 
 ### Execute archetypes
 
-Execute is one program run **deliberately narrow**, not one program spread across its
-eligible categories. Authority has five eligible categories; free composition at 22.2
-hours gives each about four, which is the exact failure the tier structure exists to
-prevent.
-
-At Execute, generate from a named shape rather than composing freely:
+Execute is one program run **deliberately narrow**, not one program spread across its eligible
+categories. Authority has five; free composition at 22.2 hours gives each about four and
+produces nothing.
 
 **Execute / Authority** — the client needs content produced
 
@@ -393,219 +609,103 @@ At Execute, generate from a named shape rather than composing freely:
 | Develop image ad creative package | 9.83 |
 | | **20.16** |
 
-Perform (38.2 hrs) composes more freely within its two programs. Grow (86.2 hrs) can run
-full breadth.
+These are **task lists, not fixed totals.** They fit Execute's floor of 22.2 program hours; an
+Execute engagement higher in the band has more room and the same shape.
+
+Perform (38.2+) composes more freely. Grow (86.2+) can run full breadth.
 
 ### Month one
 
-Setup work lands in month 1 and is heavy relative to Execute's capacity. An
-Execute / Reach engagement opens with `Set up paid media` (5.5h) and `Set up performance
-reporting` (7.0h) — 12.5 hours, **56% of the month's program capacity.**
-
-Month 1 therefore delivers roughly half a steady-state month of production. That is the
-retainer model's ramp period showing up in the arithmetic rather than a fault, but the
-generator should say so in the roadmap's own narrative so the SOW can carry it. A client
-expecting two pieces in month one gets one.
-
----
-
-## Generation payload
-
-`processor.ts` branches on `customer_display_type`. The points path is untouched.
-
-New submission fields on `DeliverableSubmission`, mirroring the roadmap block that
-already assembles `research`, `transcripts`, `process_library`, and `previous_roadmap`:
-
-```ts
-/** Program roadmap: contract blended rate, one value across every option */
-hourly_rate?: number;
-/** Program roadmap: the priced options to generate, one plan each. Max 3. */
-roadmap_options?: Array<{
-  option_id: string;
-  label: string;                     // "Execute — Authority" etc, shown to the client
-  tier: 'execute' | 'perform' | 'grow';
-  programs: Array<'authority' | 'reach' | 'pursuit'>;
-  monthly_budget: number;            // services only
-  technology_monthly: number;        // sum of selected catalog items at CLIENT price
-  technology_items?: Array<{         // resolved from technologies / contract_technologies
-    technology_id: string;
-    name: string;
-    vendor: string;
-    quantity: number;
-    client_price_monthly: number;    // resolved client price, cadence-normalised, × quantity
-  }>;
-  total_monthly: number;             // monthly_budget + technology_monthly
-  hours_available: number;           // monthly_budget / hourly_rate — services only
-  overhead_hours: number;            // reserved for strategy + account management
-  program_hours: number;             // hours_available - overhead_hours
-}>;
-/** Program roadmap: category eligibility per program, so options are enforced per option */
-program_matrix?: Record<'authority' | 'reach' | 'pursuit', string[]>;
-/** Program roadmap: library items with baseline hours, union of all options' eligible categories */
-process_library_hours?: Array<{
-  task: string;
-  description: string;
-  stage: string;
-  service_category: string;
-  baseline_hours: number;
-}>;
-```
-
-The backend sends the **union** of items eligible across all options, plus the matrix.
-Master Marketer applies the matrix per option, so a Reach-only option cannot draw an
-Authority category even though that category is present in the payload for another
-option.
-
-The backend filters `process_library_hours` to categories eligible for the sold programs
-before submitting. Master Marketer never sees ineligible items, so it cannot propose
-them.
-
-**Master Marketer may deviate from `baseline_hours`** where the research or instructions
-justify it — three systems and custom attribution should raise `Manage performance
-reporting` well above its 1-hour baseline. When it does, it must set `hours` and populate
-`adjustment_reason`. That is the whole point of leaving points: the estimate flexes to
-the client.
-
----
-
-## Expected output
-
-`content_structured` follows the existing roadmap shape — months containing task rows —
-with hours replacing points and the fields above added per row.
-
-```jsonc
-{
-  "hourly_rate": 125,                   // one rate, every option
-  "options_are_alternatives": true,     // never summed; the client picks one
-  "selected_option_id": null,           // display-only label, set after the SOW is signed
-
-  // Generated once. Describes the client, not the investment.
-  "shared": {
-    "executive_summary": {
-      "body": "…",
-      "recommended_option_id": "opt_perform_authority_reach",
-      "recommendation_rationale": "…"
-    },
-    "overview": "…",
-    "target_market": { /* … */ },
-    "brand_story": "…",
-    "products_solutions": { /* … */ },
-    "competition": { /* … */ }
-  },
-
-  "options": [
-    {
-      "option_id": "opt_execute_authority",
-      "label": "Execute — Authority",
-      "tier": "execute",
-      "programs": ["authority"],
-      "monthly_budget": 4000,
-      "technology_monthly": 150,
-      "total_monthly": 4150,
-      "hours_available": 32.0,
-      "overhead_hours": 9.8,
-      "program_hours": 22.2,
-
-      "goals": { /* OKRs scaled to what this option can commit to */ },
-      "roadmap_phases": [ /* … */ ],
-      "quarterly_initiatives": [ /* … */ ],
-      "hours_plan": { /* … */ },
-
-      "annual_plan": {
-        "months": [
-          {
-            "month": 1,
-            "hours_available": 22.2,
-            "hours_allocated": 21.5,
-            "tasks": [ /* row schema above */ ],
-            "flags": [
-              { "level": "soft", "code": "ramp_month", "message": "12.5 hrs of setup; production is roughly half a steady-state month." }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "option_id": "opt_perform_authority_reach",
-      "label": "Perform — Authority + Reach",
-      "tier": "perform",
-      "programs": ["authority", "reach"],
-      "monthly_budget": 6000,
-      "technology_monthly": 750,
-      "total_monthly": 6750,
-      "hours_available": 48.0,
-      "overhead_hours": 9.8,
-      "program_hours": 38.2,
-      "goals": { /* … */ },
-      "annual_plan": { "months": [ /* … */ ] }
-    }
-  ]
-}
-```
+Setup work is heavy relative to Execute's capacity. An Execute / Reach engagement opens with
+`Set up paid media` (5.5h) and `Set up performance reporting` (7.0h) — 12.5 hours, **56% of the
+month's program capacity.** Month one therefore delivers roughly half a steady-state month of
+production. That is the ramp period in the arithmetic rather than a fault, and the generator
+says so in the narrative so the SOW can carry it.
 
 ---
 
 ## Frontend contract
 
-The points roadmap's editing UI is already correct in shape — editable task, description,
-stage and value per row, Add Task, Add Month, delete, and in-memory edit tracking until
-save. The hours version is the same table with four changes:
+### The document is a snapshot
 
-1. **Pts → Hrs**, accepting one decimal place
-2. **Month header** shows `hours allocated / hours available` rather than a bare total, so
-   going over is visible while editing
-3. **Total budget band** shows hours available, hours allocated, and variance — plus the
-   dollar value at the contract rate, since that is the number under discussion
-4. **Flags render inline** on the row or month they belong to
-5. **Options switch only the plan sections.** Executive Summary through Competition render
-   once; Goals, Roadmap Phases, Quarterly Initiatives, Annual Plan and Hours Plan switch
-   with the selected option. In the contents sidebar the shared sections stay put and the
-   option-scoped ones re-render, so the reader is not made to feel they changed document.
-   The UI must never show a combined total across options; they are alternatives, and a
-   summed figure would misrepresent the proposal.
-6. **Every option shows services, technology and total** wherever options are compared.
-   Showing the service fee alone would make a Pursuit option look cheaper than it is.
-7. **`selected_option_id` collapses the view to one option** when set, with a way back to
-   the full comparison. It is a label only — setting it must not trigger any write to the
-   contract or its technology assignments.
+`hourly_rate`, `hours_available`, `hours_allocated` and `overhead_hours` are stored on the
+document and **read, never recomputed.** A viewer deriving capacity from `monthly_budget /
+dollar_per_hour` would silently rewrite a signed roadmap the moment the contract's rate
+changed.
 
-Technology rows never appear — technology is billed outside the fee and never consumes
-hours.
+### Rendering branches on `schema`, not the contract
 
-**When an edit pushes a month over capacity, let it go red rather than blocking the
-keystroke.** The number the strategist is reaching for is usually right; what needs to
-happen is the budget conversation, not a rejected input.
+`customer_display_type` is a presentation setting a human can change at any time. Flipping an
+hours contract to points after generation would feed an options document to the flat renderer
+— blank sections, not a graceful fallback. The viewer branches on
+`schema: "program_roadmap_v1"`. `customer_display_type` still gates which generation form
+appears.
 
-Where `baseline_hours` and `hours` differ, show the baseline quietly beside the field so
-the strategist can see what standard was.
+### A dual-shape adapter is required
+
+Four consumers read the flat `GeneratedRoadmapOutput` shape today and break on
+`{shared, options[]}`: markdown export, the public share view, the client viewer, and the
+downstream content/ABM generators. An adapter normalises **both** shapes to one internal view
+model — legacy documents wrap as a single unnamed option, program roadmaps pass through.
+
+This is the largest single frontend item, roughly the size of the viewer changes themselves.
+No migration of stored documents and no change to the points path's output.
+
+### Viewer
+
+- Option switch above the plan sections; shared sections hold position and scroll-spy state
+  while option-scoped TOC entries re-derive on switch. The TOC is the fiddly part — budget for
+  it.
+- **No summed total across options, anywhere.** Each option card shows services / technology /
+  total for that option only.
+- `selected_option_id` collapses to one option with a persistent "compare all options"
+  affordance, and writes nothing.
+- **Markdown export contains all options, clearly delimited** — it feeds LLMs and SOW
+  drafting, where the comparison is the point.
+
+### Editing
+
+The existing `PointsPlanEditor` is the right shape — rows, drag-reorder, add/delete, in-memory
+tracking until save. Four changes:
+
+- **Pts → Hrs**, one decimal place
+- **Month header** shows `allocated / available`, not a bare total
+- **Total band** shows available, allocated, variance, and dollar value at the contract rate
+- **Flags render inline** on the row or month they belong to, styled on `code`
+
+Show `baseline_hours` quietly beside each edited value so the strategist can see what standard
+was.
+
+**When an edit pushes a month over capacity, let it go red — do not block the keystroke.** The
+number they are reaching for is usually right; what needs to happen is a budget conversation,
+not a rejected input.
+
+### Technology picker
+
+Multi-select over 73 catalog rows with billability resolution, cadence normalisation,
+quantity, `is_active` filtering, and a live per-option total. This is a small feature, not a
+form field. A billable item with a null client price **fails loudly** rather than contributing
+$0.
 
 ---
 
 ## Sequencing
 
-1. Eligibility matrix as configuration
-2. `processor.ts` branch on `customer_display_type` + payload assembly
-3. Master Marketer `/api/generate/program-roadmap`
-4. Lovable: option input rows on the generation form, option switch in the viewer, editing UI
+1. **Library hygiene pass** — duplicate `Set up ABM`, four missing estimates. Blocking on
+   quality, not cosmetic.
+2. Eligibility matrix, tier bands and constants exposed as configuration data
+3. `processor.ts` branch, payload assembly, technology resolution, soft-flag computation
+4. Master Marketer — per-option calls, output schema, repair re-ask, `maxDuration` raise
+5. Lovable — dual-shape adapter, then viewer option switch, then generation form and
+   technology picker, then hours editing UI
 
-**No schema change, no ClickUp work, no data migration.** Both contract fields already
-exist, and the library already carries everything the generator needs — hours, service
-category, description. Nothing at any step touches an existing contract.
+Steps 4 and 5 run in parallel against this document. **No schema change and no data
+migration** — every field either exists or lives on the deliverable.
 
 ---
 
 ## Open
 
-- **Is $125 the standard rate with a defined ladder above it** ($150 senior-weighted,
-  $175 custom build), and who may move a contract off it? A rate that only ever lands at
-  $125 re-freezes the variable this change exists to free.
-- **Are Authority-production and pure-paid the only Execute archetypes?** Writing the list
-  down is what stops fifteen disciplines being promised at $4,000.
-- **Does the rollover cap apply to hours?** Utilization runs at 1.12 today. That is a
-  delivery-discipline problem, not a pricing one, and it persists under hours unless the
-  cap goes into the MSA.
-- **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
-  18.08h. Worth a pass before the generator reads from this data.
-- **Should `selected_option_id` be set from the deal room** rather than by hand, once a
-  SOW is signed there? It would keep the roadmap honest without anyone remembering to
-  update it — but it is a link between two systems that are deliberately separate today.
+- **Should `selected_option_id` be set from the deal room** when a SOW is signed there, rather
+  than by hand? It would keep the roadmap honest without anyone remembering — but it links two
+  systems deliberately kept separate today.

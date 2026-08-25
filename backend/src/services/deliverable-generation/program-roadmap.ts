@@ -266,7 +266,7 @@ export function validateOptions(
     if (actualTier === null) {
       errors.push(
         `${where}: $${opt.monthly_budget!.toLocaleString()} at $${dollarPerHour}/hr is ` +
-        `${capacity.toFixed(1)} hours — below Execute's floor of ${TIER_BANDS.execute.minCapacityHours}.`
+        `${capacity.toFixed(1)} hours — below Execute's floor of ${TIER_BANDS.execute.min_capacity_hours}.`
       );
     } else if (actualTier !== opt.tier) {
       errors.push(

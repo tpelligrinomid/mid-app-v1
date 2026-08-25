@@ -72,10 +72,10 @@ export type Program = 'authority' | 'reach' | 'pursuit';
  * which is what the rate variable exists for. Published pricing reads "from $4,000", so a
  * floor that rises with the rate breaks no promise.
  */
-export const TIER_BANDS: Record<Tier, { minCapacityHours: number; maxCapacityHours: number | null; programs: number }> = {
-  execute: { minCapacityHours: 32, maxCapacityHours: 48, programs: 1 },
-  perform: { minCapacityHours: 48, maxCapacityHours: 96, programs: 2 },
-  grow:    { minCapacityHours: 96, maxCapacityHours: null, programs: 3 },
+export const TIER_BANDS: Record<Tier, { min_capacity_hours: number; max_capacity_hours: number | null; programs: number }> = {
+  execute: { min_capacity_hours: 32, max_capacity_hours: 48, programs: 1 },
+  perform: { min_capacity_hours: 48, max_capacity_hours: 96, programs: 2 },
+  grow:    { min_capacity_hours: 96, max_capacity_hours: null, programs: 3 },
 };
 
 /** capacity = what the service fee buys at the contract's blended rate. */
@@ -95,7 +95,7 @@ export function programHours(monthlyBudget: number, dollarPerHour: number): numb
 export function tierForCapacity(hours: number): Tier | null {
   for (const tier of ['execute', 'perform', 'grow'] as Tier[]) {
     const band = TIER_BANDS[tier];
-    if (hours >= band.minCapacityHours && (band.maxCapacityHours === null || hours < band.maxCapacityHours)) {
+    if (hours >= band.min_capacity_hours && (band.max_capacity_hours === null || hours < band.max_capacity_hours)) {
       return tier;
     }
   }
@@ -198,7 +198,7 @@ export const FLAG_CODES = {
   month_thin_spread: {
     description: 'More active categories than the month has hours to serve properly',
     /** ~6 hours is the smallest library item that produces something substantial. */
-    hoursPerCategory: 6,
+    hours_per_category: 6,
     /**
      * An hours-only threshold stops protecting Execute above its floor. At the top of the
      * band, program_hours / 6 is 6.35 while Authority has only five eligible categories to
@@ -214,7 +214,7 @@ export const FLAG_CODES = {
      * Paid media, Analytics & reporting, Content, Design. A cap of 3 would flag the
      * archetype the spec recommends.
      */
-    tierCategoryCap: { execute: 4, perform: null, grow: null } as Record<Tier, number | null>,
+    tier_category_cap: { execute: 4, perform: null, grow: null } as Record<Tier, number | null>,
   },
   row_above_baseline: {
     description: 'Row scheduled at more than twice its library baseline with no reason given',
@@ -278,8 +278,8 @@ export const BASELINE_FLAGS: FlagCode[] = ['row_below_baseline', 'row_above_base
 
 /** Max active rolled-up categories in a month before month_thin_spread fires. */
 export function maxCategoriesForMonth(tier: Tier, programHours: number): number {
-  const byHours = programHours / FLAG_CODES.month_thin_spread.hoursPerCategory;
-  const cap = FLAG_CODES.month_thin_spread.tierCategoryCap[tier];
+  const byHours = programHours / FLAG_CODES.month_thin_spread.hours_per_category;
+  const cap = FLAG_CODES.month_thin_spread.tier_category_cap[tier];
   return cap === null ? byHours : Math.min(byHours, cap);
 }
 

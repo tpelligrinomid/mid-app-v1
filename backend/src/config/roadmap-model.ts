@@ -243,22 +243,20 @@ export const FLAG_CODES = {
      * 9.8 would fire on every correctly composed steady month -- which is how a flag column
      * gets ignored.
      *
-     * Threshold is 45% of `OVERHEAD_HOURS × months`, not 60%, and the reason is a gap in
-     * the library rather than a tuning preference.
+     * 60% of `OVERHEAD_HOURS × months`.
      *
-     * `Facilitate Client Meetings` at 5h/month is the ONLY recurring coordination item that
-     * exists, so a quarter with no planning work totals 15.0 against an expectation of 29.4.
-     * At 60% that fires on every correctly composed steady-state option, which would make
-     * the flag really a test of "did month one include a plan document".
+     * This sat at 45% while `Facilitate Client Meetings` (5h/month) was the only recurring
+     * coordination item in the library -- a steady quarter totalled 15.0 against an
+     * expectation of 29.4, so 60% fired on every correctly composed option and the flag was
+     * really testing "did month one include a plan document".
      *
-     * 45% (13.2 across a quarter) lets steady state pass with room, while genuinely thin
-     * coordination -- 10 hours a quarter on a 32-hour engagement -- still shows.
-     *
-     * The real fix is authoring recurring strategy items into the library: the observed
-     * 12.6 points/month of overhead came from accounts doing more coordination than
-     * `Facilitate Client Meetings` alone can express.
+     * `Monthly Strategy Session` (4h) and `Quarterly Review Session` (4h) closed that gap.
+     * Recurring coordination is now 9h/month against the 9.8 the book actually showed, and
+     * a steady quarter runs (5 + 4) x 3 + 4 = 31.0 -- 105% of expectation. So 60% flags
+     * genuine under-service again rather than normal composition: meetings alone across a
+     * quarter is 15.0, or 51%, and still fires.
      */
-    threshold: 0.45,
+    threshold: 0.6,
     scope: 'plan' as const,
   },
   month_under_capacity: {

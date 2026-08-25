@@ -100,13 +100,13 @@ Month one legitimately carries 20+ hours of strategy where month three carries f
 per-month check against 9.8 would fire on every correctly composed steady month, which is how
 a flag column gets ignored.
 
-**The threshold is 45%, and that is a symptom rather than a preference.**
-`Facilitate Client Meetings` at 5h/month is the *only* recurring coordination item in the
-library, so a quarter with no planning work totals 15.0 against an expectation of 29.4. At
-60% the flag fires on every correctly composed steady-state option and is really testing
-*"did month one include a plan document."* The real fix is authoring recurring strategy items
-into the library — the observed 12.6 points/month came from accounts doing more
-coordination than one meeting item can express.
+**The threshold is 60%.** It sat at 45% while `Facilitate Client Meetings` (5h/month) was
+the only recurring coordination item in the library — a steady quarter totalled 15.0 against
+an expectation of 29.4, so 60% fired on every correct option. `Monthly Strategy Session` (4h)
+and `Quarterly Review Session` (4h) closed that gap: recurring coordination is now 9h/month
+against the 9.8 the book showed, and a steady quarter runs 31.0, or 105% of expectation.
+Meetings alone across a quarter is 15.0 — 51% — and still fires, which is the case the flag
+exists for.
 | Points/hours break-even rate | `$129/hr` | Where hours bill the same as the old $100 point |
 
 **Task hours come from `compass_process_library.time_estimate_ms`, not from 0.78.** The
@@ -674,7 +674,7 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 |---|---|
 | `row_below_baseline` | `hours < baseline_hours × 0.5` with no `adjustment_reason` |
 | `row_above_baseline` | `hours > baseline_hours × 2` with no `adjustment_reason` |
-| `overhead_under_reserved` | strategy + AM across the **plan** below 45% of `overhead_hours × months` |
+| `overhead_under_reserved` | strategy + AM across the **plan** below 60% of `overhead_hours × months` |
 | `month_thin_spread` | active program categories > `tier cap ?? program_hours / 6` — Execute is a flat 4 |
 | `month_under_capacity` | allocated < 85% of available |
 | `content_share_off_pattern` | content **category** share outside the widest bound across the option's programs |
@@ -770,7 +770,7 @@ options in the same document.
 | Class | Cadence | Tasks |
 |---|---|---|
 | setup | months 1–2, as capacity allows | The relevant `Develop — Plan Document` — e.g. Develop Content Plan Document 18.75 |
-| overhead | every month | Facilitate Client Meetings 5.00 |
+| overhead | every month | Facilitate Client Meetings 5.00 · Monthly Strategy Session 4.00 · Quarterly Review Session 4.00 in month 3 |
 | recurring | every month | Manage content 0.75 · Manage SEO 5.00 · Manage performance reporting 1.00 |
 | production | scales to fill | Develop SEO blog post 5.08 · Optimize existing SEO article 4.58 |
 
@@ -779,7 +779,7 @@ options in the same document.
 | Class | Cadence | Tasks |
 |---|---|---|
 | setup | months 1–2, as capacity allows | Set up paid media 5.5 · Set up performance reporting 7.0 · optionally Develop Paid Media Plan Document 16.0 |
-| overhead | every month | Facilitate Client Meetings 5.00 |
+| overhead | every month | Facilitate Client Meetings 5.00 · Monthly Strategy Session 4.00 · Quarterly Review Session 4.00 in month 3 |
 | recurring | every month | Manage paid media 4.00 · Manage performance reporting 1.00 |
 | production | scales to fill | Google Ads text ad package 5.33 · Image ad creative package 9.83 |
 
@@ -792,8 +792,8 @@ Authority is unbuildable: plan document 18.75 + overhead 5.00 + recurring 6.75 i
 The split makes both required behaviours mechanical:
 
 - **Month one** = setup + overhead + recurring + whatever production fits, against the full
-  32.0. For Execute / Reach that is 12.5 + 5.00 + 5.00 = 22.5 fixed, leaving 9.5 — one
-  deliverable where a steady month runs two or three. That is the ramp.
+  32.0. For Execute / Reach that is 12.5 setup + 9.00 overhead + 5.00 recurring = 26.5 fixed,
+  leaving 5.5 — one deliverable where a steady month runs two or three. That is the ramp.
 - **Higher in the band** = more production, same recurring, **same categories**. This is what
   "more room and the same shape" means in practice.
 
@@ -807,14 +807,14 @@ Perform (38.2+) composes more freely. Grow (86.2+) can run full breadth.
 
 Setup work is heavy relative to Execute's capacity. An Execute / Reach engagement opens with
 `Set up paid media` (5.5h) and `Set up performance reporting` (7.0h) — 12.5 hours, **39% of
-the month's 32.0 capacity**, before 5.0 of coordination and 5.0 of recurring work on top.
+the month's 32.0 capacity**, before 9.0 of coordination and 5.0 of recurring work on top.
 
 **The ramp shows up in deliverables, not in allocation.** Month one still allocates to a
-normal percentage — around 87% for Execute / Reach — because setup and planning fill the
+normal percentage — near 99% for Execute / Reach — because setup and planning fill the
 hours. What it ships is one deliverable against two or three in a steady month.
 
 That is why `ramp_month`'s message describes output rather than hours, and why suppressing
-`month_under_capacity` under `ramp_month` is a safety rather than a necessity: at 87% month
+`month_under_capacity` under `ramp_month` is a safety rather than a necessity: at that level month
 one clears that threshold on its own.
 
 ---

@@ -25,7 +25,7 @@ import {
 
 const MAX_OPTIONS = 3;
 const ROADMAP_STAGES = new Set(['foundation', 'execution', 'analysis']);
-const STAGE_LABEL: Record<string, string> = {
+const STAGE_LABEL: Record<string, RoadmapStage> = {
   foundation: 'Foundation',
   execution: 'Execution',
   analysis: 'Analysis',
@@ -189,10 +189,12 @@ interface LibraryRow {
   time_estimate_ms: number | null;
 }
 
+export type RoadmapStage = 'Foundation' | 'Execution' | 'Analysis';
+
 export interface LibraryItem {
   task: string;
   description: string;
-  stage: string;
+  stage: RoadmapStage;
   service_category: string;
   baseline_hours: number;
 }

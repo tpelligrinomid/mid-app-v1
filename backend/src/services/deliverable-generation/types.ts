@@ -73,7 +73,9 @@ export interface DeliverableSubmission {
   process_library_hours?: Array<{
     task: string;
     description: string;
-    stage: string;
+    /** Enum, not free text -- a bad value should fail at the boundary rather than produce
+     *  a row the viewer cannot group. */
+    stage: 'Foundation' | 'Execution' | 'Analysis';
     service_category: string;
     baseline_hours: number;
   }>;

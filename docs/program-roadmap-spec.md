@@ -203,48 +203,61 @@ the client pays. Every option carries three numbers:
 
 #### Selected from the catalog, not typed
 
-Pulse already holds a Tech Stack Catalog — 73 technologies with vendor, category, internal
-cost, client price, cadence and status — and catalog items can be attached to contracts,
-which is what the client sees in their portal. The roadmap generation form picks from that
-catalog per option. Nothing is typed free-hand and nothing is invented by the generator.
+Pulse holds the catalog and the per-contract assignments. Both are now allowlisted in
+`backend-proxy` and readable from the backend.
 
-**Client price, never internal cost.** The catalog carries both and they are not close —
-AHREFs is $350 internal against $50 client price; Buzzsprout is $25 against $50. The
-client-facing total sums **client price only**. Internal cost is a margin figure and must
-never reach a client-facing proposal.
+| Table | Rows | Purpose |
+|---|---|---|
+| `technologies` | 73 | The catalog. Defaults per tool. |
+| `contract_technologies` | 227 | Assignments to a contract, with optional overrides |
+| `payment_sources` | 3 | Which agency card pays. **Internal finance, not client billing.** |
 
-**Items with no client price are agency-absorbed and excluded from the option total.**
-Several catalog rows — Apify, Bitscale, ChatGPT, Claude — carry a dash in the client price
-column. They are tools the agency runs on its own account. Summing them into a client's
-quoted total would add your own overhead to their invoice: selecting Bitscale for a
-Pursuit option would silently add $799.
+`payment_sources` holds agency cards — "MiD Tech Stack Card (Mercury)", "Tristan Expenses"
+— so it answers *which of our cards is charged*, not *who holds the contract*. It has no
+bearing on what a client is quoted and must not be surfaced in a client-facing roadmap.
+The client-billable question is answered by `is_client_billable` alone.
 
-**Cadence has to be normalised.** The catalog carries a cadence per item. Anything not
-already monthly is converted to a monthly equivalent before it enters `technology_monthly`,
-so options remain comparable.
+#### Resolving an option's technology cost
 
-On approval, the selected option's catalog items become the contract's tech stack
-assignment — which is what makes the portal view match what was sold.
+Assignments inherit from the catalog: in the live data `client_price`, `billing_cadence`,
+`client_billable_override` and `internal_cost` are almost always null, and the override
+columns are the exception rather than the rule. So every field resolves as
+`COALESCE(assignment, catalog default)`.
 
-#### Blocking dependency
+```
+for each technology on the option:
+    billable = COALESCE(ct.client_billable_override, t.is_client_billable)
+    if not billable                              -> skip   # agency-absorbed
+    if ct.status != 'active' or ct.deactivated_on -> skip
+    price   = COALESCE(ct.client_price, t.default_client_price)
+    if price is null                             -> skip
+    cadence = COALESCE(ct.billing_cadence, t.default_billing_cadence)
+    monthly = to_monthly(price, cadence) * COALESCE(ct.quantity, 1)
+    technology_monthly += monthly
+```
 
-**The backend cannot read the catalog today.** The `backend-proxy` edge function enforces
-a server-side table allowlist, and every tech stack table is rejected by it — probing ten
-candidate names returned `"Table 'x' is not allowed"` in each case, independent of whether
-the table exists.
+Four things in that sequence are easy to get wrong and each has a real cost:
 
-Two things are needed before this can be built, both outside this repo:
+**`is_client_billable`, not a missing price.** The flag is authoritative. Inferring
+billability from a blank price column would mis-handle tools that carry a default price
+but are not billed on.
 
-1. The catalog and contract-assignment table names, which are Lovable-built and appear
-   nowhere in this repo's schema or migrations
-2. Those tables added to the edge function's `ALLOWED_TABLES`
+**`default_client_price`, never `default_internal_cost`.** The catalog carries both and
+they diverge — Factors.ai is $450 internal against $600 client price. Internal cost is a
+margin figure and must never reach a client-facing proposal.
 
-Note that `docs/edge-function-code-process-library.txt` is a stale snapshot of that
-function — it omits `pulse_tasks`, which the backend reads successfully — so the deployed
-allowlist is the only authority.
+**`quantity`.** The cost is price × quantity. Assignments default to 1, so this is
+invisible until the first multi-seat tool, at which point the quote is silently short.
 
-Until then, `technology_monthly` can be entered as a single figure per option and the
-catalog picker added afterwards. The option schema below does not change when it is.
+**Cadence normalisation.** `to_monthly` converts anything not already monthly, so options
+stay comparable.
+
+**`is_agency_plan` is not the same as non-billable.** n8n is an agency plan *and*
+client-billable at $50 — an agency-wide contract whose cost is passed through per client.
+Excluding agency plans would under-quote.
+
+On approval, the selected option's technologies become `contract_technologies` rows, which
+is what makes the client's portal view match what was sold.
 
 ### Validation across options
 
@@ -397,11 +410,12 @@ roadmap_options?: Array<{
   programs: Array<'authority' | 'reach' | 'pursuit'>;
   monthly_budget: number;            // services only
   technology_monthly: number;        // sum of selected catalog items at CLIENT price
-  technology_items?: Array<{         // catalog selection; omitted until allowlisted
-    catalog_id: string;
+  technology_items?: Array<{         // resolved from technologies / contract_technologies
+    technology_id: string;
     name: string;
     vendor: string;
-    client_price_monthly: number;    // never internal cost
+    quantity: number;
+    client_price_monthly: number;    // resolved client price, cadence-normalised, × quantity
   }>;
   total_monthly: number;             // monthly_budget + technology_monthly
   hours_available: number;           // monthly_budget / hourly_rate — services only
@@ -571,6 +585,6 @@ category, description. Nothing at any step touches an existing contract.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **Catalog table names and allowlisting** — needed before the technology picker can be
-  built. See the blocking dependency above. Everything else in this spec can be built
-  without it.
+- **Does selecting a technology on an option create the `contract_technologies` row at
+  approval, or does someone assign it by hand afterwards?** Automatic keeps the portal
+  honest with no extra step; manual keeps a human between a proposal and a billing change.

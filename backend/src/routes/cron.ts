@@ -787,31 +787,6 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
   }
 });
 
-// GET /api/cron/schema-probe
-// Temporary read-only diagnostic. Remove once the catalog schema is recorded in the spec.
-router.get('/schema-probe', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
-  const candidates = String(req.query.tables || '').split(',').map(t => t.trim()).filter(Boolean);
-  const out: Record<string, unknown> = {};
-
-  for (const table of candidates) {
-    try {
-      const { data, error } = await dbProxy.select<Array<Record<string, unknown>>>(table, {});
-      if (error) { out[table] = { exists: false, error: error.message.slice(0, 200) }; continue; }
-      const rows = data || [];
-      out[table] = {
-        exists: true,
-        row_count: rows.length,
-        columns: rows.length ? Object.keys(rows[0]).sort() : '(empty)',
-        samples: rows.slice(0, 3),
-      };
-    } catch (err) {
-      out[table] = { exists: false, error: err instanceof Error ? err.message.slice(0, 200) : 'unknown' };
-    }
-  }
-
-  res.json({ success: true, results: out });
-});
-
 // POST /api/cron/process-library-service-category
 //
 // Same taxonomy and prompt as clickup-service-category, run over the Process

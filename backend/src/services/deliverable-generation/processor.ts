@@ -12,8 +12,8 @@ import { PROGRAM_MATRIX } from '../../config/roadmap-model.js';
 import {
   buildOptions,
   loadEligibleLibrary,
+  normalizeOptionsRequest,
   validateOptions,
-  type RoadmapOptionInput,
 } from './program-roadmap.js';
 import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
@@ -31,8 +31,8 @@ export interface GenerateOptions {
   researchInputs?: ResearchInputs;
   previousRoadmapId?: string;
   pointsBudget?: number;
-  /** Program roadmap: priced options from the generation form. */
-  roadmapOptions?: RoadmapOptionInput[];
+  /** Program roadmap: the generation form's envelope, normalised in the branch below. */
+  roadmapRequest?: unknown;
   seedTopics?: string[];
   maxCrawlPages?: number;
   // ABM fields
@@ -221,7 +221,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     researchInputs,
     previousRoadmapId,
     pointsBudget: pointsBudgetOverride,
-    roadmapOptions,
+    roadmapRequest,
     seedTopics,
     maxCrawlPages,
     targetSegments,
@@ -365,10 +365,6 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     // Program roadmaps: hours-based, one document carrying 1-3 priced options.
     // Entirely separate from the points path below, which is untouched.
     if (deliverableType === 'program_roadmap') {
-      if (!roadmapOptions?.length) {
-        throw new Error('A program roadmap needs at least one option (tier, programs, budget).');
-      }
-
       const contractRow = await select<{ dollar_per_hour: number | null; customer_display_type: string | null }>(
         'contracts',
         {
@@ -378,10 +374,30 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         }
       );
       const dollarPerHour = contractRow?.dollar_per_hour ?? null;
+      if (!dollarPerHour || dollarPerHour <= 0) {
+        throw new Error("Set the contract's hourly rate before generating.");
+      }
+
+      const { options: optionInputs, recommendedIndex, postedRate } =
+        normalizeOptionsRequest(roadmapRequest, dollarPerHour);
+
+      if (!optionInputs.length) {
+        throw new Error('A program roadmap needs at least one option (tier, programs, hours).');
+      }
+
+      // The form posts the rate for display. The contract is the authority -- two sources
+      // for one number is how a signed roadmap ends up quoting a rate nobody set -- but a
+      // mismatch means someone is looking at a stale contract, so say so.
+      if (postedRate !== null && postedRate !== dollarPerHour) {
+        console.warn(
+          `[Deliverable Generation] Submitted rate $${postedRate} differs from the contract's ` +
+          `$${dollarPerHour}; using the contract.`
+        );
+      }
 
       // Every option is checked before anything is generated. Refusing here costs one
       // round trip; refusing after six generation calls costs all of them.
-      const errors = validateOptions(roadmapOptions, dollarPerHour);
+      const errors = validateOptions(optionInputs, dollarPerHour);
       if (errors.length) {
         throw new Error(['Cannot generate this roadmap:', ...errors.map(e => '- ' + e)].join(String.fromCharCode(10)));
       }
@@ -395,7 +411,8 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       // Throws when a selected technology is billable with no client price. Deliberate:
       // contributing 0 would under-quote silently, which is the failure that survives
       // review.
-      const { options, technology } = await buildOptions(contractId, roadmapOptions, dollarPerHour!);
+      const { options, technology, recommendedOptionId } =
+        await buildOptions(contractId, optionInputs, dollarPerHour, recommendedIndex);
 
       const soldPrograms = [...new Set(options.flatMap(o => o.programs))];
       const library = await loadEligibleLibrary(soldPrograms);
@@ -407,6 +424,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         {
           options: options.map(o => `${o.label} (${o.program_hours}h)`),
           rate: dollarPerHour,
+          recommended: recommendedOptionId,
           has_research: !!researchData,
           has_previous_roadmap: !!previousRoadmap,
           transcript_count: context.primary_meetings.length,
@@ -428,8 +446,12 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         metadata: { deliverable_id: deliverableId },
         ...(researchData && { research: researchData }),
         transcripts: context.primary_meetings.map(m => m.transcript),
-        hourly_rate: dollarPerHour!,
+        hourly_rate: dollarPerHour,
         roadmap_options: options,
+        // The strategist picks; Master Marketer writes the rationale for that choice
+        // rather than making it. Removes the one hallucination that leaves the
+        // downstream-consumer fallback chain with nowhere to go.
+        ...(recommendedOptionId && { recommended_option_id: recommendedOptionId }),
         program_matrix: PROGRAM_MATRIX,
         process_library_hours: library,
         ...(previousRoadmap && { previous_roadmap: previousRoadmap }),

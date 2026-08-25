@@ -563,7 +563,9 @@ router.post(
       researchInputs: research_inputs,
       previousRoadmapId: previous_roadmap_id,
       pointsBudget: points_budget,
-      roadmapOptions: roadmap_options,
+      // The frontend posts { options, hours_model, recommended_option_index } at the top
+      // level; older callers send roadmap_options. Both are normalised in the processor.
+      roadmapRequest: (req.body?.options ? req.body : { options: roadmap_options }) as unknown,
       seedTopics: seed_topics,
       maxCrawlPages: max_crawl_pages,
       targetSegments: target_segments,

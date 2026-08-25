@@ -284,17 +284,45 @@ export function maxCategoriesForMonth(tier: Tier, programHours: number): number 
 }
 
 /**
+ * What class of GOAL a tier may commit to.
+ *
+ * Named `goal_` deliberately. An earlier `commitment_ladder` was read by the frontend as
+ * the contract commitment vocabulary and rendered in that picker, which would have offered
+ * a strategist "output / leading_indicator / business_outcome" where they expected
+ * "monthly / annual". Contract commitment is COMMITMENT_TERMS below.
+ */
+
+/**
  * What a tier may commit to.
  *
  * Without this, "scale the goals to the tier" produces the same MQL goal at three
  * different numbers — three prices for one promise, which is the failure the option
  * structure exists to prevent. Constraining the CLASS of commitment makes it checkable.
  */
-export const COMMITMENT_LADDER: Record<Tier, string[]> = {
+export const GOAL_COMMITMENT_LADDER: Record<Tier, string[]> = {
   execute: ['output'],
   perform: ['output', 'leading_indicator'],
   grow:    ['output', 'leading_indicator', 'business_outcome'],
 };
+
+/**
+ * Contract commitment terms — how long the client is committing for.
+ *
+ * Entirely unrelated to the goal commitment ladder above. This drives the term and renewal
+ * framing in the roadmap narrative; it does not affect capacity, tier, or any flag.
+ */
+export const COMMITMENT_TERMS = [
+  { value: 'monthly', label: 'Month to month' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'semiannual', label: '6 months' },
+  { value: 'annual', label: 'Annual' },
+] as const;
+
+export type CommitmentTerm = (typeof COMMITMENT_TERMS)[number]['value'];
+
+export function isCommitmentTerm(v: string): v is CommitmentTerm {
+  return COMMITMENT_TERMS.some((t) => t.value === v);
+}
 
 /** Everything the frontend needs, in one payload. */
 export function roadmapModelConfig() {
@@ -309,7 +337,8 @@ export function roadmapModelConfig() {
     category_rollup: CATEGORY_ROLLUP,
     overhead_category: OVERHEAD_CATEGORY,
     non_hour_categories: [...NON_HOUR_CATEGORIES],
-    commitment_ladder: COMMITMENT_LADDER,
+    goal_commitment_ladder: GOAL_COMMITMENT_LADDER,
+    commitment_terms: COMMITMENT_TERMS,
     flag_codes: FLAG_CODES,
     cross_option_flags: CROSS_OPTION_FLAGS,
     baseline_flags: BASELINE_FLAGS,

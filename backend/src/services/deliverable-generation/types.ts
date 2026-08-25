@@ -60,7 +60,13 @@ export interface DeliverableSubmission {
     hours_available: number;
     overhead_hours: number;
     program_hours: number;
+    term_months?: number;
+    commitment?: string;
+    notes?: string;
+    recommended?: boolean;
   }>;
+  /** Program roadmap: the strategist's recommended option; MM writes its rationale */
+  recommended_option_id?: string;
   /** Program roadmap: category eligibility per program, enforced per option by MM */
   program_matrix?: Record<string, string[]>;
   /** Program roadmap: library items, union of all options' eligible categories */
@@ -134,6 +140,25 @@ export interface DeliverableContext {
 // ============================================================================
 
 /** Request body for POST /deliverables/:id/generate */
+export interface ProgramRoadmapOptionInput {
+  option_id?: string;
+  /** `name` is the frontend spelling of `label`. */
+  label?: string;
+  name?: string;
+  tier: 'execute' | 'perform' | 'grow';
+  programs: Array<'authority' | 'reach' | 'pursuit'>;
+  /** Capacity hours. Preferred over monthly_budget now that tier bands are hours. */
+  monthly_hours?: number;
+  monthly_budget?: number;
+  /** technologies.technology_id values, pre-filtered to active + client-billable. */
+  technology_ids?: string[];
+  /** Proposed contract length. Narrative only. */
+  term_months?: number;
+  /** Contract commitment term from COMMITMENT_TERMS -- NOT the goal commitment ladder. */
+  commitment?: string;
+  notes?: string;
+}
+
 export interface GenerateDeliverableRequest {
   instructions?: string;
   primary_meeting_ids?: string[];
@@ -144,18 +169,18 @@ export interface GenerateDeliverableRequest {
   points_budget?: number;
   /**
    * Program roadmap: 1-3 priced options the client chooses between. Each is a complete
-   * scenario; they are alternatives and are never summed. The blended rate is not an
-   * option field -- it comes from contracts.dollar_per_hour and is the same for all.
+   * scenario; they are alternatives and are never summed.
+   *
+   * The frontend posts these at the top level as `options`, alongside
+   * `hours_model.hourly_rate` and `recommended_option_index`; `roadmap_options` is the
+   * older spelling. Both are accepted and normalised. The posted rate is ignored --
+   * contracts.dollar_per_hour is the authority.
    */
-  roadmap_options?: Array<{
-    option_id?: string;
-    label?: string;
-    tier: 'execute' | 'perform' | 'grow';
-    programs: Array<'authority' | 'reach' | 'pursuit'>;
-    monthly_budget: number;
-    /** Selections from the Pulse tech stack catalog, priced at client price. */
-    technology_ids?: string[];
-  }>;
+  options?: Array<ProgramRoadmapOptionInput>;
+  roadmap_options?: Array<ProgramRoadmapOptionInput>;
+  hours_model?: { hourly_rate?: number };
+  /** 0-based index into `options`, resolved to recommended_option_id by the backend. */
+  recommended_option_index?: number;
   /** SEO audit: topic seeds for crawl prioritization */
   seed_topics?: string[];
   /** SEO audit: max pages to crawl per domain */

@@ -11,10 +11,12 @@
 
 import { select } from '../../utils/edge-functions.js';
 import {
+  COMMITMENT_TERMS,
   OVERHEAD_HOURS,
   PROGRAM_MATRIX,
   TIER_BANDS,
   capacityHours,
+  isCommitmentTerm,
   rollUpCategory,
   tierForCapacity,
   type Program,
@@ -29,15 +31,96 @@ const STAGE_LABEL: Record<string, string> = {
   analysis: 'Analysis',
 };
 
-/** What the generation form sends, one per option. */
+/**
+ * What the generation form sends, one per option.
+ *
+ * The form posts capacity HOURS rather than a fee, which is the right way round now that
+ * tier bands are hours: the strategist picks the capacity and the fee falls out of the
+ * contract rate. `monthly_budget` is still accepted for callers that price in dollars.
+ *
+ * Field names are tolerant because the frontend settled on its own before this contract
+ * was final, and rejecting a whole generation over `name` versus `label` helps nobody.
+ * What is NOT tolerated is a missing `programs`: the eligibility filter, the allocation map
+ * and the content-share flag all read it, and there is nothing sensible to infer it from.
+ */
 export interface RoadmapOptionInput {
   option_id?: string;
+  /** `name` is the frontend's spelling. */
   label?: string;
+  name?: string;
   tier: Tier;
   programs: Program[];
-  monthly_budget: number;
-  /** Catalog selections from the Pulse tech stack. */
+  /** Capacity hours. Preferred. */
+  monthly_hours?: number;
+  /** Service fee. Used when monthly_hours is absent. */
+  monthly_budget?: number;
+  /** Catalog selections from the Pulse tech stack, already filtered to billable + active. */
   technology_ids?: string[];
+  /** Proposed contract length in months. Narrative only — affects no capacity or flag. */
+  term_months?: number;
+  /** Contract commitment term. Closed vocabulary, see COMMITMENT_TERMS. */
+  commitment?: string;
+  /** Free text from the strategist, carried into generation context. */
+  notes?: string;
+}
+
+/**
+ * Normalise one option from whatever the caller sent.
+ *
+ * `growth` is accepted as an alias for `grow`. The config endpoint publishes `grow`, but
+ * failing a six-call generation over an obvious synonym is not a useful kind of strict.
+ */
+export function normalizeOptionInput(
+  raw: Record<string, unknown>,
+  dollarPerHour: number
+): RoadmapOptionInput {
+  const tierRaw = String(raw.tier ?? '').trim().toLowerCase();
+  const tier = (tierRaw === 'growth' ? 'grow' : tierRaw) as Tier;
+
+  const monthlyHours = typeof raw.monthly_hours === 'number' ? raw.monthly_hours : undefined;
+  const monthlyBudget =
+    typeof raw.monthly_budget === 'number'
+      ? raw.monthly_budget
+      : monthlyHours !== undefined
+        ? Math.round(monthlyHours * dollarPerHour * 100) / 100
+        : undefined;
+
+  return {
+    option_id: raw.option_id as string | undefined,
+    label: (raw.label ?? raw.name) as string | undefined,
+    tier,
+    programs: (raw.programs ?? []) as Program[],
+    monthly_hours: monthlyHours,
+    monthly_budget: monthlyBudget,
+    technology_ids: (raw.technology_ids ?? []) as string[],
+    term_months: raw.term_months as number | undefined,
+    commitment: raw.commitment as string | undefined,
+    notes: raw.notes as string | undefined,
+  };
+}
+
+/**
+ * Accept either the frontend envelope or a bare option array.
+ *
+ * The form posts `{ options: [...], hours_model: { hourly_rate }, recommended_option_index }`.
+ * The rate on the envelope is ignored: contracts.dollar_per_hour is the authority, and two
+ * sources for one number is how a signed roadmap ends up quoting a rate nobody set.
+ */
+export function normalizeOptionsRequest(
+  body: unknown,
+  dollarPerHour: number
+): { options: RoadmapOptionInput[]; recommendedIndex: number | null; postedRate: number | null } {
+  const raw = (body ?? {}) as Record<string, unknown>;
+  const list = (raw.options ?? raw.roadmap_options ?? (Array.isArray(raw) ? raw : [])) as Array<Record<string, unknown>>;
+  const hoursModel = (raw.hours_model ?? {}) as Record<string, unknown>;
+  const postedRate = typeof hoursModel.hourly_rate === 'number' ? hoursModel.hourly_rate : null;
+  const idx = raw.recommended_option_index;
+
+  return {
+    options: (list || []).map((o) => normalizeOptionInput(o, dollarPerHour)),
+    recommendedIndex: typeof idx === 'number' ? idx : null,
+    postedRate,
+  };
 }
 
 /** What goes into the submission payload, one per option. */
@@ -54,6 +137,12 @@ export interface ResolvedRoadmapOption {
   hours_available: number;
   overhead_hours: number;
   program_hours: number;
+  /** Echoed straight back so the editor and markdown export can show them. */
+  term_months?: number;
+  commitment?: string;
+  notes?: string;
+  /** Set from the form's recommended_option_index; MM writes the rationale for it. */
+  recommended?: boolean;
 }
 
 export interface TechnologyResolution {
@@ -151,21 +240,37 @@ export function validateOptions(
       return;
     }
     if (!opt.monthly_budget || opt.monthly_budget <= 0) {
-      errors.push(`${where}: a monthly budget is required.`);
+      errors.push(`${where}: monthly_hours (or monthly_budget) is required.`);
       return;
     }
 
-    const capacity = capacityHours(opt.monthly_budget, dollarPerHour);
+    // Nothing can stand in for this. The eligibility filter, the allocation map and the
+    // content-share flag all read it, and tier gives only the count, never which.
+    if (!opt.programs?.length) {
+      errors.push(
+        `${where}: programs are required — ${TIER_BANDS[opt.tier]?.programs ?? 1} of ` +
+        `authority, reach, pursuit.`
+      );
+    }
+
+    if (opt.commitment && !isCommitmentTerm(opt.commitment)) {
+      errors.push(
+        `${where}: unknown commitment "${opt.commitment}". ` +
+        `Expected one of ${COMMITMENT_TERMS.map((t) => t.value).join(', ')}.`
+      );
+    }
+
+    const capacity = capacityHours(opt.monthly_budget!, dollarPerHour);
     const actualTier = tierForCapacity(capacity);
 
     if (actualTier === null) {
       errors.push(
-        `${where}: $${opt.monthly_budget.toLocaleString()} at $${dollarPerHour}/hr is ` +
+        `${where}: $${opt.monthly_budget!.toLocaleString()} at $${dollarPerHour}/hr is ` +
         `${capacity.toFixed(1)} hours — below Execute's floor of ${TIER_BANDS.execute.minCapacityHours}.`
       );
     } else if (actualTier !== opt.tier) {
       errors.push(
-        `${where}: $${opt.monthly_budget.toLocaleString()} at $${dollarPerHour}/hr is ` +
+        `${where}: $${opt.monthly_budget!.toLocaleString()} at $${dollarPerHour}/hr is ` +
         `${capacity.toFixed(1)} hours, which is ${actualTier}, not ${opt.tier}.`
       );
     }
@@ -394,8 +499,13 @@ function programAllocation(programs: Program[]): Record<string, Program> {
 export async function buildOptions(
   contractId: string,
   inputs: RoadmapOptionInput[],
-  dollarPerHour: number
-): Promise<{ options: ResolvedRoadmapOption[]; technology: Record<string, TechnologyResolution> }> {
+  dollarPerHour: number,
+  recommendedIndex: number | null = null
+): Promise<{
+  options: ResolvedRoadmapOption[];
+  technology: Record<string, TechnologyResolution>;
+  recommendedOptionId: string | null;
+}> {
   const options: ResolvedRoadmapOption[] = [];
   const technology: Record<string, TechnologyResolution> = {};
 
@@ -404,7 +514,7 @@ export async function buildOptions(
     const tech = await resolveTechnology(contractId, input.technology_ids || []);
     technology[optionId] = tech;
 
-    const capacity = capacityHours(input.monthly_budget, dollarPerHour);
+    const capacity = capacityHours(input.monthly_budget!, dollarPerHour);
 
     options.push({
       option_id: optionId,
@@ -412,16 +522,19 @@ export async function buildOptions(
       tier: input.tier,
       programs: input.programs,
       program_allocation: programAllocation(input.programs),
-      monthly_budget: input.monthly_budget,
+      monthly_budget: input.monthly_budget!,
       technology_monthly: tech.monthly,
       technology_one_time: tech.one_time,
-      total_monthly: Math.round((input.monthly_budget + tech.monthly) * 100) / 100,
+      total_monthly: Math.round((input.monthly_budget! + tech.monthly) * 100) / 100,
       hours_available: Math.round(capacity * 100) / 100,
       overhead_hours: OVERHEAD_HOURS,
       program_hours: Math.round((capacity - OVERHEAD_HOURS) * 100) / 100,
+      ...(input.term_months !== undefined && { term_months: input.term_months }),
+      ...(input.commitment !== undefined && { commitment: input.commitment }),
+      ...(input.notes !== undefined && { notes: input.notes }),
+      // Resolved from the form's index before the sort below reorders anything.
+      recommended: recommendedIndex === i,
     });
-
-    void i;
   }
 
   // Ascending tier order. Options generated blind to each other read as three unrelated
@@ -430,7 +543,11 @@ export async function buildOptions(
   const rank: Record<Tier, number> = { execute: 0, perform: 1, grow: 2 };
   options.sort((a, b) => rank[a.tier] - rank[b.tier] || a.monthly_budget - b.monthly_budget);
 
-  return { options, technology };
+  // Resolved before the sort, so an index into the form's order still points at the right
+  // option after reordering.
+  const recommendedOptionId = options.find((o) => o.recommended)?.option_id ?? null;
+
+  return { options, technology, recommendedOptionId };
 }
 
 function titleCase(s: string): string {

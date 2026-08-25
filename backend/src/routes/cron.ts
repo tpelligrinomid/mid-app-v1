@@ -699,8 +699,11 @@ router.post('/clickup-service-category', verifyCronSecret, async (req: Request, 
 // Library space instead of contract Deliverables lists. The hours/program roadmap
 // filters the library by service category, so every menu item needs one.
 //
-// Writes to ClickUp and never overwrites an existing value. Run with ?dryRun=1
-// first and read the proposals.
+// Writes to ClickUp. By default it only fills empty values. The Execution and
+// Assets lists arrived stamped `Strategy` wholesale from a task template, so the
+// default pass would skip almost everything -- use ?audit=1 to see how bad it is
+// (read-only), then ?overwrite=1 to correct only where the model disagrees.
+// Run with ?dryRun=1 first and read the proposals.
 //
 // If `lists_without_field` comes back equal to the number of lists and
 // lists_scanned is 0, the Process Library space has no "Service Category"
@@ -730,10 +733,15 @@ router.post('/process-library-service-category', verifyCronSecret, async (req: R
 
     const maxWrites = req.query.maxWrites ? Number(req.query.maxWrites) : undefined;
     const model = (req.query.model as string) || undefined;
+    const audit = req.query.audit === '1' || req.query.audit === 'true';
+    const overwrite = req.query.overwrite === '1' || req.query.overwrite === 'true';
 
-    console.log(`[Cron] Process library category classification starting (dryRun=${dryRun})`);
+    console.log(
+      `[Cron] Process library category classification starting ` +
+      `(dryRun=${dryRun} audit=${audit} overwrite=${overwrite})`
+    );
 
-    const result = await classifyProcessLibrary({ dryRun, maxWrites, model });
+    const result = await classifyProcessLibrary({ dryRun, maxWrites, model, audit, overwrite });
     const durationMs = Date.now() - startTime;
 
     if (result.lists_scanned === 0 && result.lists_without_field > 0) {

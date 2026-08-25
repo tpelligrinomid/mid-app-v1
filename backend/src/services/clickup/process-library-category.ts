@@ -9,7 +9,7 @@
  * so the two paths cannot drift into disagreeing about what a category means.
  *
  * THIS WRITES TO CLICKUP, and carries the same rules as the contract backfill:
- *   - a task that already has a value is NEVER touched
+ *   - a task that already has a value is never touched, EXCEPT under overwrite
  *   - candidate state is read from ClickUp, not the local table
  *   - dry-run reports every proposed category without writing
  *
@@ -37,6 +37,7 @@ import {
   WRITE_THROTTLE_MS,
   classifyBatch,
   needsCategory,
+  readExistingLabel,
   resolveServiceCategoryField,
   sleep,
   type ClickUpTaskLite,
@@ -56,6 +57,12 @@ export interface ProcessLibraryCategoryResult {
   candidates: number;
   classified: number;
   written: number;
+  audit_mode: boolean;
+  overwrite_mode: boolean;
+  /** Valued items where the model agreed with what ClickUp already held. */
+  audit_agree: number;
+  /** Valued items where it disagreed. Written only in overwrite mode. */
+  audit_disagree: number;
   /** Local compass_process_library rows updated to match what ClickUp now holds. */
   rows_updated: number;
   remaining: number;
@@ -67,6 +74,7 @@ export interface ProcessLibraryCategoryResult {
     list: string;
     proposed_category: string;
     written: boolean;
+    existing_category?: string;
   }>;
   errors: Array<{ context: string; error: string }>;
 }
@@ -108,8 +116,30 @@ export async function classifyProcessLibrary(options: {
   maxWrites?: number;
   /** Override the classifier model for a comparison run. Ignored if unrecognised. */
   model?: string;
+  /**
+   * Audit mode: also classify items that ALREADY carry a category and report where
+   * the model disagrees. Never writes -- it forces dryRun, because the whole point
+   * is to inspect values the normal path deliberately leaves alone.
+   */
+  audit?: boolean;
+  /**
+   * Overwrite mode: audit, but write the corrected value where the model disagrees.
+   * Agreements are never rewritten, so this only touches values it considers wrong.
+   *
+   * The contract-side equivalent carries a warning that it cannot tell a human
+   * correction from a machine default. Here the evidence is cleaner: the Execution
+   * and Assets lists arrived stamped `Strategy` wholesale -- "Develop animated
+   * video" and "Create & send newsletter" are not Strategy under any reading of the
+   * taxonomy, and a person tagging them one at a time would not have produced that.
+   * The library is also ~139 rows, so a dry run is small enough to read end to end
+   * before committing. Do that first.
+   */
+  overwrite?: boolean;
 } = {}): Promise<ProcessLibraryCategoryResult> {
-  const dryRun = options.dryRun ?? false;
+  const overwrite = options.overwrite ?? false;
+  const audit = overwrite ? true : (options.audit ?? false);
+  // Audit alone is always read-only; overwrite honours dryRun like a normal run.
+  const dryRun = audit && !overwrite ? true : (options.dryRun ?? false);
   const maxWrites = options.maxWrites ?? 200;
   const model =
     options.model && ALLOWED_MODELS.has(options.model) ? options.model : CLASSIFIER_MODEL;
@@ -117,6 +147,10 @@ export async function classifyProcessLibrary(options: {
   const result: ProcessLibraryCategoryResult = {
     dry_run: dryRun,
     model,
+    audit_mode: audit,
+    overwrite_mode: overwrite,
+    audit_agree: 0,
+    audit_disagree: 0,
     lists_scanned: 0,
     lists_without_field: 0,
     tasks_seen: 0,
@@ -182,7 +216,11 @@ export async function classifyProcessLibrary(options: {
         const menuItems = tasks.filter(isMenuItem);
         result.tasks_seen += menuItems.length;
 
-        const candidates = menuItems.filter((task) => needsCategory(task, resolved.fieldId));
+        // Audit and overwrite deliberately reconsider items that already carry a
+        // value; the normal path only fills empties.
+        const candidates = audit
+          ? menuItems
+          : menuItems.filter((task) => needsCategory(task, resolved.fieldId));
         result.candidates += candidates.length;
 
         // Budget is spent on CLASSIFICATION, not just writes -- the model call is
@@ -238,6 +276,39 @@ export async function classifyProcessLibrary(options: {
               continue;
             }
 
+            const existing = readExistingLabel(task, resolved);
+
+            if (existing) {
+              if (existing.toUpperCase() === label.toUpperCase()) {
+                result.audit_agree++;
+                result.proposals.push({
+                  task_id: task.id,
+                  name: task.name,
+                  list: list.name,
+                  proposed_category: label,
+                  existing_category: existing,
+                  written: false,
+                });
+                continue;
+              }
+
+              result.audit_disagree++;
+
+              // Audit reports the disagreement and stops there. Only overwrite
+              // replaces a value that is already set.
+              if (!overwrite) {
+                result.proposals.push({
+                  task_id: task.id,
+                  name: task.name,
+                  list: list.name,
+                  proposed_category: label,
+                  existing_category: existing,
+                  written: false,
+                });
+                continue;
+              }
+            }
+
             let written = false;
             if (!dryRun) {
               try {
@@ -270,6 +341,7 @@ export async function classifyProcessLibrary(options: {
               name: task.name,
               list: list.name,
               proposed_category: label,
+              ...(existing ? { existing_category: existing } : {}),
               written,
             });
           }
@@ -285,6 +357,7 @@ export async function classifyProcessLibrary(options: {
     `[Process Library Categories] ${result.candidates} candidates, ` +
     `${result.classified} classified, ${result.written} written, ` +
     `${result.rows_updated} rows updated, ${result.remaining} remaining, ` +
+    (audit ? `agree=${result.audit_agree} disagree=${result.audit_disagree}, ` : '') +
     `${result.lists_without_field} lists without the field, ${result.errors.length} errors`
   );
 

@@ -1,3 +1,5 @@
+> **SUPERSEDED by `program-roadmap-spec.md` v5.** Kept for history only; do not build from this.
+
 # Addendum 2 for Master Marketer — overhead reverses, and your three corrections
 
 Reply to `program-roadmap-review-response-v3.md`.

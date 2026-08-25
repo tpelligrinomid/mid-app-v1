@@ -1,3 +1,5 @@
+> **SUPERSEDED by `program-roadmap-spec.md` v5.** Kept for history only; do not build from this.
+
 # Addendum for Master Marketer — what changed after your v2 review
 
 All four of your asks are in. Two of them changed shape slightly, and **one thing changed

@@ -1,3 +1,5 @@
+> **SUPERSEDED by `program-roadmap-spec.md` v5.** Kept for history only; do not build from this.
+
 # Program roadmap form — three changes
 
 The backend now accepts your payload as posted (`options`, `name`, `monthly_hours`,

@@ -199,7 +199,7 @@ export const FLAG_CODES = {
   row_below_baseline: {
     description: 'Row scheduled at less than half its library baseline with no reason given',
     threshold: 0.5,
-    scope: 'month' as const,
+    scope: 'row' as const,
   },
   month_thin_spread: {
     description: 'More active categories than the month has hours to serve properly',
@@ -229,7 +229,7 @@ export const FLAG_CODES = {
   row_above_baseline: {
     description: 'Row scheduled at more than twice its library baseline with no reason given',
     threshold: 2,
-    scope: 'month' as const,
+    scope: 'row' as const,
   },
   overhead_under_reserved: {
     description: 'Strategy and account management across the plan falls short of the expectation',
@@ -243,10 +243,22 @@ export const FLAG_CODES = {
      * 9.8 would fire on every correctly composed steady month -- which is how a flag column
      * gets ignored.
      *
-     * Fires below 60% of `OVERHEAD_HOURS × months`, so genuine under-service still shows
-     * while normal lumpiness does not.
+     * Threshold is 45% of `OVERHEAD_HOURS × months`, not 60%, and the reason is a gap in
+     * the library rather than a tuning preference.
+     *
+     * `Facilitate Client Meetings` at 5h/month is the ONLY recurring coordination item that
+     * exists, so a quarter with no planning work totals 15.0 against an expectation of 29.4.
+     * At 60% that fires on every correctly composed steady-state option, which would make
+     * the flag really a test of "did month one include a plan document".
+     *
+     * 45% (13.2 across a quarter) lets steady state pass with room, while genuinely thin
+     * coordination -- 10 hours a quarter on a 32-hour engagement -- still shows.
+     *
+     * The real fix is authoring recurring strategy items into the library: the observed
+     * 12.6 points/month of overhead came from accounts doing more coordination than
+     * `Facilitate Client Meetings` alone can express.
      */
-    threshold: 0.6,
+    threshold: 0.45,
     scope: 'plan' as const,
   },
   month_under_capacity: {
@@ -275,7 +287,9 @@ export const FLAG_CODES = {
      */
     computed_from: 'service_category',
     ranges: { authority: [0.35, 0.65], reach: [0, 0.45], pursuit: [0, 0.40] } as Record<Program, [number, number]>,
-    scope: 'month' as const,
+    // Option scope: month one is mostly plan document and setup, so its content share is
+    // meaningless in isolation. The pattern only reads across the plan.
+    scope: 'option' as const,
   },
   ramp_month: {
     description: 'Month one carrying heavy setup; roughly half a steady-state month of production',
@@ -309,6 +323,7 @@ export interface RoadmapFlag {
   /**
    * Where the flag attaches. Three levels, because three different things go wrong:
    *
+   *   row      -- this row is priced wrong; rendered inline on the row itself
    *   month    -- this month is composed badly
    *   option   -- this option is composed badly across its whole plan
    *   document -- these options disagree with each other
@@ -316,10 +331,19 @@ export interface RoadmapFlag {
    * `overhead_under_reserved` is option-level: overhead is lumpy month to month, so it is
    * only meaningful summed across the plan.
    */
-  scope: 'month' | 'option' | 'document';
+  scope: 'row' | 'month' | 'option' | 'document';
   /** Set on document-scope flags so the viewer can highlight both sides of a comparison. */
   option_ids?: string[];
 }
+
+/**
+ * Flags that attach to a single task row.
+ *
+ * The frontend renders these inline on the offending row, which is where they matter most --
+ * `row_below_baseline` is the flag most likely to appear right after a strategist edits a
+ * row, and a month-level flag cannot point at which one.
+ */
+export const ROW_LEVEL_FLAGS: FlagCode[] = ['row_below_baseline', 'row_above_baseline'];
 
 /** Flags that compare options against each other, and so attach to the document. */
 export const CROSS_OPTION_FLAGS: FlagCode[] = ['goal_target_not_monotonic'];
@@ -328,6 +352,7 @@ export const CROSS_OPTION_FLAGS: FlagCode[] = ['goal_target_not_monotonic'];
 export const OPTION_LEVEL_FLAGS: FlagCode[] = [
   'overhead_under_reserved',
   'goal_commitment_mismatch',
+  'content_share_off_pattern',
 ];
 
 /**
@@ -419,6 +444,7 @@ export function roadmapModelConfig() {
     goal_commitment_ladder: GOAL_COMMITMENT_LADDER,
     commitment_terms: COMMITMENT_TERMS,
     flag_codes: FLAG_CODES,
+    row_level_flags: ROW_LEVEL_FLAGS,
     cross_option_flags: CROSS_OPTION_FLAGS,
     option_level_flags: OPTION_LEVEL_FLAGS,
     baseline_flags: BASELINE_FLAGS,

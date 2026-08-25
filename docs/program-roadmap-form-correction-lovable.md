@@ -1,3 +1,5 @@
+> **SUPERSEDED by `program-roadmap-spec.md` v5.** Kept for history only; do not build from this.
+
 # Program roadmap form — one correction, and two flag changes
 
 All three changes landed correctly. **One thing I told you in the last prompt has since

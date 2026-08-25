@@ -79,36 +79,10 @@ on approval, so downstream reporting knows what was sold.
 populated, rolled up from subtasks to match ClickUp's displayed total).
 `service_category` is already synced and classified.
 
-One field is missing:
-
-```sql
-ALTER TABLE compass_process_library
-  ADD COLUMN IF NOT EXISTS work_type text;   -- 'deliverable' | 'ongoing'
-```
-
-**This is not a cadence field, and the distinction matters.** How often something is
-scheduled is a per-roadmap decision — "Manage social" might run three months and stop;
-"Develop web page" might run every month for a client doing a lot of pages. Scheduling is
-simply which months a row appears in, and needs no field at all.
-
-What *is* stable is whether an item produces a discrete artifact:
-
-| `work_type` | Meaning | Examples |
-|---|---|---|
-| `deliverable` | Produces a discrete artifact each time it runs | Develop SEO blog post, Develop image ad creative package |
-| `ongoing` | Continuous management, no discrete artifact | Manage ABM, Manage paid media, Manage performance reporting |
-
-`Manage ABM` produces no artifact whether it runs once or twelve times, so the property
-holds regardless of schedule. This is what the "maintained, not delivered" guardrail
-depends on.
-
-Setup items (`Set up paid media`, `Set up SEO`) are `deliverable` — standing a system up
-is a discrete piece of work with an end state. They land in month 1 because the generator
-schedules them there, not because a field says so.
-
-**Source it from a ClickUp dropdown**, same pattern as Service Category, and populate it
-with a classifier pass over the 85 items rather than by hand — the infrastructure in
-`process-library-category.ts` already does exactly this shape of job.
+**No new field is needed.** Everything in the process library is a deliverable —
+`Manage ABM` produces notes and a record of work the same as `Develop SEO blog post`
+produces an article. There is no ongoing-versus-artifact split to encode, and scheduling
+is simply which months a row appears in.
 
 ### Roadmap rows
 
@@ -122,7 +96,6 @@ Each generated task row carries **both** numbers:
   service_category: string,        // rolled up for display, stored at full granularity
   program: 'authority' | 'reach' | 'pursuit' | 'overhead',
   process_id: string | null,       // null when the strategist added a custom row
-  work_type: 'deliverable' | 'ongoing',
   baseline_hours: number,          // from the library, never overwritten
   hours: number,                   // generated or strategist-edited; what counts
   adjustment_reason: string | null
@@ -193,7 +166,8 @@ real rather than advisory.
 
 | Flag | Threshold | Why |
 |---|---|---|
-| **Category maintained, not delivered** | A category whose rows that month are all `work_type: ongoing` | The direct guard against three categories at an hour each. A 1-hour `Manage performance reporting` line is fine when something in that category ships; three ongoing lines and no deliverable means the month produces nothing. Reads work type, not schedule, so it is unaffected by how often anything runs. |
+| **Row scheduled well below its baseline** | `hours < baseline_hours × 0.5` and `adjustment_reason` is null | The direct guard against "one hour each". `Develop SEO blog post` at 1 hour against a 5.08-hour baseline will not produce the deliverable. Soft, because a shorter piece legitimately takes less — writing the reason answers the flag. Uses only what the library already knows, so it needs no new taxonomy. |
+| **Month spread too thin** | Active categories > `program_hours / 6` | Catches the case the tier gate cannot: nine categories at 2.4 hours each inside a single program. Six hours is roughly the smallest library item that produces something substantial. |
 | Overhead under-reserved | Strategy + AM < 9.8 hrs/month | Coordination is being borrowed against |
 | Month under capacity | Allocated < 85% of available | Unspent capacity accrues as rollover |
 | Breadth exceeds archetype | Active categories > tier's shape (see below) | Spread, not focus |
@@ -213,24 +187,24 @@ At Execute, generate from a named shape rather than composing freely:
 
 **Execute / Authority** — the client needs content produced
 
-| Task | Work type | Hours |
-|---|---|---|
-| Manage content | ongoing | 0.75 |
-| Manage SEO | ongoing | 5.00 |
-| Manage performance reporting | ongoing | 1.00 |
-| Develop SEO blog post × 2 | deliverable | 10.16 |
-| Optimize existing SEO article | deliverable | 4.58 |
-| | | **21.49** |
+| Task | Hours |
+|---|---|
+| Manage content | 0.75 |
+| Manage SEO | 5.00 |
+| Manage performance reporting | 1.00 |
+| Develop SEO blog post × 2 | 10.16 |
+| Optimize existing SEO article | 4.58 |
+| | **21.49** |
 
 **Execute / Reach** — the client already has content and needs paid run
 
-| Task | Work type | Hours |
-|---|---|---|
-| Manage paid media | ongoing | 4.00 |
-| Manage performance reporting | ongoing | 1.00 |
-| Develop Google Ads text ad creative package | deliverable | 5.33 |
-| Develop image ad creative package | deliverable | 9.83 |
-| | | **20.16** |
+| Task | Hours |
+|---|---|
+| Manage paid media | 4.00 |
+| Manage performance reporting | 1.00 |
+| Develop Google Ads text ad creative package | 5.33 |
+| Develop image ad creative package | 9.83 |
+| | **20.16** |
 
 Perform (38.2 hrs) composes more freely within its two programs. Grow (86.2 hrs) can run
 full breadth.
@@ -266,13 +240,12 @@ tier?: 'execute' | 'perform' | 'grow';
 programs?: Array<'authority' | 'reach' | 'pursuit'>;
 /** Program roadmap: reserved monthly hours for strategy + account management */
 overhead_hours?: number;
-/** Program roadmap: library items with hours and work type, filtered to eligible categories */
+/** Program roadmap: library items with baseline hours, filtered to eligible categories */
 process_library_hours?: Array<{
   task: string;
   description: string;
   stage: string;
   service_category: string;
-  work_type: 'deliverable' | 'ongoing';
   baseline_hours: number;
 }>;
 ```
@@ -343,16 +316,16 @@ the strategist can see what standard was.
 
 ## Sequencing
 
-1. Add the `Work Type` dropdown in ClickUp; classify the 85 items and let the library
-   sync carry it
-2. Migration: `pricing_model`, `tier`, `programs` on contracts; `work_type` on the library
-3. Eligibility matrix as configuration
-4. `processor.ts` branch + payload assembly
-5. Master Marketer `/api/generate/program-roadmap`
-6. Lovable editing UI
+1. Migration: `pricing_model`, `tier`, `programs` on contracts
+2. Eligibility matrix as configuration
+3. `processor.ts` branch + payload assembly
+4. Master Marketer `/api/generate/program-roadmap`
+5. Lovable editing UI
 
-**Nothing here blocks on the existing book.** `dollar_per_hour` is set per new-model
-contract at creation, not backfilled, so no existing contract is touched at any step.
+**No ClickUp work and no data migration.** The library already carries everything the
+generator needs — hours, service category, description. `dollar_per_hour` is set per
+new-model contract at creation, not backfilled, so no existing contract is touched at any
+step.
 
 ---
 

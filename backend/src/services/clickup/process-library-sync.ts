@@ -29,6 +29,8 @@ interface ProcessSyncResults {
   time_estimates_present: number;
   /** Items whose estimate had to be recovered via a task-detail call. */
   time_estimates_hydrated: number;
+  /** Items whose hours came from summing subtasks rather than their own field. */
+  time_estimates_rolled_up: number;
   /** Items carrying a Service Category value in ClickUp. */
   service_categories_present: number;
   errors: Array<{ context: string; error: string }>;
@@ -90,6 +92,7 @@ export class ProcessLibrarySyncService {
       items_embedded: 0,
       time_estimates_present: 0,
       time_estimates_hydrated: 0,
+      time_estimates_rolled_up: 0,
       service_categories_present: 0,
       errors: [],
     };
@@ -143,7 +146,8 @@ export class ProcessLibrarySyncService {
         `[Process Library Sync] Complete: ${results.items_synced} synced, ` +
         `${results.items_deactivated} deactivated, ${results.items_embedded} embedded, ` +
         `${results.time_estimates_present}/${results.items_synced} with time estimates ` +
-        `(${results.time_estimates_hydrated} hydrated), ` +
+        `(${results.time_estimates_rolled_up} rolled up from subtasks, ` +
+        `${results.time_estimates_hydrated} hydrated), ` +
         `${results.service_categories_present}/${results.items_synced} with service categories, ` +
         `${results.errors.length} errors`
       );
@@ -167,75 +171,135 @@ export class ProcessLibrarySyncService {
     seenClickUpIds: Set<string>,
     results: ProcessSyncResults
   ): Promise<void> {
+    // Every page is collected before anything is computed, because the estimate
+    // rollup below spans the whole list: a menu item on page 0 can own subtasks
+    // that land on page 1, and summing per page would silently undercount it.
+    const allTasks: ClickUpTask[] = [];
     let page = 0;
-    let hasMore = true;
 
-    while (hasMore) {
+    while (page <= 100) {
       const tasks: ClickUpTask[] = await fetchWithRetry(() =>
         this.client.getTasksFromList(list.id, {
           archived: false,
           includeClosed: false,
-          subtasks: false,
+          // Subtasks carry the hours (see rollUpTimeEstimates), so they have to
+          // be fetched even though only parents are ever stored.
+          subtasks: true,
           page,
         })
       );
 
-      if (tasks.length === 0) {
-        hasMore = false;
-        continue;
-      }
+      if (tasks.length === 0) break;
+      allTasks.push(...tasks);
+      page++;
+    }
 
-      // Filter to tasks with MiD Points Menu = true and no parent (parent tasks only)
-      const filteredTasks = tasks.filter(task => {
-        if (task.parent) return false;
-        return this.hasMidPointsMenu(task);
+    if (allTasks.length === 0) return;
+
+    // Filter to tasks with MiD Points Menu = true and no parent (parent tasks only)
+    const filteredTasks = allTasks.filter(task => {
+      if (task.parent) return false;
+      return this.hasMidPointsMenu(task);
+    });
+
+    if (filteredTasks.length === 0) return;
+
+    await this.hydrateTimeEstimates(filteredTasks, results);
+
+    const rolledUp = this.rollUpTimeEstimates(allTasks, filteredTasks);
+
+    const records = filteredTasks.map(task =>
+      this.transformTask(task, folder, list, phase, phase_order, rolledUp.get(task.id) ?? null)
+    );
+
+    const batchSize = 50;
+    for (let i = 0; i < records.length; i += batchSize) {
+      const batch = records.slice(i, i + batchSize);
+      const { error } = await dbProxy.upsert('compass_process_library', batch, {
+        onConflict: 'clickup_task_id',
       });
 
-      // Batch upsert
-      if (filteredTasks.length > 0) {
-        await this.hydrateTimeEstimates(filteredTasks, results);
-
-        const records = filteredTasks.map(task =>
-          this.transformTask(task, folder, list, phase, phase_order)
-        );
-
-        const batchSize = 50;
-        for (let i = 0; i < records.length; i += batchSize) {
-          const batch = records.slice(i, i + batchSize);
-          const { error } = await dbProxy.upsert('compass_process_library', batch, {
-            onConflict: 'clickup_task_id',
-          });
-
-          if (error) {
-            console.error('[Process Library Sync] Batch upsert error:', error);
-            results.errors.push({ context: `upsert:${list.name}`, error: error.message });
-          }
-        }
-
-        // Track seen IDs
-        for (const task of filteredTasks) {
-          seenClickUpIds.add(task.id);
-        }
-
-        results.items_synced += filteredTasks.length;
-        results.service_categories_present += records.filter(r => r.service_category).length;
-
-        // Embed each item
-        for (const task of filteredTasks) {
-          try {
-            await this.embedProcess(task, phase, list.name);
-            results.items_embedded++;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            results.errors.push({ context: `embed:${task.id}`, error: message });
-            console.error(`[Process Library Sync] Embed error for ${task.name}:`, message);
-          }
-        }
+      if (error) {
+        console.error('[Process Library Sync] Batch upsert error:', error);
+        results.errors.push({ context: `upsert:${list.name}`, error: error.message });
       }
-
-      page++;
-      if (page > 100) hasMore = false;
     }
+
+    // Track seen IDs
+    for (const task of filteredTasks) {
+      seenClickUpIds.add(task.id);
+    }
+
+    results.items_synced += filteredTasks.length;
+    results.service_categories_present += records.filter(r => r.service_category).length;
+    results.time_estimates_present += records.filter(r => r.time_estimate_ms).length;
+    results.time_estimates_rolled_up += records.filter(
+      (r, i) => r.time_estimate_ms && !filteredTasks[i].time_estimate
+    ).length;
+
+    // Embed each item
+    for (const task of filteredTasks) {
+      try {
+        await this.embedProcess(task, phase, list.name);
+        results.items_embedded++;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        results.errors.push({ context: `embed:${task.id}`, error: message });
+        console.error(`[Process Library Sync] Embed error for ${task.name}:`, message);
+      }
+    }
+  }
+
+  /**
+   * Sum each menu item's hours up from its subtasks.
+   *
+   * The estimates live on the subtasks, not the menu item. ClickUp's list view
+   * shows a parent's Time estimate as the rolled-up total of everything beneath
+   * it, but the API returns only the task's OWN value -- which for 84 of 85
+   * library items is null. Reading the parent alone therefore reports the library
+   * as having almost no estimates while the UI shows hours on nearly every row.
+   *
+   * Points are the other way round: they sit on the menu item itself, which is
+   * why that mapping never had this problem.
+   *
+   * Nesting is resolved transitively rather than one level deep, so a
+   * sub-subtask's hours still reach the menu item that owns them. A parent's own
+   * estimate is included when set, matching what the UI totals.
+   */
+  private rollUpTimeEstimates(
+    allTasks: ClickUpTask[],
+    menuItems: ClickUpTask[]
+  ): Map<string, number> {
+    const menuItemIds = new Set(menuItems.map(t => t.id));
+    const parentOf = new Map<string, string>();
+    for (const task of allTasks) {
+      if (task.parent) parentOf.set(task.id, task.parent);
+    }
+
+    /** Walk up to the owning menu item, guarding against a cyclic parent chain. */
+    const rootMenuItem = (taskId: string): string | null => {
+      let current: string | undefined = taskId;
+      const seen = new Set<string>();
+      while (current && !seen.has(current)) {
+        if (menuItemIds.has(current)) return current;
+        seen.add(current);
+        current = parentOf.get(current);
+      }
+      return null;
+    };
+
+    const totals = new Map<string, number>();
+    for (const task of allTasks) {
+      const estimate = typeof task.time_estimate === 'number' ? task.time_estimate : 0;
+      if (estimate <= 0) continue;
+
+      const root = rootMenuItem(task.id);
+      if (!root) continue;
+
+      totals.set(root, (totals.get(root) ?? 0) + estimate);
+    }
+
+    return totals;
   }
 
   /**
@@ -278,7 +342,6 @@ export class ProcessLibrarySyncService {
       }
     }
 
-    results.time_estimates_present += tasks.filter(task => task.time_estimate != null).length;
   }
 
   private hasMidPointsMenu(task: ClickUpTask): boolean {
@@ -322,14 +385,16 @@ export class ProcessLibrarySyncService {
     folder: { id: string; name: string },
     list: { id: string; name: string },
     phase: string,
-    phase_order: number
+    phase_order: number,
+    rolledUpEstimateMs: number | null
   ): Record<string, unknown> {
     return {
       clickup_task_id: task.id,
       name: task.name,
       description: this.extractExternalDescription(task),
       points: this.extractPoints(task),
-      time_estimate_ms: task.time_estimate || null,
+      // Rollup already includes the task's own estimate, so it wins outright.
+      time_estimate_ms: rolledUpEstimateMs || task.time_estimate || null,
       service_category: extractServiceCategoryLabel(task),
       phase,
       phase_order,

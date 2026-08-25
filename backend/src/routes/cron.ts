@@ -526,7 +526,9 @@ router.post('/sync-process-library', verifyCronSecret, async (req: Request, res:
         items_deactivated: results.items_deactivated,
         items_embedded: results.items_embedded,
         time_estimates_present: results.time_estimates_present,
+        time_estimates_rolled_up: results.time_estimates_rolled_up,
         time_estimates_hydrated: results.time_estimates_hydrated,
+        service_categories_present: results.service_categories_present,
       },
       errors: results.errors.length > 0 ? results.errors : undefined
     });

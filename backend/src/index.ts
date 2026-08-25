@@ -24,6 +24,7 @@ import chatRouter from './routes/compass/chat.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
 import brandVoiceRouter from './routes/compass/brand-voice.js';
 import taskAnalysisReportRouter from './routes/admin/task-analysis-report.js';
+import programSizingCheckRouter from './routes/admin/program-sizing-check.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -94,6 +95,7 @@ app.use('/api/cron', cronRouter);
 
 // Admin routes (no auth middleware - authenticated via CRON_SECRET header, ad-hoc CSV exports)
 app.use('/api/admin', taskAnalysisReportRouter);
+app.use('/api/admin', programSizingCheckRouter);
 
 // Webhook routes (no auth middleware - authenticated via x-api-key header)
 app.use('/api/webhooks', webhooksRouter);

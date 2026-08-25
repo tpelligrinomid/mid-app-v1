@@ -3,9 +3,27 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
-**v4** — incorporates the Master Marketer and Lovable review responses
-(`program-roadmap-review-response.md`, `-v2.md`, `program-roadmap-review-response-from-lovable.md`)
-and the decisions taken against them.
+**v5 — this document supersedes every addendum and correction note.** Those were a
+mistake: five delta documents across two repos, citing commits neither side could resolve.
+This file is the single current statement. Read it; ignore the rest.
+
+`program-roadmap-addendum-master-marketer.md`, `-addendum-2-`,
+`program-roadmap-form-changes-lovable.md` and `-form-correction-` are **superseded**. The
+review responses stay as history; nothing needs reading from them.
+
+### What changed since v2, for anyone tracking deltas
+
+| Change | Why |
+|---|---|
+| Tier bands are capacity hours, not dollars | The same tier bought 40% different work at different rates |
+| `annual_plan` is the Gantt; `hours_plan` holds rows | They were always separate; v1 merged them |
+| Three months of rows, twelve of Gantt | Matches the points path |
+| Goals carry `commitment_type` | "Scale goals to tier" produced one promise at three prices |
+| **Overhead is IN the plan as rows** | Reversed twice. Final: strategy and AM are billed to tasks like anything else |
+| `recommended_option_id` is an input | The strategist picks; the generator writes the rationale |
+| Execute thin-spread cap is a flat 4 | A `min()` fired on the archetype at the published entry price |
+| Content share computes off `service_category` | Via `program` it fired on almost every correct Perform option |
+| Flags carry `scope` — row/month/option/document | Row flags must render on the row that caused them |
 
 ---
 
@@ -70,12 +88,25 @@ account management rows like any other.** Nothing is injected after generation.
 to, not a subtraction from what may be planned. `program_hours` on an option is **guidance**
 — the non-overhead portion a well-composed month lands near — never a per-month ceiling.
 
+**Planning documents are `Strategy`, and therefore count as overhead.** All thirteen
+`Develop — Plan Document` items carry `Strategy`, and the classifier rule is explicit —
+*"planning documents are always Strategy, whatever domain they plan."* A content plan is
+overhead, not content.
+
 **Overhead is lumpy, so its flag is checked across the plan rather than per month.** The
 library bears this out: the only recurring coordination item is `Facilitate Client Meetings`
 at 5h/month, while planning sits in one-time `Develop … Plan Document` items running 10–45h.
 Month one legitimately carries 20+ hours of strategy where month three carries five. A
 per-month check against 9.8 would fire on every correctly composed steady month, which is how
 a flag column gets ignored.
+
+**The threshold is 45%, and that is a symptom rather than a preference.**
+`Facilitate Client Meetings` at 5h/month is the *only* recurring coordination item in the
+library, so a quarter with no planning work totals 15.0 against an expectation of 29.4. At
+60% the flag fires on every correctly composed steady-state option and is really testing
+*"did month one include a plan document."* The real fix is authoring recurring strategy items
+into the library — the observed 12.6 points/month came from accounts doing more
+coordination than one meeting item can express.
 | Points/hours break-even rate | `$129/hr` | Where hours bill the same as the old $100 point |
 
 **Task hours come from `compass_process_library.time_estimate_ms`, not from 0.78.** The
@@ -630,7 +661,7 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 |---|---|
 | `row_below_baseline` | `hours < baseline_hours × 0.5` with no `adjustment_reason` |
 | `row_above_baseline` | `hours > baseline_hours × 2` with no `adjustment_reason` |
-| `overhead_under_reserved` | strategy + AM across the **plan** below 60% of `overhead_hours × months` |
+| `overhead_under_reserved` | strategy + AM across the **plan** below 45% of `overhead_hours × months` |
 | `month_thin_spread` | active program categories > `tier cap ?? program_hours / 6` — Execute is a flat 4 |
 | `month_under_capacity` | allocated < 85% of available |
 | `content_share_off_pattern` | content **category** share outside the widest bound across the option's programs |
@@ -649,10 +680,23 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 }
 ```
 
-**Three scopes, because three different things go wrong.** `month` — this month is composed
-badly. `option` — this option is wrong across its whole plan, which is where
-`overhead_under_reserved` and `goal_commitment_mismatch` live. `document` — these options
-disagree with each other, which is only `goal_target_not_monotonic`.
+**Four scopes, because four different things go wrong.**
+
+| Scope | Means | Codes |
+|---|---|---|
+| `row` | This row is priced wrong — renders inline on the row | `row_below_baseline`, `row_above_baseline` |
+| `month` | This month is composed badly | `month_thin_spread`, `month_under_capacity`, `ramp_month` |
+| `option` | This option is wrong across its whole plan | `overhead_under_reserved`, `goal_commitment_mismatch`, `content_share_off_pattern` |
+| `document` | These options disagree with each other | `goal_target_not_monotonic` |
+
+`row` exists because `row_below_baseline` is the flag most likely to appear immediately after
+a strategist edits a row, and a month-level flag cannot point at which one.
+
+`content_share_off_pattern` is option-scoped: month one is mostly plan document and setup, so
+its content share is meaningless in isolation.
+
+**The generator emits empty `flags: []` at all four levels** so the backend has somewhere to
+write without mutating the document shape.
 
 Flags never block. Three details the envelope has to carry:
 

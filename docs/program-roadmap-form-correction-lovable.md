@@ -1,6 +1,8 @@
-> **SUPERSEDED by `program-roadmap-spec.md` v5.** Kept for history only; do not build from this.
+# Program roadmap form — current frontend contract
 
-# Program roadmap form — one correction, and two flag changes
+**This is the live document for the form and viewer.** It tracks
+`program-roadmap-spec.md` v6; where they disagree the spec wins, but everything here is
+current as of v6.
 
 All three changes landed correctly. **One thing I told you in the last prompt has since
 changed**, and it affects the per-option display you just built. The cause is a decision
@@ -69,7 +71,7 @@ There are three levels, because three different things go wrong:
   level: 'soft',
   code,
   message,
-  scope: 'month' | 'option' | 'document',
+  scope: 'row' | 'month' | 'option' | 'document',
   severity?: 'review' | 'notice',
   option_ids?: string[],
 }
@@ -77,12 +79,20 @@ There are three levels, because three different things go wrong:
 
 | Scope | Means | Codes |
 |---|---|---|
-| `month` | This month is composed badly | `row_below_baseline`, `row_above_baseline`, `month_thin_spread`, `month_under_capacity`, `content_share_off_pattern`, `ramp_month` |
-| `option` | This option is wrong across its whole plan | `overhead_under_reserved`, `goal_commitment_mismatch` |
+| `row` | This row is priced wrong | `row_below_baseline`, `row_above_baseline` |
+| `month` | This month is composed badly | `month_thin_spread`, `month_under_capacity`, `ramp_month` |
+| `option` | This option is wrong across its whole plan | `overhead_under_reserved`, `goal_commitment_mismatch`, `content_share_off_pattern` |
 | `document` | These options disagree with each other | `goal_target_not_monotonic` |
 
-`config.option_level_flags` and `config.cross_option_flags` list the last two groups, so the
-sets stay readable from the endpoint rather than hardcoded.
+**`row` matters most for the editor.** `row_below_baseline` is the flag most likely to appear
+the instant a strategist edits a row, and a month-level flag cannot point at which row caused
+it. Render these inline on the row itself.
+
+`content_share_off_pattern` moved from month to option scope: month one is mostly plan
+document and setup, so its content share means nothing in isolation.
+
+`config.row_level_flags`, `config.option_level_flags` and `config.cross_option_flags` list the
+groups, so the sets stay readable from the endpoint rather than hardcoded.
 
 `option_ids` appears on `document`-scope flags so you can highlight both sides of a
 comparison.
@@ -106,3 +116,19 @@ them, this should need no change.
 Everything else in your build is correct as described. The read-only rate, the programs
 multi-select with matrix-sourced categories and tier-enforced counts, the Pursuit rules, and
 the `growth` → `grow` normalisation are all exactly right.
+
+---
+
+## What is still ahead of you
+
+The form is nearly done. The larger remaining work is the viewer, in the order you proposed:
+
+1. **Dual-shape adapter** — the largest single item, normalising legacy flat documents and
+   `{shared, options[]}` to one view model
+2. **Viewer option switch** — shared sections hold position and scroll state, plan sections
+   re-key
+3. **Hours editing UI** — `allocated / available` per month, inline flags styled on `code`
+   and `severity`, `baseline_hours` shown quietly beside each edited value
+
+**Overhead rows appear in the plan like any other row** — `program: 'overhead'`, category
+`Strategy & account management`, editable hours. Not a separate block, not injected.

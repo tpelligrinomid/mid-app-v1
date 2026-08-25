@@ -30,18 +30,23 @@ export const HOURS_PER_POINT = 0.78;
 export const OVERHEAD_HOURS = 9.8;
 
 /**
- * Overhead is reserved OUTSIDE the plan, not composed within it.
+ * Overhead is IN the plan, as ordinary rows.
  *
- * The generator allocates against program_hours and never emits a strategy or account
- * management row -- reserving coordination time is not a decision worth a generation call.
- * The backend injects a standard overhead block afterwards, so the client still sees it as
- * its own line: the retainer model's value story depends on that reserve being visible
- * rather than absorbed, and a client looking at 22.2 hours against a $4,000 fee will
- * reasonably ask where the rest went.
+ * Strategy and account management is not a reserve skimmed off the top -- it is work that
+ * gets billed to tasks like everything else. Preparing a plan, standing up a VM, running a
+ * monthly status call: each is a library item with hours against it, and the library
+ * carries them already (`Develop Marketing Roadmap Document`, `Client Onboarding & Kickoff`,
+ * `Facilitate Client Meetings`).
  *
- * This is also why there is no `overhead_under_reserved` flag. Under this split it would
- * fire on every option of every roadmap, and a flag that always fires teaches people to
- * ignore the flag column.
+ * So the generator allocates against the FULL capacity and emits strategy and account
+ * management rows like any other. OVERHEAD_HOURS is the expectation for how much of a month
+ * they should come to, not a subtraction from what may be planned -- which is what makes
+ * `overhead_under_reserved` a real signal: a month with 2 hours of coordination on a
+ * 32-hour engagement is under-serving the account, and that is worth saying.
+ *
+ * `program_hours` on an option is therefore GUIDANCE, not a per-month ceiling. Because
+ * overhead is lumpy, a month-one plan legitimately spends 24 hours on strategy and setup
+ * while month three spends five. The month's real ceiling is the full `hours_available`.
  */
 
 /**
@@ -200,19 +205,22 @@ export const FLAG_CODES = {
     /** ~6 hours is the smallest library item that produces something substantial. */
     hours_per_category: 6,
     /**
-     * An hours-only threshold stops protecting Execute above its floor. At the top of the
-     * band, program_hours / 6 is 6.35 while Authority has only five eligible categories to
-     * spend -- so the guardrail that enforces "Execute is one program run deliberately
-     * narrow" cannot fire exactly where there are ~16 spare hours to spread into.
+     * A FLAT cap where set, not a min() against the hours threshold.
      *
-     * Capping by tier makes narrowness a property of the tier, which is what it is. Only
-     * Execute is capped: Perform composes more freely by design, and a Perform engagement
-     * at 86 program hours across nine eligible categories is ~9.5 hours each, which is
-     * legitimate.
+     * min() only ever tightens. At the Execute floor, program_hours / 6 is 3.7, so a
+     * min(3.7, 4) fires on the four-category Execute / Reach archetype for every engagement
+     * between $4,000 and $4,225 at $125 -- the published entry price and the most common
+     * Execute engagement. The cap was added to stop the guard evaporating at the TOP of the
+     * band; a min() moved the failure to the bottom instead.
      *
-     * The cap is 4 because Execute / Reach genuinely uses four rolled-up categories --
-     * Paid media, Analytics & reporting, Content, Design. A cap of 3 would flag the
-     * archetype the spec recommends.
+     * Flat 4 holds at every point in the band: the archetype passes at the floor, and
+     * narrowness still binds at the ceiling where the hours threshold would allow six.
+     *
+     * Only Execute is capped. Perform composes more freely by design, and 86 program hours
+     * across nine eligible categories is ~9.5 hours each, which is legitimate.
+     *
+     * The count EXCLUDES Strategy & account management: it runs under every engagement, so
+     * counting it would charge every plan one category for something it cannot avoid.
      */
     tier_category_cap: { execute: 4, perform: null, grow: null } as Record<Tier, number | null>,
   },
@@ -220,13 +228,49 @@ export const FLAG_CODES = {
     description: 'Row scheduled at more than twice its library baseline with no reason given',
     threshold: 2,
   },
+  overhead_under_reserved: {
+    description: 'Strategy and account management across the plan falls short of the expectation',
+    /**
+     * Checked across the WHOLE PLAN, not per month, because overhead is lumpy by nature.
+     *
+     * The library bears this out: the only recurring coordination item is
+     * `Facilitate Client Meetings` at 5h/month, while the planning work sits in one-time
+     * `Develop X Plan Document` items running 10-45h. So month one legitimately carries
+     * 20+ hours of strategy and months two and three carry five. A per-month check against
+     * 9.8 would fire on every correctly composed steady month -- which is how a flag column
+     * gets ignored.
+     *
+     * Fires below 60% of `OVERHEAD_HOURS × months`, so genuine under-service still shows
+     * while normal lumpiness does not.
+     */
+    threshold: 0.6,
+    scope: 'plan' as const,
+  },
   month_under_capacity: {
     description: 'Month allocates less than 85% of available hours',
     threshold: 0.85,
   },
   content_share_off_pattern: {
-    description: 'Content share outside the expected range for the program',
-    ranges: { authority: [0.35, 0.65], reach: [0, 0.45], pursuit: [0, 0.40] },
+    description: 'Content share outside the expected range for the programs sold',
+    /**
+     * Computed off `service_category`, NOT off a row's `program`.
+     *
+     * Routing it through program_allocation made it fire on almost every correctly composed
+     * Perform option. At Authority + Reach, Content, Design and Analytics are all shared,
+     * so first-in-ordering hands whichever program was listed first roughly 80% of the
+     * hours -- and both orderings trip a bound. A flag column that is usually wrong is one
+     * strategists stop reading.
+     *
+     * The question the flag actually asks is how much of the month is content production
+     * versus everything else, which the category answers directly -- without an allocation
+     * that cannot represent a category split, and without depending on the order the
+     * strategist happened to list programs in.
+     *
+     * Range is chosen by the option's programs: the widest bound among them, since a
+     * two-program option can legitimately sit anywhere between its programs' patterns.
+     */
+    computed_from: 'service_category',
+    ranges: { authority: [0.35, 0.65], reach: [0, 0.45], pursuit: [0, 0.40] } as Record<Program, [number, number]>,
   },
   ramp_month: {
     description: 'Month one carrying heavy setup; roughly half a steady-state month of production',
@@ -276,11 +320,15 @@ export const CROSS_OPTION_FLAGS: FlagCode[] = [
  */
 export const BASELINE_FLAGS: FlagCode[] = ['row_below_baseline', 'row_above_baseline'];
 
-/** Max active rolled-up categories in a month before month_thin_spread fires. */
+/**
+ * Max active PROGRAM categories in a month before month_thin_spread fires.
+ *
+ * Count excludes OVERHEAD_CATEGORY -- see tier_category_cap.
+ */
 export function maxCategoriesForMonth(tier: Tier, programHours: number): number {
-  const byHours = programHours / FLAG_CODES.month_thin_spread.hours_per_category;
   const cap = FLAG_CODES.month_thin_spread.tier_category_cap[tier];
-  return cap === null ? byHours : Math.min(byHours, cap);
+  // Flat where a cap exists; the hours threshold governs only the uncapped tiers.
+  return cap ?? programHours / FLAG_CODES.month_thin_spread.hours_per_category;
 }
 
 /**
@@ -324,6 +372,19 @@ export function isCommitmentTerm(v: string): v is CommitmentTerm {
   return COMMITMENT_TERMS.some((t) => t.value === v);
 }
 
+/**
+ * Acceptable content share for an option, taken as the widest bound across its programs.
+ *
+ * A Perform option running Authority + Reach can sit legitimately anywhere between
+ * Authority's content-led pattern and Reach's distribution-led one, so bounding it to
+ * either alone would flag a correct plan.
+ */
+export function contentShareRange(programs: Program[]): [number, number] {
+  const ranges = programs.map((p) => FLAG_CODES.content_share_off_pattern.ranges[p]).filter(Boolean);
+  if (!ranges.length) return [0, 1];
+  return [Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))];
+}
+
 /** Everything the frontend needs, in one payload. */
 export function roadmapModelConfig() {
   return {
@@ -343,8 +404,8 @@ export function roadmapModelConfig() {
     cross_option_flags: CROSS_OPTION_FLAGS,
     baseline_flags: BASELINE_FLAGS,
     max_options: 3,
-    /** Overhead is reserved outside the plan and injected for display. */
-    overhead_in_plan: false,
+    /** Overhead is planned as ordinary rows, not reserved outside the plan. */
+    overhead_in_plan: true,
     /** Pursuit needs a four-to-six week ramp and content behind it; Execute cannot fund that. */
     pursuit_min_tier: 'perform' as Tier,
     pursuit_sold_alone: false,

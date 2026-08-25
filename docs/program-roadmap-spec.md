@@ -3,7 +3,7 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
-**v3** — incorporates the Master Marketer and Lovable review responses
+**v4** — incorporates the Master Marketer and Lovable review responses
 (`program-roadmap-review-response.md`, `-v2.md`, `program-roadmap-review-response-from-lovable.md`)
 and the decisions taken against them.
 
@@ -57,19 +57,25 @@ six months. Recompute if the library changes materially.
 | Hours per point | `0.78` | Converting legacy points-denominated figures only |
 | Monthly overhead reserve | `9.8 hrs` | 12.6 observed points × 0.78; near-constant at every tier |
 
-**Overhead is reserved outside the plan, not composed within it.** The generator allocates
-against `program_hours` and never emits a strategy or account management row — reserving
-coordination time is not a decision worth a generation call. **The backend injects a
-standard overhead block afterwards**, so the client still sees it as its own line.
+**Overhead is IN the plan, as ordinary rows.** Strategy and account management is not a
+reserve skimmed off the top — it is work billed to tasks like everything else. Preparing a
+plan, standing up a VM, running a monthly status call: each is a library item with hours
+against it, and the library carries them already — `Facilitate Client Meetings`,
+`Develop Content Plan Document`, `Client Onboarding & Kickoff`.
 
-That injection is not cosmetic. The retainer model's value story depends on the reserve
-being visible rather than absorbed — *"we'd rather tell you that up front than take the
-money and under-deliver"* — and a client looking at 22.2 hours against a $4,000 fee will
-reasonably ask where the rest went.
+So **the generator allocates against the full `hours_available` and emits strategy and
+account management rows like any other.** Nothing is injected after generation.
 
-It is also why there is no `overhead_under_reserved` flag. Under this split it would fire on
-every option of every roadmap, and a flag that always fires teaches people to ignore the
-flag column.
+`OVERHEAD_HOURS` is therefore an *expectation* for what a month's coordination should come
+to, not a subtraction from what may be planned. `program_hours` on an option is **guidance**
+— the non-overhead portion a well-composed month lands near — never a per-month ceiling.
+
+**Overhead is lumpy, so its flag is checked across the plan rather than per month.** The
+library bears this out: the only recurring coordination item is `Facilitate Client Meetings`
+at 5h/month, while planning sits in one-time `Develop … Plan Document` items running 10–45h.
+Month one legitimately carries 20+ hours of strategy where month three carries five. A
+per-month check against 9.8 would fire on every correctly composed steady month, which is how
+a flag column gets ignored.
 | Points/hours break-even rate | `$129/hr` | Where hours bill the same as the old $100 point |
 
 **Task hours come from `compass_process_library.time_estimate_ms`, not from 0.78.** The
@@ -548,13 +554,14 @@ maintains afterwards.
     "annual_plan": { "categories": [ /* 12-month Gantt */ ] },
     "hours_plan": {
       "section_description": "…",        // injected by the assembler, not generated
-      "total_hours_allocated": 64.5,
-      "total_hours_available": 66.6,
+      "total_hours_allocated": 93.9,
+      "total_hours_available": 96.0,
       "months": [{
         "month": 1,
         "month_label": "Month 1",
-        "program_hours_available": 22.2,
-        "program_hours_allocated": 21.5,
+        "hours_available": 32.0,
+        "hours_allocated": 31.3,
+        "overhead_hours_allocated": 5.0,
         "tasks": [ /* row schema above */ ],
         "flags": []                       // attached by the backend, not the model
       }]
@@ -623,9 +630,10 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 |---|---|
 | `row_below_baseline` | `hours < baseline_hours × 0.5` with no `adjustment_reason` |
 | `row_above_baseline` | `hours > baseline_hours × 2` with no `adjustment_reason` |
-| `month_thin_spread` | active rolled-up categories > `min(program_hours / 6, tier cap)` — Execute caps at 4 |
+| `overhead_under_reserved` | strategy + AM across the **plan** below 60% of `overhead_hours × months` |
+| `month_thin_spread` | active program categories > `tier cap ?? program_hours / 6` — Execute is a flat 4 |
 | `month_under_capacity` | allocated < 85% of available |
-| `content_share_off_pattern` | Authority <35% or >65%; Reach >45%; Pursuit >40% |
+| `content_share_off_pattern` | content **category** share outside the widest bound across the option's programs |
 | `ramp_month` | month 1 carrying heavy setup |
 | `goal_commitment_mismatch` | a goal's `commitment_type` exceeds what the tier permits |
 | `goal_target_not_monotonic` | a higher tier's target at or below a lower tier's |
@@ -649,6 +657,23 @@ highlight both sides of a comparison.
 **Both baseline flags skip hand-added rows.** A custom row has `process_id: null` and
 therefore no baseline, so comparing against it either divides by zero or fires on every row a
 strategist adds.
+
+**The Execute cap is flat, not a `min()`.** A `min()` only ever tightens: at the Execute
+floor `program_hours / 6` is 3.7, so `min(3.7, 4)` fires on the four-category Execute / Reach
+archetype for every engagement between $4,000 and $4,225 at $125 — the published entry price.
+The cap exists to stop the guard evaporating at the *top* of the band; a `min()` moved the
+failure to the bottom instead. A flat 4 holds at both ends.
+
+**The category count excludes `Strategy & account management`.** With overhead rows in the
+plan, counting the overhead category would charge every plan one category for something it
+cannot avoid, and would put Execute / Reach at five against a cap of four.
+
+**Content share computes off `service_category`, not `program`.** Routing it through
+`program_allocation` made it fire on almost every correctly composed Perform option: at
+Authority + Reach, Content, Design and Analytics are all shared, so first-in-ordering hands
+one program roughly 80% of the hours and *both* orderings trip a bound. The category answers
+the question directly, and removes the ordering dependency. For multi-program options the
+range is the widest bound across the option's programs.
 
 **Why the Execute cap on thin spread.** An hours-only threshold stops protecting Execute
 above its floor: at the top of the band `program_hours / 6` is 6.35 while Authority has only

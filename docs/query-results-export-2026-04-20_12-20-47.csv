@@ -1,3 +1,0 @@
-column_name;constraint_name;references_column;references_table
-contract_id;amendments_contract_id_fkey;contract_id;contracts
-created_by;amendments_created_by_fkey;user_id;users

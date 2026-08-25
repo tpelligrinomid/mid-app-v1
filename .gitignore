@@ -1,3 +1,30 @@
 .claude/
 node_modules/
 nul
+
+# Working docs and data exports — kept locally, not in the repo.
+# These carry employee, client and internal pricing detail. They were committed by
+# accident in 9bb89b2 and untracked in the follow-up; they remain on disk.
+
+docs/*.csv
+docs/*.pdf
+
+docs/Q1 Task Analysis.md
+docs/Show-Notes-Example.md
+docs/The Retainer Model, Simplified.md
+docs/bug-3.13.26.txt
+docs/clickup-archived-task-sync-spec.md
+docs/creative-ops-cross-repo-plan.md
+docs/deliverables-dependency-map.html
+docs/earthsafe-performance-reporting-plan-august-2026.md
+docs/lovable-prompt-net-churn.md
+docs/lovable-prompt-tech-stack.md
+docs/process-library-sync-spec.md
+docs/prompt-sequence-social-post-package.md
+docs/pulse-portfolio-chat-spec.md
+docs/q1-2026-management-task-analysis.md
+docs/resource-overlay-q1-2026.md
+docs/sample-payloads-tally.txt
+docs/task-analysis-q1-2026.html
+docs/task-analysis-q1-2026.md
+docs/top-contracts-q1-2026.md

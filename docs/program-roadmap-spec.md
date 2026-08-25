@@ -7,7 +7,7 @@ roadmap; nothing about the points path changes.
 
 ## Scope
 
-**New engagements only.** Existing contracts stay on `pricing_model = 'points'`, keep
+**New engagements only.** Existing contracts keep `customer_display_type = 'points'`, keep
 `monthly_points_allotment`, and keep generating the current `roadmap` deliverable. No
 migration, no backfill, no change to their output.
 
@@ -50,34 +50,39 @@ Overhead is roughly constant in absolute hours, so its share falls as the fee ri
 
 ### `contracts`
 
-Two columns already exist and need no work:
+**No schema change. Both fields already exist.**
 
-- `dollar_per_hour` — the blended rate. Set when a new-model contract is created,
-  defaulting to $125. **This is not a backfill.** Existing contracts stay on points and
-  never need a rate; the generator simply refuses to run without one, which is a
-  validation at generation time rather than a migration.
-- `customer_display_type` — `'points' | 'hours' | 'none'`, already drives client display.
+- `customer_display_type` — `'points' | 'hours' | 'none'`. This *is* the pricing model,
+  and it already selects what the client sees. `'hours'` routes to the program roadmap;
+  `'points'` and `'none'` keep the existing points path, so every contract on the book
+  today is unaffected by default.
+- `dollar_per_hour` — the blended rate, set per contract. Not backfilled: existing
+  contracts stay on points and never need one, and the generator refuses to run without
+  it, which is a validation at generation time rather than a migration.
 
-New — one column only:
+**One rate per contract, not per option.** The rate reflects how demanding an account is
+to serve — seniority required, review depth, system complexity — and is a judgement made
+once, at contract level. It does not vary between the options on a roadmap.
 
-```sql
-ALTER TABLE contracts
-  ADD COLUMN IF NOT EXISTS pricing_model text DEFAULT 'points';   -- 'points' | 'programs'
-```
+That is a deliberate limit on explanation. The blended rate already covers every skill
+set; the tier minimums already enforce "two programs costs at least this much". Making
+the rate move between options too would mean explaining to a client why their hourly rate
+changes with the size of the plan, which is one variable more than the model can carry.
 
-`pricing_model` selects the generation path. Defaulting to `'points'` means every
-existing contract keeps its current behaviour with no data migration.
+*Edge case worth knowing:* a contract priced in hours but set to `'none'` display would
+route to the points path. If you ever need to price in hours while hiding the unit from
+the client, that is the point at which display and pricing have to separate into two
+fields.
 
-**Tier and programs are deliberately NOT on the contract.** They are generation inputs,
-not contract attributes — a single roadmap presents several priced options and the client
-chooses. Recording them on the contract before that choice would be recording a decision
-nobody has made.
+**Tier and programs are deliberately NOT on the contract.** They are generation inputs —
+a roadmap presents several priced options and the client chooses, so recording them
+beforehand would record a decision nobody has made.
 
-*Known consequence:* nothing in the database will say which programs an account is
-running, so portfolio questions ("how many clients run Pursuit?") stay answerable only by
-inference from task service categories, the way the sizing analysis does it today. If that
-becomes a real reporting need, the place to record it is the approved option — not the
-contract, and not before approval.
+*Deferred by decision:* with programs off the contract, nothing in the database says
+which programs an account runs, so portfolio questions ("how many clients run Pursuit?")
+stay answerable only by inference from task service categories, the way the sizing
+analysis does today. Accepted for now; if it becomes a real reporting need, the place to
+record it is the approved option.
 
 ### `compass_process_library`
 
@@ -131,11 +136,12 @@ strategist supplies a row per option:
 | `tier` | `execute` \| `perform` \| `grow` |
 | `programs` | Which programs this option runs |
 | `monthly_budget` | The fee this option assumes |
-| `hourly_rate` | Blended rate for this option; defaults to $125 |
 
-Rate is per option rather than per roadmap so a higher option can assume a
-senior-weighted team: *"$6,000 at $125 buys 48 hours; $9,000 at $150 buys 60 hours with a
-senior strategist and a developer."* Both are honest, and the difference is visible.
+**Maximum three options.** Three reads as a proposal; more reads as indecision, and
+multiplies generation cost with it.
+
+The rate is not an option field — it comes from the contract and is the same across every
+option. Options differ only in what is bought, never in what an hour costs.
 
 Options are **alternatives, not phases.** They are not summed — each is a complete plan
 for the same engagement at a different investment, and the client picks one. The output
@@ -153,6 +159,7 @@ exists because options are explicit:
 | Rule | Message |
 |---|---|
 | Tier does not match budget band | "$4,000 is Execute. Grow starts at $12,000." |
+| More than three options | "A roadmap carries at most three options." |
 
 The bands are $4,000–5,900 Execute, $6,000–11,900 Perform, $12,000+ Grow. This is the
 retainer model's "tiers are arithmetic, not policy" made enforceable — a strategist who
@@ -274,20 +281,21 @@ expecting two pieces in month one gets one.
 
 ## Generation payload
 
-`processor.ts` branches on `pricing_model`. The points path is untouched.
+`processor.ts` branches on `customer_display_type`. The points path is untouched.
 
 New submission fields on `DeliverableSubmission`, mirroring the roadmap block that
 already assembles `research`, `transcripts`, `process_library`, and `previous_roadmap`:
 
 ```ts
-/** Program roadmap: the priced options to generate, one plan each */
+/** Program roadmap: contract blended rate, one value across every option */
+hourly_rate?: number;
+/** Program roadmap: the priced options to generate, one plan each. Max 3. */
 roadmap_options?: Array<{
   option_id: string;
   label: string;                     // "Execute — Authority" etc, shown to the client
   tier: 'execute' | 'perform' | 'grow';
   programs: Array<'authority' | 'reach' | 'pursuit'>;
   monthly_budget: number;
-  hourly_rate: number;
   hours_available: number;           // monthly_budget / hourly_rate
   overhead_hours: number;            // reserved for strategy + account management
   program_hours: number;             // hours_available - overhead_hours
@@ -328,6 +336,7 @@ with hours replacing points and the fields above added per row.
 
 ```jsonc
 {
+  "hourly_rate": 125,                   // one rate, every option
   "options_are_alternatives": true,     // never summed; the client picks one
   "options": [
     {
@@ -336,7 +345,6 @@ with hours replacing points and the fields above added per row.
       "tier": "execute",
       "programs": ["authority"],
       "monthly_budget": 4000,
-      "hourly_rate": 125,
       "hours_available": 32.0,
       "overhead_hours": 9.8,
       "program_hours": 22.2,
@@ -358,7 +366,6 @@ with hours replacing points and the fields above added per row.
       "tier": "perform",
       "programs": ["authority", "reach"],
       "monthly_budget": 6000,
-      "hourly_rate": 125,
       "hours_available": 48.0,
       "overhead_hours": 9.8,
       "program_hours": 38.2,
@@ -400,16 +407,14 @@ the strategist can see what standard was.
 
 ## Sequencing
 
-1. Migration: `pricing_model` on contracts — one column
-2. Eligibility matrix as configuration
-3. `processor.ts` branch + payload assembly
-4. Master Marketer `/api/generate/program-roadmap`
-5. Lovable: option input rows on the generation form, option switch in the viewer, editing UI
+1. Eligibility matrix as configuration
+2. `processor.ts` branch on `customer_display_type` + payload assembly
+3. Master Marketer `/api/generate/program-roadmap`
+4. Lovable: option input rows on the generation form, option switch in the viewer, editing UI
 
-**No ClickUp work and no data migration.** The library already carries everything the
-generator needs — hours, service category, description. `dollar_per_hour` is set per
-new-model contract at creation, not backfilled, so no existing contract is touched at any
-step.
+**No schema change, no ClickUp work, no data migration.** Both contract fields already
+exist, and the library already carries everything the generator needs — hours, service
+category, description. Nothing at any step touches an existing contract.
 
 ---
 
@@ -425,8 +430,6 @@ step.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **How many options is too many?** Three reads as a proposal; six reads as indecision,
-  and multiplies generation cost by six. Worth a cap.
 - **Does an option carry its own narrative**, or is the roadmap's prose shared with only
   the plans differing? Shared prose is cheaper and reads better; per-option narrative
   makes the trade-off between options explicit.

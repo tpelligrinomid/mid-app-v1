@@ -8,6 +8,7 @@ import { backfillEmbeddings } from '../services/rag/backfill.js';
 import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
 import { recoverStuckDeliverables, diagnoseDeliverables, recoverDeliverable } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
+import { dbProxy } from '../utils/db-proxy.js';
 import { backfillServiceCategories } from '../services/clickup/service-category.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 
@@ -691,6 +692,97 @@ router.post('/clickup-service-category', verifyCronSecret, async (req: Request, 
       error: error instanceof Error ? error.message : 'Unknown error',
       duration_ms: Date.now() - startTime,
       timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// GET /api/cron/process-library-value-check
+//
+// Read-only diagnostic. Compares what each library item was worth under points
+// ($100/pt, fixed) against what its estimated hours are worth at a given rate, to
+// size how much the points menu was underselling. Nothing is written.
+//
+// ?rate=150 (default) sets the hourly rate used for the comparison.
+router.get('/process-library-value-check', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rate = req.query.rate ? Number(req.query.rate) : 150;
+
+    const { data, error } = await dbProxy.select<Array<{
+      name: string;
+      points: number | null;
+      time_estimate_ms: number | null;
+      service_category: string | null;
+      phase: string | null;
+    }>>('compass_process_library', {
+      columns: 'name,points,time_estimate_ms,service_category,phase',
+      filters: { is_active: true },
+    });
+
+    if (error) {
+      res.status(500).json({ success: false, error: error.message });
+      return;
+    }
+
+    const rows = (data || [])
+      .filter(r => r.points && r.points > 0 && r.time_estimate_ms && r.time_estimate_ms > 0)
+      .map(r => {
+        const hours = r.time_estimate_ms! / 3_600_000;
+        const pointsValue = r.points! * 100;
+        const hoursValue = hours * rate;
+        return {
+          name: r.name,
+          service_category: r.service_category,
+          phase: r.phase,
+          points: r.points,
+          hours: Math.round(hours * 100) / 100,
+          points_value: Math.round(pointsValue),
+          hours_value: Math.round(hoursValue),
+          ratio: Math.round((hoursValue / pointsValue) * 100) / 100,
+        };
+      })
+      .sort((a, b) => b.ratio - a.ratio);
+
+    const ratios = rows.map(r => r.ratio).sort((a, b) => a - b);
+    const median = ratios.length
+      ? (ratios.length % 2
+          ? ratios[(ratios.length - 1) / 2]
+          : (ratios[ratios.length / 2 - 1] + ratios[ratios.length / 2]) / 2)
+      : null;
+
+    // Weighted by value, not a mean of ratios -- a cheap item with a wild ratio
+    // should not move the portfolio number as much as an expensive one.
+    const totalPoints = rows.reduce((sum, r) => sum + r.points_value, 0);
+    const totalHours = rows.reduce((sum, r) => sum + r.hours_value, 0);
+
+    const byCategory: Record<string, { count: number; points_value: number; hours_value: number; ratio: number }> = {};
+    for (const r of rows) {
+      const key = r.service_category || 'UNCATEGORIZED';
+      const bucket = byCategory[key] || (byCategory[key] = { count: 0, points_value: 0, hours_value: 0, ratio: 0 });
+      bucket.count++;
+      bucket.points_value += r.points_value;
+      bucket.hours_value += r.hours_value;
+    }
+    for (const bucket of Object.values(byCategory)) {
+      bucket.ratio = Math.round((bucket.hours_value / bucket.points_value) * 100) / 100;
+    }
+
+    res.json({
+      success: true,
+      rate,
+      comparable_items: rows.length,
+      total_active: (data || []).length,
+      skipped_missing_points_or_hours: (data || []).length - rows.length,
+      median_ratio: median,
+      weighted_ratio: Math.round((totalHours / totalPoints) * 100) / 100,
+      total_points_value: Math.round(totalPoints),
+      total_hours_value: Math.round(totalHours),
+      by_category: byCategory,
+      items: rows,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });

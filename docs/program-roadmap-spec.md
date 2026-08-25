@@ -256,8 +256,9 @@ stay comparable.
 client-billable at $50 — an agency-wide contract whose cost is passed through per client.
 Excluding agency plans would under-quote.
 
-On approval, the selected option's technologies become `contract_technologies` rows, which
-is what makes the client's portal view match what was sold.
+Nothing here creates `contract_technologies` rows. The resolution above reads the catalog
+to price an option; assigning technology to a contract is a billing change and happens
+through the SOW process, not from a proposal document.
 
 ### Validation across options
 
@@ -277,10 +278,26 @@ The bands are $4,000–5,900 Execute, $6,000–11,900 Perform, $12,000+ Grow. Th
 retainer model's "tiers are arithmetic, not policy" made enforceable — a strategist who
 wants Grow treatment raises the budget rather than relabelling the tier.
 
-### After the client chooses
+### The roadmap never writes back
 
-The selected option is what becomes the plan of record. Nothing is written back to the
-contract at generation time; the choice is recorded on the approved deliverable.
+**There is no approval step on a deliverable.** The statuses are `planned`, `working`,
+`waiting_on_client`, `delivered` — and `delivered` means the document reached the client,
+not that they accepted the deal. Acceptance happens in the deal room, the contract, and
+the SOW, which are separate vehicles.
+
+So the roadmap writes nothing to `contracts` and nothing to `contract_technologies`, ever.
+It is a sales artifact. A document that can be regenerated, edited, and re-sent must not
+be able to change what a client is billed — and with no approval event to hang it on,
+there is no safe moment to do so even if it were wanted.
+
+`contract_technologies` rows are created through whatever process handles a signed SOW
+today. The roadmap's technology selection is an estimate for the proposal, nothing more.
+
+**One display-only exception.** A roadmap that still shows three options a year later
+leaves nobody able to tell which one became real. The strategist may mark
+`selected_option_id` on the deliverable once the SOW is signed; the viewer then collapses
+to that option. It is a label — it triggers nothing, changes no billing, and can be
+changed or cleared freely.
 
 ---
 
@@ -460,6 +477,7 @@ with hours replacing points and the fields above added per row.
 {
   "hourly_rate": 125,                   // one rate, every option
   "options_are_alternatives": true,     // never summed; the client picks one
+  "selected_option_id": null,           // display-only label, set after the SOW is signed
 
   // Generated once. Describes the client, not the investment.
   "shared": {
@@ -547,6 +565,9 @@ save. The hours version is the same table with four changes:
    summed figure would misrepresent the proposal.
 6. **Every option shows services, technology and total** wherever options are compared.
    Showing the service fee alone would make a Pursuit option look cheaper than it is.
+7. **`selected_option_id` collapses the view to one option** when set, with a way back to
+   the full comparison. It is a label only — setting it must not trigger any write to the
+   contract or its technology assignments.
 
 Technology rows never appear — technology is billed outside the fee and never consumes
 hours.
@@ -585,6 +606,6 @@ category, description. Nothing at any step touches an existing contract.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **Does selecting a technology on an option create the `contract_technologies` row at
-  approval, or does someone assign it by hand afterwards?** Automatic keeps the portal
-  honest with no extra step; manual keeps a human between a proposal and a billing change.
+- **Should `selected_option_id` be set from the deal room** rather than by hand, once a
+  SOW is signed there? It would keep the roadmap honest without anyone remembering to
+  update it — but it is a link between two systems that are deliberately separate today.

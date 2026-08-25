@@ -80,6 +80,27 @@ interface ContractRow {
   contract_type: string;
 }
 
+/**
+ * The task sync writes custom_fields with JSON.stringify into a jsonb column, so it
+ * can read back either as a parsed array or as a JSON string depending on how the
+ * value round-tripped. Handling only one shape silently yields zero categories --
+ * which reads as "no task is categorised" rather than as a parsing failure.
+ */
+function normalizeCustomFields(
+  raw: unknown
+): Array<{ id: string; name?: string; value?: unknown; type_config?: { options?: Array<{ id?: string; name?: string; label?: string; orderindex?: number }> } }> | undefined {
+  if (Array.isArray(raw)) return raw as never;
+  if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 interface TaskRow {
   contract_id: string | null;
   points: number | null;
@@ -141,6 +162,7 @@ router.get('/program-sizing-check', verifySecret, async (req: Request, res: Resp
     }
 
     const aggs = new Map<string, Agg>();
+    const diag = { with_fields: 0, with_service_category_field: 0, resolved_label: 0 };
 
     for (const task of tasks) {
       if (!task.contract_id || !task.points || task.points <= 0) continue;
@@ -167,14 +189,17 @@ router.get('/program-sizing-check', verifySecret, async (req: Request, res: Resp
         aggs.set(task.contract_id, agg);
       }
 
-      const label = extractServiceCategoryLabel({
-        id: '',
-        name: '',
-        custom_fields: Array.isArray(task.custom_fields)
-          ? (task.custom_fields as Array<{ id: string; name?: string; value?: unknown }>)
-          : undefined,
-      });
+      const fields = normalizeCustomFields(task.custom_fields);
+      if (fields) {
+        diag.with_fields++;
+        if (fields.some(f => (f.name || '').trim().toLowerCase() === 'service category')) {
+          diag.with_service_category_field++;
+        }
+      }
+
+      const label = extractServiceCategoryLabel({ id: '', name: '', custom_fields: fields });
       const category = (label || '').toUpperCase();
+      if (category) diag.resolved_label++;
 
       agg.total_points += task.points;
       if (task.date_done) agg.months_active.add(task.date_done.slice(0, 7));
@@ -250,6 +275,7 @@ router.get('/program-sizing-check', verifySecret, async (req: Request, res: Resp
       window_months: months,
       contracts_analyzed: rows.length,
       tasks_scanned: tasks.length,
+      extraction_diagnostics: diag,
       model_assumptions: {
         overhead_points_per_month: 12,
         points_per_program: '45-50',

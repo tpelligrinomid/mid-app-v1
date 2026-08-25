@@ -639,8 +639,20 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 | `goal_target_not_monotonic` | a higher tier's target at or below a lower tier's |
 
 ```ts
-{ level: 'soft', code, message, severity?: 'review' | 'notice', option_ids?: string[] }
+{
+  level: 'soft',
+  code,
+  message,
+  scope: 'month' | 'option' | 'document',
+  severity?: 'review' | 'notice',
+  option_ids?: string[],
+}
 ```
+
+**Three scopes, because three different things go wrong.** `month` — this month is composed
+badly. `option` — this option is wrong across its whole plan, which is where
+`overhead_under_reserved` and `goal_commitment_mismatch` live. `document` — these options
+disagree with each other, which is only `goal_target_not_monotonic`.
 
 Flags never block. Three details the envelope has to carry:
 

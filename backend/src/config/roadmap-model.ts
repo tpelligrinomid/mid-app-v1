@@ -199,6 +199,7 @@ export const FLAG_CODES = {
   row_below_baseline: {
     description: 'Row scheduled at less than half its library baseline with no reason given',
     threshold: 0.5,
+    scope: 'month' as const,
   },
   month_thin_spread: {
     description: 'More active categories than the month has hours to serve properly',
@@ -223,10 +224,12 @@ export const FLAG_CODES = {
      * counting it would charge every plan one category for something it cannot avoid.
      */
     tier_category_cap: { execute: 4, perform: null, grow: null } as Record<Tier, number | null>,
+    scope: 'month' as const,
   },
   row_above_baseline: {
     description: 'Row scheduled at more than twice its library baseline with no reason given',
     threshold: 2,
+    scope: 'month' as const,
   },
   overhead_under_reserved: {
     description: 'Strategy and account management across the plan falls short of the expectation',
@@ -249,6 +252,7 @@ export const FLAG_CODES = {
   month_under_capacity: {
     description: 'Month allocates less than 85% of available hours',
     threshold: 0.85,
+    scope: 'month' as const,
   },
   content_share_off_pattern: {
     description: 'Content share outside the expected range for the programs sold',
@@ -271,15 +275,19 @@ export const FLAG_CODES = {
      */
     computed_from: 'service_category',
     ranges: { authority: [0.35, 0.65], reach: [0, 0.45], pursuit: [0, 0.40] } as Record<Program, [number, number]>,
+    scope: 'month' as const,
   },
   ramp_month: {
     description: 'Month one carrying heavy setup; roughly half a steady-state month of production',
+    scope: 'month' as const,
   },
   goal_commitment_mismatch: {
     description: 'A goal commits beyond what the tier permits',
+    scope: 'option' as const,
   },
   goal_target_not_monotonic: {
     description: 'A higher tier target at or below a lower tier one',
+    scope: 'document' as const,
   },
 } as const;
 
@@ -299,17 +307,27 @@ export interface RoadmapFlag {
   message: string;
   severity?: FlagSeverity;
   /**
-   * Cross-option flags belong to the document rather than a month.
-   * `goal_target_not_monotonic` is a relation between two options and has nowhere else to
-   * live; the viewer uses this to highlight both sides of the comparison.
+   * Where the flag attaches. Three levels, because three different things go wrong:
+   *
+   *   month    -- this month is composed badly
+   *   option   -- this option is composed badly across its whole plan
+   *   document -- these options disagree with each other
+   *
+   * `overhead_under_reserved` is option-level: overhead is lumpy month to month, so it is
+   * only meaningful summed across the plan.
    */
+  scope: 'month' | 'option' | 'document';
+  /** Set on document-scope flags so the viewer can highlight both sides of a comparison. */
   option_ids?: string[];
 }
 
-/** Flags that compare options and therefore attach at document level, not to a month. */
-export const CROSS_OPTION_FLAGS: FlagCode[] = [
+/** Flags that compare options against each other, and so attach to the document. */
+export const CROSS_OPTION_FLAGS: FlagCode[] = ['goal_target_not_monotonic'];
+
+/** Flags meaningful only across a whole option, not a single month. */
+export const OPTION_LEVEL_FLAGS: FlagCode[] = [
+  'overhead_under_reserved',
   'goal_commitment_mismatch',
-  'goal_target_not_monotonic',
 ];
 
 /**
@@ -402,6 +420,7 @@ export function roadmapModelConfig() {
     commitment_terms: COMMITMENT_TERMS,
     flag_codes: FLAG_CODES,
     cross_option_flags: CROSS_OPTION_FLAGS,
+    option_level_flags: OPTION_LEVEL_FLAGS,
     baseline_flags: BASELINE_FLAGS,
     max_options: 3,
     /** Overhead is planned as ordinary rows, not reserved outside the plan. */

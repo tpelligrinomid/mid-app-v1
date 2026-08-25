@@ -135,7 +135,8 @@ strategist supplies a row per option:
 |---|---|
 | `tier` | `execute` \| `perform` \| `grow` |
 | `programs` | Which programs this option runs |
-| `monthly_budget` | The fee this option assumes |
+| `monthly_budget` | The **service** fee this option assumes |
+| `technology_monthly` | Estimated platform cost, billed separately from services |
 
 **Maximum three options.** Three reads as a proposal; more reads as indecision, and
 multiplies generation cost with it.
@@ -173,15 +174,58 @@ are delivery goals, Perform adds the leading indicators we control, Grow owns th
 the measurement behind it. Three options with identical goals would be three prices for
 one promise.
 
-**Executive Summary needs a decision.** The body is shared, but the retainer model says
-the AGE should end on a determination — *"Your roadmap requires $9,000 a month. That's
-Perform."* If that sentence belongs in the roadmap, the summary carries a short
-recommendation block naming the options and which one is recommended, and is therefore not
-purely shared. Recommended, but it is a judgement about how the proposal should read.
+**Executive Summary carries a recommendation.** The body is shared, but it ends on a
+determination rather than a menu, as the retainer model requires — *"Your roadmap requires
+$9,000 a month plus roughly $600 in platform. That's Perform."* The summary therefore
+names every option, states which one is recommended, and gives the reason. It quotes
+**total** monthly investment, services plus technology, since that is the number the
+client actually decides on.
 
 **Generation cost.** Shared sections are generated once, not once per option. Three
 options is closer to 1.5× a single roadmap than 3×, because the expensive work — synthesis
 of research into target market, competition, and brand story — does not repeat.
+
+### Technology
+
+Technology is billed as a separate line item and **never consumes hours**. It still has to
+appear per option, because the tooling a program needs is not the same across programs —
+Pursuit requires sending domains, inbox warming, enrichment and rotation before anything
+sends, where Authority needs almost none of it.
+
+Comparing options on the service fee alone would therefore hide a real difference in what
+the client pays. Every option carries three numbers:
+
+| | |
+|---|---|
+| `monthly_budget` | Services |
+| `technology_monthly` | Platform and licence cost |
+| **`total_monthly`** | What the client actually pays |
+
+**The strategist supplies the cost; the generator supplies the requirement.** There is no
+tool catalogue in the system and no price list, so the generator must not invent figures.
+What it can do is name the tooling each option's programs imply — outbound needs sending
+infrastructure and enrichment; paid needs ad platform access; reporting needs a dashboard
+tool — so the strategist has a checklist to price rather than a blank field.
+
+Line items are optional but preferred, because the retainer model commits to showing the
+client what is running and who holds each contract:
+
+```ts
+technology?: {
+  estimated_monthly: number;
+  line_items?: Array<{
+    name: string;                       // "HeyReach", "Clay", "Databox"
+    monthly_cost: number;
+    billed_by: 'mid' | 'client';        // who holds the contract
+    required_for: string;               // "Pursuit — outbound sequencing"
+  }>;
+}
+```
+
+`billed_by` matters: a tool the client holds directly is a cost they carry but not one on
+your invoice, and conflating the two is what made technology invisible under the old
+model. The retainer model's Fix 2 exists precisely because $35,184/mo across 32 retainers
+sat inside monthly fees where nobody could see it.
 
 ### Validation across options
 
@@ -249,6 +293,7 @@ Two classes. Hard rules refuse; soft rules flag and let the strategist decide.
 | Pursuit selected alone at any tier | "Pursuit is never sold on its own." |
 | Category outside the sold programs' matrix | Names the category and the programs that would include it |
 | `dollar_per_hour` unset | "Set the contract's hourly rate before generating." |
+| Technology counted against capacity | Internal check — `hours_available` must derive from `monthly_budget`, never `total_monthly` |
 | Any month's allocated hours exceed capacity | Names the month and the overage |
 
 These are refusals, not warnings. The retainer model's core complaint is that scope gets
@@ -331,8 +376,10 @@ roadmap_options?: Array<{
   label: string;                     // "Execute — Authority" etc, shown to the client
   tier: 'execute' | 'perform' | 'grow';
   programs: Array<'authority' | 'reach' | 'pursuit'>;
-  monthly_budget: number;
-  hours_available: number;           // monthly_budget / hourly_rate
+  monthly_budget: number;            // services only
+  technology_monthly: number;        // billed separately; never consumes hours
+  total_monthly: number;             // monthly_budget + technology_monthly
+  hours_available: number;           // monthly_budget / hourly_rate — services only
   overhead_hours: number;            // reserved for strategy + account management
   program_hours: number;             // hours_available - overhead_hours
 }>;
@@ -377,7 +424,11 @@ with hours replacing points and the fields above added per row.
 
   // Generated once. Describes the client, not the investment.
   "shared": {
-    "executive_summary": { "body": "…", "recommended_option_id": "opt_perform_authority_reach" },
+    "executive_summary": {
+      "body": "…",
+      "recommended_option_id": "opt_perform_authority_reach",
+      "recommendation_rationale": "…"
+    },
     "overview": "…",
     "target_market": { /* … */ },
     "brand_story": "…",
@@ -392,6 +443,8 @@ with hours replacing points and the fields above added per row.
       "tier": "execute",
       "programs": ["authority"],
       "monthly_budget": 4000,
+      "technology_monthly": 150,
+      "total_monthly": 4150,
       "hours_available": 32.0,
       "overhead_hours": 9.8,
       "program_hours": 22.2,
@@ -421,6 +474,8 @@ with hours replacing points and the fields above added per row.
       "tier": "perform",
       "programs": ["authority", "reach"],
       "monthly_budget": 6000,
+      "technology_monthly": 750,
+      "total_monthly": 6750,
       "hours_available": 48.0,
       "overhead_hours": 9.8,
       "program_hours": 38.2,
@@ -451,6 +506,8 @@ save. The hours version is the same table with four changes:
    option-scoped ones re-render, so the reader is not made to feel they changed document.
    The UI must never show a combined total across options; they are alternatives, and a
    summed figure would misrepresent the proposal.
+6. **Every option shows services, technology and total** wherever options are compared.
+   Showing the service fee alone would make a Pursuit option look cheaper than it is.
 
 Technology rows never appear — technology is billed outside the fee and never consumes
 hours.
@@ -489,7 +546,7 @@ category, description. Nothing at any step touches an existing contract.
   cap goes into the MSA.
 - **Four library items still carry no estimate**, and `Set up ABM` exists twice at 9h and
   18.08h. Worth a pass before the generator reads from this data.
-- **Does the Executive Summary carry a recommendation** naming which option we advise, or
-  does it present the options neutrally? The retainer model's "the roadmap names the
-  number" argues for a recommendation; presenting neutrally puts the choice entirely with
-  the client.
+- **Is a tool catalogue worth building?** Today the strategist prices technology per
+  option by hand. A catalogue of tools with standard monthly costs and `billed_by` would
+  make the estimate consistent and let the generator propose figures rather than only
+  requirements — but it is a real piece of work and nothing is blocked without it.

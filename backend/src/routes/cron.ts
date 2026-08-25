@@ -9,6 +9,7 @@ import { processScheduledNotes } from '../services/strategy-notes/scheduler.js';
 import { recoverStuckDeliverables, diagnoseDeliverables, recoverDeliverable } from '../services/deliverable-generation/recover.js';
 import { syncConfig } from '../config/sync-config.js';
 import { backfillServiceCategories } from '../services/clickup/service-category.js';
+import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 
 const router = Router();
 
@@ -682,6 +683,76 @@ router.post('/clickup-service-category', verifyCronSecret, async (req: Request, 
     res.json({ success: true, ...result, duration_ms: durationMs, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('[Cron] Service category backfill failed:', error);
+    res.status(500).json({
+      success: false,
+      dry_run: dryRun,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// POST /api/cron/process-library-service-category
+//
+// Same taxonomy and prompt as clickup-service-category, run over the Process
+// Library space instead of contract Deliverables lists. The hours/program roadmap
+// filters the library by service category, so every menu item needs one.
+//
+// Writes to ClickUp and never overwrites an existing value. Run with ?dryRun=1
+// first and read the proposals.
+//
+// If `lists_without_field` comes back equal to the number of lists and
+// lists_scanned is 0, the Process Library space has no "Service Category"
+// dropdown -- add the field in ClickUp before this can do anything.
+//
+// Render Cron Job Configuration:
+// - Name: process-library-service-category
+// - Schedule: 0 6 * * * (daily, after the library sync)
+// - Command: curl -fsS -X POST "https://your-app.onrender.com/api/cron/process-library-service-category?secret=$CRON_SECRET"
+router.post('/process-library-service-category', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+
+  try {
+    if (!syncConfig.clickup.apiToken) {
+      res.status(503).json({ error: 'ClickUp integration not configured' });
+      return;
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+      res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      return;
+    }
+    if (!process.env.BACKEND_API_KEY) {
+      res.status(503).json({ error: 'Database proxy not configured' });
+      return;
+    }
+
+    const maxWrites = req.query.maxWrites ? Number(req.query.maxWrites) : undefined;
+    const model = (req.query.model as string) || undefined;
+
+    console.log(`[Cron] Process library category classification starting (dryRun=${dryRun})`);
+
+    const result = await classifyProcessLibrary({ dryRun, maxWrites, model });
+    const durationMs = Date.now() - startTime;
+
+    if (result.lists_scanned === 0 && result.lists_without_field > 0) {
+      console.warn(
+        `[Cron] No list in the Process Library space carries a "Service Category" field ` +
+        `(${result.lists_without_field} checked) - nothing could be classified.`
+      );
+    }
+
+    if (result.errors.length) {
+      console.warn(
+        `[Cron] Process library classification had ${result.errors.length} error(s):`,
+        JSON.stringify(result.errors.slice(0, 20))
+      );
+    }
+
+    res.json({ success: true, ...result, duration_ms: durationMs, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('[Cron] Process library category classification failed:', error);
     res.status(500).json({
       success: false,
       dry_run: dryRun,

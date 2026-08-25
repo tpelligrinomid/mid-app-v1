@@ -42,13 +42,13 @@ import { sendStructured } from '../claude/client.js';
  *
  * Overridable per-run via model= for future comparisons.
  */
-const CLASSIFIER_MODEL = 'claude-sonnet-5';
-const ALLOWED_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5']);
-const CLASSIFY_BATCH_SIZE = 20;
-const SERVICE_CATEGORY_FIELD_NAME = 'service category';
+export const CLASSIFIER_MODEL = 'claude-sonnet-5';
+export const ALLOWED_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5']);
+export const CLASSIFY_BATCH_SIZE = 20;
+export const SERVICE_CATEGORY_FIELD_NAME = 'service category';
 
 /** ClickUp allows ~100 req/min. 700ms between writes keeps us under with headroom. */
-const WRITE_THROTTLE_MS = 700;
+export const WRITE_THROTTLE_MS = 700;
 
 /**
  * Only classify work that has actually started.
@@ -304,7 +304,7 @@ interface FolderToSync {
   contract_name?: string;
 }
 
-interface ClickUpTaskLite {
+export interface ClickUpTaskLite {
   id: string;
   name: string;
   description?: string;
@@ -313,7 +313,12 @@ interface ClickUpTaskLite {
   date_updated?: string | number;
   status?: { status?: string };
   tags?: Array<{ name?: string }>;
-  custom_fields?: Array<{ id: string; name?: string; value?: unknown }>;
+  custom_fields?: Array<{
+    id: string;
+    name?: string;
+    value?: unknown;
+    type_config?: { options?: Array<{ id?: string; name?: string; label?: string; orderindex?: number }> };
+  }>;
 }
 
 export interface ServiceCategoryResult {
@@ -355,10 +360,10 @@ export interface ServiceCategoryResult {
   errors: Array<{ context: string; error: string }>;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Locate the Service Category field on a list and map label -> option UUID. */
-function resolveServiceCategoryField(
+export function resolveServiceCategoryField(
   fields: Awaited<ReturnType<ClickUpClient['getListCustomFields']>>
 ): {
   fieldId: string;
@@ -395,7 +400,7 @@ function resolveServiceCategoryField(
  * so `'value' in entry` is the reliable test — checking truthiness would treat
  * a legitimately-set option as empty.
  */
-function needsCategory(task: ClickUpTaskLite, fieldId: string): boolean {
+export function needsCategory(task: ClickUpTaskLite, fieldId: string): boolean {
   // No custom_fields array at all means we did not get field data for this
   // task, NOT that its fields are empty. Treating the two the same would make
   // every task in a partial response look uncategorized and let the backfill
@@ -417,7 +422,7 @@ function needsCategory(task: ClickUpTaskLite, fieldId: string): boolean {
  * some API paths return the numeric orderindex instead, so both are handled.
  * Returns null when the field is empty or the value maps to nothing.
  */
-function readExistingLabel(
+export function readExistingLabel(
   task: ClickUpTaskLite,
   resolved: { fieldId: string; labelsById: Map<string, string>; labelsByIndex: Map<number, string> }
 ): string | null {
@@ -429,7 +434,55 @@ function readExistingLabel(
   return null;
 }
 
-async function classifyBatch(
+/**
+ * Read a task's Service Category label straight off its own payload.
+ *
+ * `readExistingLabel` needs the option map from a prior getListCustomFields call,
+ * which is right for the backfill (it is already holding the field to write to)
+ * and wasteful for a sync that only wants to record what ClickUp says. ClickUp
+ * returns `type_config.options` inline on each task custom field, so the label
+ * resolves with no extra request.
+ *
+ * Matching on field NAME rather than a hardcoded id is deliberate: the Process
+ * Library lives in its own space and there is no guarantee its Service Category
+ * field shares an id with the one on contract Deliverables lists.
+ *
+ * Returns null when the field is absent, unset, or maps to no known option --
+ * all three mean "ClickUp has no answer for this task", which is what the caller
+ * should store.
+ */
+export function extractServiceCategoryLabel(task: ClickUpTaskLite): string | null {
+  if (!Array.isArray(task.custom_fields)) return null;
+
+  const entry = task.custom_fields.find(
+    (f) => (f.name || '').trim().toLowerCase() === SERVICE_CATEGORY_FIELD_NAME
+  );
+  if (!entry || !('value' in entry)) return null;
+
+  const value = entry.value;
+  if (value === null || value === undefined || value === '') return null;
+
+  const options = entry.type_config?.options || [];
+
+  // Dropdowns report the option UUID; some fields and API paths report the
+  // numeric orderindex instead, so both are resolved.
+  if (typeof value === 'string') {
+    const byId = options.find((opt) => opt.id === value);
+    const label = (byId?.label ?? byId?.name ?? '').trim();
+    return label || null;
+  }
+
+  if (typeof value === 'number') {
+    const byIndex =
+      options.find((opt) => opt.orderindex === value) ?? options[value];
+    const label = (byIndex?.label ?? byIndex?.name ?? '').trim();
+    return label || null;
+  }
+
+  return null;
+}
+
+export async function classifyBatch(
   tasks: ClickUpTaskLite[],
   contractName: string,
   listName: string,

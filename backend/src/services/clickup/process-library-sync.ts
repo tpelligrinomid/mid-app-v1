@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ClickUpClient, fetchWithRetry } from './client.js';
 import { syncConfig } from '../../config/sync-config.js';
 import { dbProxy } from '../../utils/db-proxy.js';
+import { extractServiceCategoryLabel } from './service-category.js';
 import { ingestContent } from '../rag/ingestion.js';
 
 interface ClickUpTask {
@@ -16,6 +17,7 @@ interface ClickUpTask {
     name: string;
     type: string;
     value?: unknown;
+    type_config?: { options?: Array<{ id?: string; name?: string; label?: string; orderindex?: number }> };
   }>;
 }
 
@@ -27,6 +29,8 @@ interface ProcessSyncResults {
   time_estimates_present: number;
   /** Items whose estimate had to be recovered via a task-detail call. */
   time_estimates_hydrated: number;
+  /** Items carrying a Service Category value in ClickUp. */
+  service_categories_present: number;
   errors: Array<{ context: string; error: string }>;
 }
 
@@ -86,6 +90,7 @@ export class ProcessLibrarySyncService {
       items_embedded: 0,
       time_estimates_present: 0,
       time_estimates_hydrated: 0,
+      service_categories_present: 0,
       errors: [],
     };
 
@@ -138,7 +143,9 @@ export class ProcessLibrarySyncService {
         `[Process Library Sync] Complete: ${results.items_synced} synced, ` +
         `${results.items_deactivated} deactivated, ${results.items_embedded} embedded, ` +
         `${results.time_estimates_present}/${results.items_synced} with time estimates ` +
-        `(${results.time_estimates_hydrated} hydrated), ${results.errors.length} errors`
+        `(${results.time_estimates_hydrated} hydrated), ` +
+        `${results.service_categories_present}/${results.items_synced} with service categories, ` +
+        `${results.errors.length} errors`
       );
 
       await this.logSyncComplete(syncId, 'success', results);
@@ -211,6 +218,7 @@ export class ProcessLibrarySyncService {
         }
 
         results.items_synced += filteredTasks.length;
+        results.service_categories_present += records.filter(r => r.service_category).length;
 
         // Embed each item
         for (const task of filteredTasks) {
@@ -322,6 +330,7 @@ export class ProcessLibrarySyncService {
       description: this.extractExternalDescription(task),
       points: this.extractPoints(task),
       time_estimate_ms: task.time_estimate || null,
+      service_category: extractServiceCategoryLabel(task),
       phase,
       phase_order,
       category: list.name,

@@ -52,8 +52,10 @@ Overhead is roughly constant in absolute hours, so its share falls as the fee ri
 
 Two columns already exist and need no work:
 
-- `dollar_per_hour` — the blended rate. **Populated on 3 of 36 contracts today; this is
-  the hard blocker.** The generator has nothing to divide by without it.
+- `dollar_per_hour` — the blended rate. Set when a new-model contract is created,
+  defaulting to $125. **This is not a backfill.** Existing contracts stay on points and
+  never need a rate; the generator simply refuses to run without one, which is a
+  validation at generation time rather than a migration.
 - `customer_display_type` — `'points' | 'hours' | 'none'`, already drives client display.
 
 New:
@@ -77,25 +79,36 @@ on approval, so downstream reporting knows what was sold.
 populated, rolled up from subtasks to match ClickUp's displayed total).
 `service_category` is already synced and classified.
 
-One field is missing, and it matters for scheduling:
+One field is missing:
 
 ```sql
 ALTER TABLE compass_process_library
-  ADD COLUMN IF NOT EXISTS cadence text;   -- 'one_time' | 'monthly' | 'per_deliverable'
+  ADD COLUMN IF NOT EXISTS work_type text;   -- 'deliverable' | 'ongoing'
 ```
 
-The library has three cadences and they schedule differently:
+**This is not a cadence field, and the distinction matters.** How often something is
+scheduled is a per-roadmap decision — "Manage social" might run three months and stop;
+"Develop web page" might run every month for a client doing a lot of pages. Scheduling is
+simply which months a row appears in, and needs no field at all.
 
-| Cadence | Items | Scheduling rule |
+What *is* stable is whether an item produces a discrete artifact:
+
+| `work_type` | Meaning | Examples |
 |---|---|---|
-| `one_time` | 13 | Month 1 only. "Set up paid media", "Set up SEO" |
-| `monthly` | 10 | Every month, unchanged. "Manage paid media", "Manage SEO" |
-| `per_deliverable` | 48 | Scheduled as needed. "Develop SEO blog post" |
+| `deliverable` | Produces a discrete artifact each time it runs | Develop SEO blog post, Develop image ad creative package |
+| `ongoing` | Continuous management, no discrete artifact | Manage ABM, Manage paid media, Manage performance reporting |
 
-**Source it from a ClickUp dropdown**, same pattern as Service Category. Name-prefix
-derivation (`Set up…` / `Manage…` / everything else) is correct for the current 85 items
-and can serve as an interim fallback, but it is guessing from a string and will break the
-first time someone names an item "Ongoing SEO management". Populate the field.
+`Manage ABM` produces no artifact whether it runs once or twelve times, so the property
+holds regardless of schedule. This is what the "maintained, not delivered" guardrail
+depends on.
+
+Setup items (`Set up paid media`, `Set up SEO`) are `deliverable` — standing a system up
+is a discrete piece of work with an end state. They land in month 1 because the generator
+schedules them there, not because a field says so.
+
+**Source it from a ClickUp dropdown**, same pattern as Service Category, and populate it
+with a classifier pass over the 85 items rather than by hand — the infrastructure in
+`process-library-category.ts` already does exactly this shape of job.
 
 ### Roadmap rows
 
@@ -109,6 +122,7 @@ Each generated task row carries **both** numbers:
   service_category: string,        // rolled up for display, stored at full granularity
   program: 'authority' | 'reach' | 'pursuit' | 'overhead',
   process_id: string | null,       // null when the strategist added a custom row
+  work_type: 'deliverable' | 'ongoing',
   baseline_hours: number,          // from the library, never overwritten
   hours: number,                   // generated or strategist-edited; what counts
   adjustment_reason: string | null
@@ -179,7 +193,7 @@ real rather than advisory.
 
 | Flag | Threshold | Why |
 |---|---|---|
-| **Category maintained, not delivered** | A category with `monthly` rows but no `per_deliverable` row that month | The direct guard against three categories at an hour each. A 1-hour `Manage performance reporting` line is fine when something in that category ships; three manage lines and no deliverable means the month produces nothing. |
+| **Category maintained, not delivered** | A category whose rows that month are all `work_type: ongoing` | The direct guard against three categories at an hour each. A 1-hour `Manage performance reporting` line is fine when something in that category ships; three ongoing lines and no deliverable means the month produces nothing. Reads work type, not schedule, so it is unaffected by how often anything runs. |
 | Overhead under-reserved | Strategy + AM < 9.8 hrs/month | Coordination is being borrowed against |
 | Month under capacity | Allocated < 85% of available | Unspent capacity accrues as rollover |
 | Breadth exceeds archetype | Active categories > tier's shape (see below) | Spread, not focus |
@@ -199,23 +213,23 @@ At Execute, generate from a named shape rather than composing freely:
 
 **Execute / Authority** — the client needs content produced
 
-| Task | Cadence | Hours |
+| Task | Work type | Hours |
 |---|---|---|
-| Manage content | monthly | 0.75 |
-| Manage SEO | monthly | 5.00 |
-| Manage performance reporting | monthly | 1.00 |
-| Develop SEO blog post × 2 | per_deliverable | 10.16 |
-| Optimize existing SEO article | per_deliverable | 4.58 |
+| Manage content | ongoing | 0.75 |
+| Manage SEO | ongoing | 5.00 |
+| Manage performance reporting | ongoing | 1.00 |
+| Develop SEO blog post × 2 | deliverable | 10.16 |
+| Optimize existing SEO article | deliverable | 4.58 |
 | | | **21.49** |
 
 **Execute / Reach** — the client already has content and needs paid run
 
-| Task | Cadence | Hours |
+| Task | Work type | Hours |
 |---|---|---|
-| Manage paid media | monthly | 4.00 |
-| Manage performance reporting | monthly | 1.00 |
-| Develop Google Ads text ad creative package | per_deliverable | 5.33 |
-| Develop image ad creative package | per_deliverable | 9.83 |
+| Manage paid media | ongoing | 4.00 |
+| Manage performance reporting | ongoing | 1.00 |
+| Develop Google Ads text ad creative package | deliverable | 5.33 |
+| Develop image ad creative package | deliverable | 9.83 |
 | | | **20.16** |
 
 Perform (38.2 hrs) composes more freely within its two programs. Grow (86.2 hrs) can run
@@ -223,7 +237,7 @@ full breadth.
 
 ### Month one
 
-`one_time` items land in month 1 and are heavy relative to Execute's capacity. An
+Setup work lands in month 1 and is heavy relative to Execute's capacity. An
 Execute / Reach engagement opens with `Set up paid media` (5.5h) and `Set up performance
 reporting` (7.0h) — 12.5 hours, **56% of the month's program capacity.**
 
@@ -252,13 +266,13 @@ tier?: 'execute' | 'perform' | 'grow';
 programs?: Array<'authority' | 'reach' | 'pursuit'>;
 /** Program roadmap: reserved monthly hours for strategy + account management */
 overhead_hours?: number;
-/** Program roadmap: library items with hours and cadence, filtered to eligible categories */
+/** Program roadmap: library items with hours and work type, filtered to eligible categories */
 process_library_hours?: Array<{
   task: string;
   description: string;
   stage: string;
   service_category: string;
-  cadence: 'one_time' | 'monthly' | 'per_deliverable';
+  work_type: 'deliverable' | 'ongoing';
   baseline_hours: number;
 }>;
 ```
@@ -329,16 +343,16 @@ the strategist can see what standard was.
 
 ## Sequencing
 
-1. Populate `dollar_per_hour` across contracts — **blocks everything else**
-2. Add the `cadence` dropdown in ClickUp and let the library sync carry it
-3. Migration: `pricing_model`, `tier`, `programs` on contracts
-4. Eligibility matrix as configuration
-5. `processor.ts` branch + payload assembly
-6. Master Marketer `/api/generate/program-roadmap`
-7. Lovable editing UI
+1. Add the `Work Type` dropdown in ClickUp; classify the 85 items and let the library
+   sync carry it
+2. Migration: `pricing_model`, `tier`, `programs` on contracts; `work_type` on the library
+3. Eligibility matrix as configuration
+4. `processor.ts` branch + payload assembly
+5. Master Marketer `/api/generate/program-roadmap`
+6. Lovable editing UI
 
-Steps 1 and 2 are data work and can start now. Nothing downstream is worth building until
-the rate is populated, because the generator has nothing to divide by.
+**Nothing here blocks on the existing book.** `dollar_per_hour` is set per new-model
+contract at creation, not backfilled, so no existing contract is touched at any step.
 
 ---
 

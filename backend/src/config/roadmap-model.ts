@@ -30,6 +30,21 @@ export const HOURS_PER_POINT = 0.78;
 export const OVERHEAD_HOURS = 9.8;
 
 /**
+ * Overhead is reserved OUTSIDE the plan, not composed within it.
+ *
+ * The generator allocates against program_hours and never emits a strategy or account
+ * management row -- reserving coordination time is not a decision worth a generation call.
+ * The backend injects a standard overhead block afterwards, so the client still sees it as
+ * its own line: the retainer model's value story depends on that reserve being visible
+ * rather than absorbed, and a client looking at 22.2 hours against a $4,000 fee will
+ * reasonably ask where the rest went.
+ *
+ * This is also why there is no `overhead_under_reserved` flag. Under this split it would
+ * fire on every option of every roadmap, and a flag that always fires teaches people to
+ * ignore the flag column.
+ */
+
+/**
  * The rate at which hours bill the same as the old $100 point.
  *
  * Below it, a program roadmap quotes less than the points menu did for the same work;
@@ -184,10 +199,26 @@ export const FLAG_CODES = {
     description: 'More active categories than the month has hours to serve properly',
     /** ~6 hours is the smallest library item that produces something substantial. */
     hoursPerCategory: 6,
+    /**
+     * An hours-only threshold stops protecting Execute above its floor. At the top of the
+     * band, program_hours / 6 is 6.35 while Authority has only five eligible categories to
+     * spend -- so the guardrail that enforces "Execute is one program run deliberately
+     * narrow" cannot fire exactly where there are ~16 spare hours to spread into.
+     *
+     * Capping by tier makes narrowness a property of the tier, which is what it is. Only
+     * Execute is capped: Perform composes more freely by design, and a Perform engagement
+     * at 86 program hours across nine eligible categories is ~9.5 hours each, which is
+     * legitimate.
+     *
+     * The cap is 4 because Execute / Reach genuinely uses four rolled-up categories --
+     * Paid media, Analytics & reporting, Content, Design. A cap of 3 would flag the
+     * archetype the spec recommends.
+     */
+    tierCategoryCap: { execute: 4, perform: null, grow: null } as Record<Tier, number | null>,
   },
-  overhead_under_reserved: {
-    description: 'Strategy and account management below the monthly reserve',
-    threshold: OVERHEAD_HOURS,
+  row_above_baseline: {
+    description: 'Row scheduled at more than twice its library baseline with no reason given',
+    threshold: 2,
   },
   month_under_capacity: {
     description: 'Month allocates less than 85% of available hours',
@@ -209,6 +240,48 @@ export const FLAG_CODES = {
 } as const;
 
 export type FlagCode = keyof typeof FLAG_CODES;
+
+/**
+ * Soft flags mean two different things to a strategist and want styling to match.
+ *
+ * `content_share_off_pattern` says the generator composed this badly; `row_below_baseline`
+ * after an edit says you just did. Same level, opposite response.
+ */
+export type FlagSeverity = 'review' | 'notice';
+
+export interface RoadmapFlag {
+  level: 'soft';
+  code: FlagCode;
+  message: string;
+  severity?: FlagSeverity;
+  /**
+   * Cross-option flags belong to the document rather than a month.
+   * `goal_target_not_monotonic` is a relation between two options and has nowhere else to
+   * live; the viewer uses this to highlight both sides of the comparison.
+   */
+  option_ids?: string[];
+}
+
+/** Flags that compare options and therefore attach at document level, not to a month. */
+export const CROSS_OPTION_FLAGS: FlagCode[] = [
+  'goal_commitment_mismatch',
+  'goal_target_not_monotonic',
+];
+
+/**
+ * Both baseline flags skip hand-added rows.
+ *
+ * A custom row has process_id null and therefore no baseline, so comparing against it
+ * either divides by zero or fires on every row a strategist adds by hand.
+ */
+export const BASELINE_FLAGS: FlagCode[] = ['row_below_baseline', 'row_above_baseline'];
+
+/** Max active rolled-up categories in a month before month_thin_spread fires. */
+export function maxCategoriesForMonth(tier: Tier, programHours: number): number {
+  const byHours = programHours / FLAG_CODES.month_thin_spread.hoursPerCategory;
+  const cap = FLAG_CODES.month_thin_spread.tierCategoryCap[tier];
+  return cap === null ? byHours : Math.min(byHours, cap);
+}
 
 /**
  * What a tier may commit to.
@@ -238,7 +311,11 @@ export function roadmapModelConfig() {
     non_hour_categories: [...NON_HOUR_CATEGORIES],
     commitment_ladder: COMMITMENT_LADDER,
     flag_codes: FLAG_CODES,
+    cross_option_flags: CROSS_OPTION_FLAGS,
+    baseline_flags: BASELINE_FLAGS,
     max_options: 3,
+    /** Overhead is reserved outside the plan and injected for display. */
+    overhead_in_plan: false,
     /** Pursuit needs a four-to-six week ramp and content behind it; Execute cannot fund that. */
     pursuit_min_tier: 'perform' as Tier,
     pursuit_sold_alone: false,

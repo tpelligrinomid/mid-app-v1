@@ -3,9 +3,9 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
-**v2** — incorporates the Master Marketer and Lovable review responses
-(`program-roadmap-review-response.md`, `program-roadmap-review-response-from-lovable.md`)
-and the four decisions taken against them.
+**v3** — incorporates the Master Marketer and Lovable review responses
+(`program-roadmap-review-response.md`, `-v2.md`, `program-roadmap-review-response-from-lovable.md`)
+and the decisions taken against them.
 
 ---
 
@@ -56,6 +56,20 @@ six months. Recompute if the library changes materially.
 |---|---|---|
 | Hours per point | `0.78` | Converting legacy points-denominated figures only |
 | Monthly overhead reserve | `9.8 hrs` | 12.6 observed points × 0.78; near-constant at every tier |
+
+**Overhead is reserved outside the plan, not composed within it.** The generator allocates
+against `program_hours` and never emits a strategy or account management row — reserving
+coordination time is not a decision worth a generation call. **The backend injects a
+standard overhead block afterwards**, so the client still sees it as its own line.
+
+That injection is not cosmetic. The retainer model's value story depends on the reserve
+being visible rather than absorbed — *"we'd rather tell you that up front than take the
+money and under-deliver"* — and a client looking at 22.2 hours against a $4,000 fee will
+reasonably ask where the rest went.
+
+It is also why there is no `overhead_under_reserved` flag. Under this split it would fire on
+every option of every roadmap, and a flag that always fires teaches people to ignore the
+flag column.
 | Points/hours break-even rate | `$129/hr` | Where hours bill the same as the old $100 point |
 
 **Task hours come from `compass_process_library.time_estimate_ms`, not from 0.78.** The
@@ -206,6 +220,18 @@ row-level `program` is derived:
 
 Fewer degrees of freedom, and the allocation itself becomes reviewable.
 
+**Row-level `program` is derived from the map and echoed, not independently chosen.** Stated
+explicitly because otherwise the field reads as a second, conflicting source of truth.
+
+**The form only asks for it at Perform and Grow.** For a single-program option every eligible
+category maps to that one program, so there is nothing to decide.
+
+**Known v1 limitation:** the map cannot express a category split across programs. At Perform
+and Grow, Content genuinely serves more than one — blog posts under Authority, ad copy under
+Reach, sequence copy under Pursuit — so `content_share_off_pattern` computes off a
+simplification at exactly the tiers where composition matters most. Accepted for v1: the flag
+is soft, and split weights are not worth the complexity yet.
+
 ---
 
 ## Roadmap options
@@ -264,6 +290,14 @@ with nothing saying why.
 it can only be evaluated afterwards. It is a **repair loop against the offending option**,
 never a refusal — a six-call generation must not be discarded because one month is 0.4 hours
 over.
+
+**The loop terminates: two repair attempts, then emit with a loud flag.** Failing a whole job
+on the third attempt is worse than shipping one over-capacity month a strategist can see and
+fix in the editor.
+
+**`recommended_option_id` is validated against the generated `option_id`s.** It is the one
+hallucination that puts the downstream-consumer rule into an unresolvable state — the
+fallback chain has no third step.
 
 ### The roadmap never writes back
 
@@ -452,7 +486,19 @@ per option so a Reach-only option cannot draw an Authority category present for 
 ## Expected output
 
 **Three months of task rows; twelve months of Gantt.** The points path is quarterly and this
-matches it. Twelve months of hour-level rows across three options is 36 month-blocks — it
+matches it. `roadmap_phases` stays at three 90-day phases, so the per-option block is
+internally consistent.
+
+**The Gantt's categories differ per option, not only its density.** At Execute one program
+runs; at Grow three do.
+
+**Months 4–12 are governed by nothing** — no rows price them, no capacity check applies, no
+flag reaches them. Across three options that is three unvalidated year-long projections
+rendered side by side, and the visual contrast between a dense Grow Gantt and a thin Execute
+one does pricing work no guardrail touches. Two constraints contain it: months 4–12 are
+**directional continuation of the same shape, never implied volume**, and they **introduce no
+category the priced quarter does not contain**. The viewer should label the projection as
+such. Twelve months of hour-level rows across three options is 36 month-blocks — it
 strains the output ceiling, and it is detail nobody reads in a sales proposal and everybody
 maintains afterwards.
 
@@ -502,12 +548,13 @@ maintains afterwards.
     "annual_plan": { "categories": [ /* 12-month Gantt */ ] },
     "hours_plan": {
       "section_description": "…",        // injected by the assembler, not generated
-      "total_hours": 64.5,
+      "total_hours_allocated": 64.5,
+      "total_hours_available": 66.6,
       "months": [{
         "month": 1,
         "month_label": "Month 1",
-        "hours_available": 22.2,
-        "hours_allocated": 21.5,
+        "program_hours_available": 22.2,
+        "program_hours_allocated": 21.5,
         "tasks": [ /* row schema above */ ],
         "flags": []                       // attached by the backend, not the model
       }]
@@ -575,15 +622,41 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 | `code` | Threshold |
 |---|---|
 | `row_below_baseline` | `hours < baseline_hours × 0.5` with no `adjustment_reason` |
-| `month_thin_spread` | active rolled-up categories > `program_hours / 6` |
-| `overhead_under_reserved` | strategy + AM below `overhead_hours` |
+| `row_above_baseline` | `hours > baseline_hours × 2` with no `adjustment_reason` |
+| `month_thin_spread` | active rolled-up categories > `min(program_hours / 6, tier cap)` — Execute caps at 4 |
 | `month_under_capacity` | allocated < 85% of available |
 | `content_share_off_pattern` | Authority <35% or >65%; Reach >45%; Pursuit >40% |
 | `ramp_month` | month 1 carrying heavy setup |
 | `goal_commitment_mismatch` | a goal's `commitment_type` exceeds what the tier permits |
 | `goal_target_not_monotonic` | a higher tier's target at or below a lower tier's |
 
-Flags are `{ level: 'soft', code, message }` and never block.
+```ts
+{ level: 'soft', code, message, severity?: 'review' | 'notice', option_ids?: string[] }
+```
+
+Flags never block. Three details the envelope has to carry:
+
+**`severity` separates two very different messages.** `content_share_off_pattern` says *the
+generator composed this badly*; `row_below_baseline` after an edit says *you just did*. Same
+level, opposite response — `review` styles louder than `notice` without inventing a hard
+level that blocks.
+
+**Cross-option flags attach to the document, not a month.**
+`goal_target_not_monotonic` is a relation between two options and has nowhere else to live;
+`goal_commitment_mismatch` is per-option. Both carry `option_ids` so the viewer can
+highlight both sides of a comparison.
+
+**Both baseline flags skip hand-added rows.** A custom row has `process_id: null` and
+therefore no baseline, so comparing against it either divides by zero or fires on every row a
+strategist adds.
+
+**Why the Execute cap on thin spread.** An hours-only threshold stops protecting Execute
+above its floor: at the top of the band `program_hours / 6` is 6.35 while Authority has only
+five eligible categories, so the guardrail cannot fire exactly where there are ~16 spare
+hours to spread into. The cap is **4**, not 3, because Execute / Reach genuinely uses four
+rolled-up categories — Paid media, Analytics & reporting, Content, Design — and a tighter cap
+would flag the archetype this spec recommends. Only Execute is capped: Perform composes more
+freely by design, and 86 program hours across nine eligible categories is ~9.5 hours each.
 
 **`month_under_capacity` is suppressed when `ramp_month` fires.** An Execute/Reach month one
 runs 17.5 of 22.2 hours — 79% — which trips both for the same expected, documented situation.
@@ -594,29 +667,38 @@ Execute is one program run **deliberately narrow**, not one program spread acros
 categories. Authority has five; free composition at 22.2 hours gives each about four and
 produces nothing.
 
+Each archetype is stated in **three classes**, because a flat task list leaves the generator
+guessing which rows are fixed and which flex — and it will guess differently between two
+options in the same document.
+
 **Execute / Authority** — the client needs content produced
 
-| Task | Hours |
-|---|---|
-| Manage content | 0.75 |
-| Manage SEO | 5.00 |
-| Manage performance reporting | 1.00 |
-| Develop SEO blog post × 2 | 10.16 |
-| Optimize existing SEO article | 4.58 |
-| | **21.49** |
+| Class | Cadence | Tasks |
+|---|---|---|
+| setup | month 1 only | per library, for the categories in play |
+| recurring | every month | Manage content 0.75 · Manage SEO 5.00 · Manage performance reporting 1.00 |
+| production | scales to fill | Develop SEO blog post 5.08 · Optimize existing SEO article 4.58 |
 
 **Execute / Reach** — the client already has content and needs paid run
 
-| Task | Hours |
-|---|---|
-| Manage paid media | 4.00 |
-| Manage performance reporting | 1.00 |
-| Develop Google Ads text ad creative package | 5.33 |
-| Develop image ad creative package | 9.83 |
-| | **20.16** |
+| Class | Cadence | Tasks |
+|---|---|---|
+| setup | month 1 only | Set up paid media 5.5 · Set up performance reporting 7.0 |
+| recurring | every month | Manage paid media 4.00 · Manage performance reporting 1.00 |
+| production | scales to fill | Google Ads text ad package 5.33 · Image ad creative package 9.83 |
 
-These are **task lists, not fixed totals.** They fit Execute's floor of 22.2 program hours; an
-Execute engagement higher in the band has more room and the same shape.
+The split makes both required behaviours mechanical:
+
+- **Month one** = setup + recurring + whatever production fits. Without this the arithmetic
+  is impossible: Execute / Reach setup is 12.5 hours and the steady-state shape is 20.16,
+  which is 32.7 against 22.2 of capacity. The archetype cannot run in month one, and
+  something has to give principled ground.
+- **Higher in the band** = more production, same recurring, **same categories**. This is what
+  "more room and the same shape" means in practice.
+
+**Production scaling to fill is a requirement, not a suggestion.** An Execute engagement at
+38.1 program hours running a fixed 21.5 sits at 56% allocated and would trip
+`month_under_capacity` every month of its life.
 
 Perform (38.2+) composes more freely. Grow (86.2+) can run full breadth.
 

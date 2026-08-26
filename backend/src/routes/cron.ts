@@ -810,8 +810,9 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       title: string;
       deliverable_type: string;
       metadata: Record<string, unknown> | null;
+      content_structured: Record<string, unknown> | null;
     }>>('compass_deliverables', {
-      select: 'deliverable_id,contract_id,title,deliverable_type,metadata',
+      select: 'deliverable_id,contract_id,title,deliverable_type,metadata,content_structured',
       filters: { deliverable_id: deliverableId },
       limit: 1,
     });
@@ -858,6 +859,10 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
         title: row.title,
         declared_type: row.deliverable_type,
         generation: gen ?? null,
+        // Whether a document actually landed, independent of whether the status write
+        // that should accompany it did.
+        has_content: !!row.content_structured,
+        content_keys: row.content_structured ? Object.keys(row.content_structured) : null,
         request_summary: {
           saved_at: stored.saved_at,
           has_options: Array.isArray(opts),

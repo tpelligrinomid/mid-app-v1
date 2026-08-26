@@ -3,7 +3,7 @@
 Hours-based, program-based, tier-based roadmap. Runs **alongside** the existing points
 roadmap; nothing about the points path changes.
 
-**v6 — this document supersedes every addendum and correction note.** Those were a
+**v7 — this document supersedes every addendum and correction note.** Those were a
 mistake: five delta documents across two repos, citing commits neither side could resolve.
 This file is the single current statement. Read it; ignore the rest.
 
@@ -306,7 +306,7 @@ $22,000 proposal, and any UI that totals them says otherwise.
 
 | Section | Scope |
 |---|---|
-| `executive_summary` | Shared, generated **last**, carries the recommendation |
+| `executive_summary` | Shared, generated **last**, writes the rationale for the supplied recommendation |
 | `overview`, `target_market`, `brand_story`, `products_and_solutions`, `competition` | **Shared** |
 | `goals`, `roadmap_phases`, `quarterly_initiatives`, `annual_plan`, `hours_plan` | **Per option** |
 
@@ -339,13 +339,19 @@ it can only be evaluated afterwards. It is a **repair loop against the offending
 never a refusal — a six-call generation must not be discarded because one month is 0.4 hours
 over.
 
-**The loop terminates: two repair attempts, then emit with a loud flag.** Failing a whole job
-on the third attempt is worse than shipping one over-capacity month a strategist can see and
-fix in the editor.
+**The loop terminates: two repair attempts, then emit `month_over_capacity`** at month scope,
+`severity: 'review'`. Failing a whole job on the third attempt is worse than shipping one
+over-capacity month a strategist can fix in the editor in seconds.
 
-**`recommended_option_id` is validated against the generated `option_id`s.** It is the one
-hallucination that puts the downstream-consumer rule into an unresolvable state — the
-fallback chain has no third step.
+**`recommended_option_id` is an INPUT, not generated.** The strategist picks it on the
+generation form as a 0-based `recommended_option_index`; the backend resolves it to an id
+before options are sorted, and sends it. The generator writes the rationale for a choice
+already made rather than making the choice.
+
+It is optional on the generator's side: when absent or unmatched it falls back to the
+highest tier and raises `recommendation_unresolved` at document scope. That fallback should
+never fire — the form always supplies it — but the downstream-consumer rule has no third
+step, so a content plan needs *some* option to plan against.
 
 ### The roadmap never writes back
 
@@ -504,6 +510,7 @@ roadmap_options?: Array<{
   program_allocation: Record<string, 'authority' | 'reach' | 'pursuit'>;
   monthly_budget: number;            // services only
   technology_monthly: number;        // for the executive summary's total
+  technology_one_time: number;       // setup fees, never amortised into the monthly figure
   total_monthly: number;
   hours_available: number;           // monthly_budget / hourly_rate
   overhead_hours: number;            // 9.8
@@ -513,6 +520,9 @@ roadmap_options?: Array<{
 program_matrix?: Record<'authority' | 'reach' | 'pursuit', string[]>;
 /** Program roadmap: library items, union of all options' eligible categories */
 process_library_hours?: Array<{
+  /** Echoed onto each generated row as `process_id`. Without it every row lands null and
+   *  both baseline flags -- which skip null rows -- can never fire on generated output. */
+  process_id: string;
   task: string;
   description: string;
   /** Enum, not free text: a bad value should fail at the boundary rather than
@@ -593,8 +603,8 @@ maintains afterwards.
     "program_hours": 22.2,
 
     "goals": { /* commitment_type per goal */ },
-    "roadmap_phases": [],
-    "quarterly_initiatives": [],
+    "roadmap_phases": { "section_description": "...", "phases": [] },
+    "quarterly_initiatives": { "section_description": "...", "initiatives": [] },
     "annual_plan": { "categories": [ /* 12-month Gantt */ ] },
     "hours_plan": {
       "section_description": "…",        // injected by the assembler, not generated
@@ -681,6 +691,8 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 | `ramp_month` | month 1 carrying heavy setup |
 | `goal_commitment_mismatch` | a goal's `commitment_type` exceeds what the tier permits |
 | `goal_target_not_monotonic` | a higher tier's target at or below a lower tier's |
+| `month_over_capacity` | month exceeds capacity after two repair attempts — the loop's terminal state |
+| `recommendation_unresolved` | no recommended option resolved; defaulted to the highest tier |
 
 ```ts
 {
@@ -698,9 +710,9 @@ period, so the SOW can carry it. The backend attaches `flags[]`.
 | Scope | Means | Codes |
 |---|---|---|
 | `row` | This row is priced wrong — renders inline on the row | `row_below_baseline`, `row_above_baseline` |
-| `month` | This month is composed badly | `month_thin_spread`, `month_under_capacity`, `ramp_month` |
+| `month` | This month is composed badly | `month_thin_spread`, `month_under_capacity`, `ramp_month`, `month_over_capacity` |
 | `option` | This option is wrong across its whole plan | `overhead_under_reserved`, `goal_commitment_mismatch`, `content_share_off_pattern` |
-| `document` | These options disagree with each other | `goal_target_not_monotonic` |
+| `document` | These options disagree with each other | `goal_target_not_monotonic`, `recommendation_unresolved` |
 
 `row` exists because `row_below_baseline` is the flag most likely to appear immediately after
 a strategist edits a row, and a month-level flag cannot point at which one.

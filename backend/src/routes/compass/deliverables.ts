@@ -553,25 +553,36 @@ router.post(
     });
 
     /**
-     * Persist the request before dispatching.
+     * Persist the request before dispatching, and AWAIT it.
      *
      * Nothing stored the generation inputs, so a submission that failed downstream took the
-     * whole form with it -- meetings, research inputs, and every roadmap option had to be
-     * re-entered by hand to try again. The request is small (transcripts and library are
-     * resolved server-side, not posted) and metadata is jsonb.
+     * whole form with it -- meetings, research inputs and every roadmap option re-entered by
+     * hand just to retry a backend fix.
+     *
+     * The await is the part that matters. setGenerationState does a read-modify-write on
+     * metadata, so a fire-and-forget write here races the generation's own state write --
+     * and a validation failure lands almost instantly, reading metadata before this write
+     * arrives and then overwriting it. The request appeared to save and was gone by the time
+     * anyone looked.
+     *
+     * The response has already been sent, so awaiting costs the caller nothing.
      */
-    void req.supabase
-      .from('compass_deliverables')
-      .update({
-        metadata: {
-          ...(deliverable.metadata as Record<string, unknown> | null),
-          generation_request: { ...req.body, saved_at: new Date().toISOString() },
-        },
-      })
-      .eq('deliverable_id', deliverableId)
-      .then(({ error }) => {
-        if (error) console.warn('[Deliverables] Could not persist generation_request:', error.message);
-      });
+    try {
+      const { error: persistError } = await req.supabase
+        .from('compass_deliverables')
+        .update({
+          metadata: {
+            ...(deliverable.metadata as Record<string, unknown> | null),
+            generation_request: { ...req.body, saved_at: new Date().toISOString() },
+          },
+        })
+        .eq('deliverable_id', deliverableId);
+      if (persistError) {
+        console.warn('[Deliverables] Could not persist generation_request:', persistError.message);
+      }
+    } catch (err) {
+      console.warn('[Deliverables] Could not persist generation_request:', err);
+    }
 
     // Fire-and-forget
     generateDeliverableInBackground({

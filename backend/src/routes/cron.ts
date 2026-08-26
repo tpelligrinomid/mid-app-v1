@@ -10,6 +10,8 @@ import { recoverStuckDeliverables, diagnoseDeliverables, recoverDeliverable } fr
 import { syncConfig } from '../config/sync-config.js';
 import { dbProxy } from '../utils/db-proxy.js';
 import { backfillServiceCategories } from '../services/clickup/service-category.js';
+import { generateDeliverableInBackground } from '../services/deliverable-generation/processor.js';
+import { select } from '../utils/edge-functions.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 
 const router = Router();
@@ -778,6 +780,84 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
       total_hours_value: Math.round(totalHours),
       by_category: byCategory,
       items: rows,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/cron/retry-deliverable-generation?deliverable_id=...
+//
+// Replays the stored generation_request for a deliverable. Exists because the generate
+// endpoint needs a user session, so a failure that is fixed backend-side otherwise means
+// re-entering the whole form to test the fix.
+//
+// Reads what was posted, not what was derived, so the retry is the same submission.
+router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  const deliverableId = String(req.query.deliverable_id || '').trim();
+  if (!deliverableId) {
+    res.status(400).json({ error: 'deliverable_id is required' });
+    return;
+  }
+
+  try {
+    const rows = await select<Array<{
+      deliverable_id: string;
+      contract_id: string;
+      title: string;
+      deliverable_type: string;
+      metadata: Record<string, unknown> | null;
+    }>>('compass_deliverables', {
+      select: 'deliverable_id,contract_id,title,deliverable_type,metadata',
+      filters: { deliverable_id: deliverableId },
+      limit: 1,
+    });
+
+    const row = rows?.[0];
+    if (!row) {
+      res.status(404).json({ error: 'Deliverable not found' });
+      return;
+    }
+
+    const stored = row.metadata?.generation_request as Record<string, unknown> | undefined;
+    if (!stored) {
+      res.status(409).json({
+        error: 'No stored generation_request for this deliverable',
+        detail: 'Only submissions made after request persistence shipped can be replayed.',
+      });
+      return;
+    }
+
+    console.log(`[Cron] Replaying generation for "${row.title}" (${row.deliverable_type})`);
+
+    void generateDeliverableInBackground({
+      deliverableId: row.deliverable_id,
+      contractId: row.contract_id,
+      title: row.title,
+      deliverableType: row.deliverable_type,
+      instructions: stored.instructions as string | undefined,
+      primaryMeetingIds: stored.primary_meeting_ids as string[] | undefined,
+      researchInputs: stored.research_inputs as never,
+      previousRoadmapId: stored.previous_roadmap_id as string | undefined,
+      pointsBudget: stored.points_budget as number | undefined,
+      roadmapRequest: (stored.options ? stored : { options: stored.roadmap_options }) as unknown,
+      seedTopics: stored.seed_topics as string[] | undefined,
+      maxCrawlPages: stored.max_crawl_pages as number | undefined,
+      referenceDeliverableIds: stored.reference_deliverable_ids as string[] | undefined,
+    }).catch(() => {
+      // Already handled inside generateDeliverableInBackground
+    });
+
+    res.status(202).json({
+      success: true,
+      deliverable_id: deliverableId,
+      title: row.title,
+      declared_type: row.deliverable_type,
+      replayed_from: stored.saved_at,
+      message: 'Generation replayed; watch metadata.generation for status.',
     });
   } catch (error) {
     res.status(500).json({

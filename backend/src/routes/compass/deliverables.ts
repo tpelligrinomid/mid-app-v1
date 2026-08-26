@@ -552,6 +552,27 @@ router.post(
       processing: { status: 'pending' },
     });
 
+    /**
+     * Persist the request before dispatching.
+     *
+     * Nothing stored the generation inputs, so a submission that failed downstream took the
+     * whole form with it -- meetings, research inputs, and every roadmap option had to be
+     * re-entered by hand to try again. The request is small (transcripts and library are
+     * resolved server-side, not posted) and metadata is jsonb.
+     */
+    void req.supabase
+      .from('compass_deliverables')
+      .update({
+        metadata: {
+          ...(deliverable.metadata as Record<string, unknown> | null),
+          generation_request: { ...req.body, saved_at: new Date().toISOString() },
+        },
+      })
+      .eq('deliverable_id', deliverableId)
+      .then(({ error }) => {
+        if (error) console.warn('[Deliverables] Could not persist generation_request:', error.message);
+      });
+
     // Fire-and-forget
     generateDeliverableInBackground({
       deliverableId,

@@ -822,11 +822,26 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       return;
     }
 
-    const stored = row.metadata?.generation_request as Record<string, unknown> | undefined;
+    /**
+     * A POST body stands in for the stored request, or overrides parts of it.
+     *
+     * Persistence shipped after the first submissions, so the earliest failures have
+     * nothing to replay -- and refilling a long form to retest a backend fix is exactly
+     * what the retry exists to avoid. Meetings and research resolve from the contract
+     * anyway; only the priced options genuinely have to be restated.
+     */
+    const inline = (req.body && Object.keys(req.body).length ? req.body : null) as Record<string, unknown> | null;
+    const persisted = row.metadata?.generation_request as Record<string, unknown> | undefined;
+    const stored = inline ? { ...(persisted ?? {}), ...inline } : persisted;
+
     if (!stored) {
       res.status(409).json({
         error: 'No stored generation_request for this deliverable',
-        detail: 'Only submissions made after request persistence shipped can be replayed.',
+        detail: 'Nothing persisted for this submission. POST the options inline to replay it.',
+        example: {
+          options: [{ name: 'Option A', monthly_hours: 45, programs: ['authority'] }],
+          recommended_option_index: 0,
+        },
       });
       return;
     }
@@ -883,7 +898,7 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       deliverable_id: deliverableId,
       title: row.title,
       declared_type: row.deliverable_type,
-      replayed_from: stored.saved_at,
+      replayed_from: inline ? 'inline payload' : stored.saved_at,
       message: 'Generation replayed; watch metadata.generation for status.',
     });
   } catch (error) {

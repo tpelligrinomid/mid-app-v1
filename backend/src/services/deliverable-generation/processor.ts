@@ -48,6 +48,13 @@ export interface GenerateOptions {
   referenceImages?: Array<{ url: string; caption?: string }>;
 }
 
+/** Did the caller supply priced options? That is the program roadmap's signature. */
+function hasRoadmapOptions(request: unknown): boolean {
+  const raw = (request ?? {}) as Record<string, unknown>;
+  const list = raw.options ?? raw.roadmap_options;
+  return Array.isArray(list) && list.length > 0;
+}
+
 /** Update the generation state in compass_deliverables.metadata */
 async function updateGenerationState(
   deliverableId: string,
@@ -362,9 +369,25 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       return;
     }
 
-    // Program roadmaps: hours-based, one document carrying 1-3 priced options.
-    // Entirely separate from the points path below, which is untouched.
-    if (deliverableType === 'program_roadmap') {
+    /**
+     * Program roadmaps: hours-based, one document carrying 1-3 priced options.
+     * Entirely separate from the points path below, which is untouched.
+     *
+     * Routed on the PAYLOAD, not only the deliverable type. The frontend builds the hours
+     * form inside the existing roadmap dialog, so the deliverable can legitimately arrive
+     * typed `roadmap` while carrying roadmap_options -- and a type-only check sent it down
+     * the points path, where a new-model contract has no monthly_points_allotment and
+     * resolves to a budget of 0. Master Marketer then rejected it on
+     * `points_budget: Number must be greater than 0`, which is a true error about the wrong
+     * thing entirely.
+     *
+     * Supplying options is unambiguous intent. Honour it whatever the type says.
+     */
+    const wantsProgramRoadmap =
+      deliverableType === 'program_roadmap' ||
+      (deliverableType === 'roadmap' && hasRoadmapOptions(roadmapRequest));
+
+    if (wantsProgramRoadmap) {
       const contractRow = await select<{ dollar_per_hour: number | null; customer_display_type: string | null }>(
         'contracts',
         {
@@ -420,7 +443,8 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       const techWarnings = Object.values(technology).flatMap(t => t.warnings);
 
       console.log(
-        `[Deliverable Generation] Program roadmap context for "${title}":`,
+        `[Deliverable Generation] Program roadmap context for "${title}" ` +
+        `(declared type: ${deliverableType}):`,
         {
           options: options.map(o => `${o.label} (${o.program_hours}h)`),
           rate: dollarPerHour,
@@ -499,6 +523,27 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
           pointsBudget = (contractResult as unknown as { monthly_points_allotment: number | null })?.monthly_points_allotment || 0;
         } catch (err) {
           console.warn('[Deliverable Generation] Failed to fetch points budget (non-blocking):', err);
+        }
+      }
+
+      /**
+       * A contract priced in hours has no points allotment, so this resolves to 0 and
+       * Master Marketer rejects it downstream with a message about points -- accurate, and
+       * useless for working out that the wrong form was used. Say so here instead.
+       */
+      if (!pointsBudget) {
+        const displayType = await select<{ customer_display_type: string | null }>('contracts', {
+          select: 'customer_display_type',
+          filters: { contract_id: contractId },
+          single: true,
+        }).then(r => r?.customer_display_type).catch(() => null);
+
+        if (displayType === 'hours') {
+          throw new Error(
+            'This contract is priced in hours but no roadmap options were supplied. ' +
+            'Generate it from the program roadmap form, which posts tier, programs and ' +
+            'monthly hours per option.'
+          );
         }
       }
 

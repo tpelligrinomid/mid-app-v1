@@ -462,7 +462,16 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       }
 
       const { jobId: prJobId, triggerRunId: prRunId } = await submitDeliverable({
-        deliverable_type: deliverableType,
+        // Always 'program_roadmap', never the declared type.
+        //
+        // The route is built from this field, and the branch above deliberately fires on
+        // the payload rather than the type -- the frontend builds the hours form inside the
+        // roadmap dialog, so a program roadmap legitimately arrives typed `roadmap`.
+        // Passing the declared type through sent the program payload to
+        // /api/generate/roadmap, where the points schema rejected it for missing
+        // points_budget and process_library. Both were absent because they belong to the
+        // other path entirely.
+        deliverable_type: 'program_roadmap',
         contract_id: contractId,
         title,
         instructions,

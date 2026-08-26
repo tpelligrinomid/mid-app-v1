@@ -70,15 +70,29 @@ export interface RoadmapOptionInput {
  *
  * `growth` is accepted as an alias for `grow`. The config endpoint publishes `grow`, but
  * failing a six-call generation over an obvious synonym is not a useful kind of strict.
+ *
+ * TIER IS DERIVED when absent. The form treats it as optional and omits it when unset, and
+ * a strategist has no reason to fill it in: capacity decides the band, the form already
+ * computes and displays that band from monthly_hours, and asking someone to restate it is
+ * how a whole generation fails on `unknown tier ""`. A supplied tier still wins, and is
+ * still validated against the band it claims.
  */
 export function normalizeOptionInput(
   raw: Record<string, unknown>,
   dollarPerHour: number
 ): RoadmapOptionInput {
-  const tierRaw = String(raw.tier ?? '').trim().toLowerCase();
-  const tier = (tierRaw === 'growth' ? 'grow' : tierRaw) as Tier;
-
   const monthlyHours = typeof raw.monthly_hours === 'number' ? raw.monthly_hours : undefined;
+
+  const tierRaw = String(raw.tier ?? '').trim().toLowerCase();
+  const declared = tierRaw === 'growth' ? 'grow' : tierRaw;
+  const derived =
+    typeof raw.monthly_budget === 'number'
+      ? tierForCapacity(raw.monthly_budget / dollarPerHour)
+      : monthlyHours !== undefined
+        ? tierForCapacity(monthlyHours)
+        : null;
+  const tier = (declared || derived || '') as Tier;
+
   const monthlyBudget =
     typeof raw.monthly_budget === 'number'
       ? raw.monthly_budget

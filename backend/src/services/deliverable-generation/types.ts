@@ -71,6 +71,8 @@ export interface DeliverableSubmission {
   program_matrix?: Record<string, string[]>;
   /** Program roadmap: library items, union of all options' eligible categories */
   process_library_hours?: Array<{
+    /** Echoed onto generated rows as process_id; the baseline flags need it. */
+    process_id: string;
     task: string;
     description: string;
     /** Enum, not free text -- a bad value should fail at the boundary rather than produce

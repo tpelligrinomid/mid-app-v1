@@ -306,6 +306,24 @@ export const FLAG_CODES = {
     description: 'A higher tier target at or below a lower tier one',
     scope: 'document' as const,
   },
+  month_over_capacity: {
+    /**
+     * The repair loop's terminal state. Two attempts to bring a month inside capacity, then
+     * the option ships with this rather than failing a six-call generation over an overage a
+     * strategist can fix in the editor in seconds.
+     */
+    description: 'Month allocates more hours than are available, after repair attempts',
+    scope: 'month' as const,
+  },
+  recommendation_unresolved: {
+    /**
+     * The form supplies recommended_option_id, so this should not occur. It exists because
+     * the downstream-consumer rule has no third fallback: if neither selected_option_id nor
+     * a valid recommendation resolves, a content plan has no option to plan against.
+     */
+    description: 'No recommended option resolved; defaulted to the highest tier',
+    scope: 'document' as const,
+  },
 } as const;
 
 export type FlagCode = keyof typeof FLAG_CODES;
@@ -349,7 +367,10 @@ export interface RoadmapFlag {
 export const ROW_LEVEL_FLAGS: FlagCode[] = ['row_below_baseline', 'row_above_baseline'];
 
 /** Flags that compare options against each other, and so attach to the document. */
-export const CROSS_OPTION_FLAGS: FlagCode[] = ['goal_target_not_monotonic'];
+export const CROSS_OPTION_FLAGS: FlagCode[] = [
+  'goal_target_not_monotonic',
+  'recommendation_unresolved',
+];
 
 /** Flags meaningful only across a whole option, not a single month. */
 export const OPTION_LEVEL_FLAGS: FlagCode[] = [

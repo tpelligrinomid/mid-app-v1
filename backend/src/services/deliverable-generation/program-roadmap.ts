@@ -183,6 +183,7 @@ interface AssignmentRow {
 }
 
 interface LibraryRow {
+  process_id: string;
   name: string;
   description: string | null;
   phase: string | null;
@@ -193,6 +194,12 @@ interface LibraryRow {
 export type RoadmapStage = 'Foundation' | 'Execution' | 'Analysis';
 
 export interface LibraryItem {
+  /**
+   * Without this the generator has no id to echo onto a row, every row lands with
+   * process_id null, and both baseline flags -- which skip null rows -- can never fire on
+   * anything generated. Two of the nine codes would be dead.
+   */
+  process_id: string;
   task: string;
   description: string;
   stage: RoadmapStage;
@@ -463,7 +470,7 @@ export async function loadEligibleLibrary(programs: Program[]): Promise<LibraryI
   eligible.add(OVERHEAD_CATEGORY);
 
   const rows = await select<LibraryRow[]>('compass_process_library', {
-    select: 'name,description,phase,service_category,time_estimate_ms',
+    select: 'process_id,name,description,phase,service_category,time_estimate_ms',
     filters: { is_active: true },
   });
 
@@ -476,6 +483,7 @@ export async function loadEligibleLibrary(programs: Program[]): Promise<LibraryI
       return rolled !== null && eligible.has(rolled);
     })
     .map((r) => ({
+      process_id: r.process_id,
       task: r.name,
       description: r.description || r.name,
       stage: STAGE_LABEL[r.phase!.toLowerCase()]!,

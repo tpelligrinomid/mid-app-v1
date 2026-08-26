@@ -831,6 +831,33 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       return;
     }
 
+    // ?inspect=1 reads the stored state without replaying. The generate endpoint needs a
+    // user session, so without this the only way to see why a generation failed is to ask
+    // whoever has the browser open.
+    if (req.query.inspect) {
+      const gen = row.metadata?.generation as Record<string, unknown> | undefined;
+      const opts = (stored.options ?? stored.roadmap_options) as unknown[] | undefined;
+      res.json({
+        success: true,
+        deliverable_id: deliverableId,
+        title: row.title,
+        declared_type: row.deliverable_type,
+        generation: gen ?? null,
+        request_summary: {
+          saved_at: stored.saved_at,
+          has_options: Array.isArray(opts),
+          option_count: Array.isArray(opts) ? opts.length : 0,
+          options: opts ?? null,
+          hours_model: stored.hours_model ?? null,
+          recommended_option_index: stored.recommended_option_index ?? null,
+          primary_meeting_ids: (stored.primary_meeting_ids as unknown[] | undefined)?.length ?? 0,
+          has_research_inputs: !!stored.research_inputs,
+          points_budget: stored.points_budget ?? null,
+        },
+      });
+      return;
+    }
+
     console.log(`[Cron] Replaying generation for "${row.title}" (${row.deliverable_type})`);
 
     void generateDeliverableInBackground({

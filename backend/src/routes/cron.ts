@@ -11,6 +11,8 @@ import { syncConfig } from '../config/sync-config.js';
 import { dbProxy } from '../utils/db-proxy.js';
 import { backfillServiceCategories } from '../services/clickup/service-category.js';
 import { generateDeliverableInBackground } from '../services/deliverable-generation/processor.js';
+import { submitDeliverable } from '../services/master-marketer/client.js';
+import { setGenerationStateSafe } from '../services/deliverable-generation/state.js';
 import { insert, select } from '../utils/edge-functions.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 
@@ -782,6 +784,116 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
       total_hours_value: Math.round(totalHours),
       by_category: byCategory,
       items: rows,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// POST /api/cron/passthrough-generate?contract_id=...&title=...
+//
+// Submits a Master Marketer payload verbatim against a fresh deliverable.
+//
+// Exists because a generation's expensive context -- research synthesis, meeting
+// transcripts -- is resolved server-side and is not recoverable from the form request. When
+// that context is only available as a captured MM payload, rebuilding it through the normal
+// path means losing it: without explicit meeting ids, transcripts resolve empty.
+//
+// Two things are rebuilt rather than passed through, because they are the parts that change
+// between runs: process_library_hours is re-matched against the live library so process_id
+// is present, and `recommended` is set on the option named by recommended_option_id.
+router.post('/passthrough-generate', verifyCronSecret, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const contractId = String(req.query.contract_id || '').trim();
+    const payload = (req.body?.json ?? req.body) as Record<string, unknown>;
+
+    if (!contractId) {
+      res.status(400).json({ error: 'contract_id is required' });
+      return;
+    }
+    if (!payload?.roadmap_options) {
+      res.status(400).json({ error: 'Body must be a Master Marketer program roadmap payload' });
+      return;
+    }
+
+    const title = String(req.query.title || payload.title || 'Program Roadmap (passthrough)');
+
+    // Re-match library items to recover process_id, which the captured payload lacks.
+    const libraryRows = await select<Array<{ process_id: string; name: string }>>(
+      'compass_process_library',
+      { select: 'process_id,name', filters: { is_active: true } }
+    );
+    const idByTask = new Map((libraryRows || []).map(r => [r.name.trim(), r.process_id]));
+
+    const library = (payload.process_library_hours as Array<Record<string, unknown>> | undefined) ?? [];
+    let matched = 0;
+    const enrichedLibrary = library.map(item => {
+      const id = idByTask.get(String(item.task || '').trim());
+      if (id) matched++;
+      return { ...item, process_id: id ?? null };
+    });
+
+    const recommendedId = payload.recommended_option_id as string | undefined;
+    const options = ((payload.roadmap_options as Array<Record<string, unknown>>) ?? []).map(o => ({
+      ...o,
+      recommended: !!recommendedId && o.option_id === recommendedId,
+    }));
+
+    const created = await insert<Array<{ deliverable_id: string }>>('compass_deliverables', {
+      contract_id: contractId,
+      title,
+      deliverable_type: 'program_roadmap',
+      status: 'planned',
+    });
+    const deliverableId = created?.[0]?.deliverable_id;
+    if (!deliverableId) {
+      res.status(500).json({ error: 'Could not create the deliverable' });
+      return;
+    }
+
+    const { jobId, triggerRunId } = await submitDeliverable({
+      deliverable_type: 'program_roadmap',
+      contract_id: contractId,
+      title,
+      instructions: payload.instructions as string | undefined,
+      client: payload.client as never,
+      metadata: { deliverable_id: deliverableId },
+      research: payload.research as never,
+      transcripts: payload.transcripts as string[] | undefined,
+      hourly_rate: payload.hourly_rate as number,
+      roadmap_options: options as never,
+      program_matrix: payload.program_matrix as never,
+      process_library_hours: enrichedLibrary as never,
+      ...(recommendedId && { recommended_option_id: recommendedId }),
+    });
+
+    await setGenerationStateSafe(deliverableId, {
+      status: 'submitted',
+      job_id: jobId,
+      trigger_run_id: triggerRunId,
+      submitted_at: new Date().toISOString(),
+    });
+
+    console.log(
+      `[Cron] Passthrough submitted "${title}" -> deliverable ${deliverableId} ` +
+      `(job ${jobId}, run ${triggerRunId}); ${matched}/${library.length} library items matched a process_id`
+    );
+
+    res.status(202).json({
+      success: true,
+      deliverable_id: deliverableId,
+      title,
+      job_id: jobId,
+      trigger_run_id: triggerRunId,
+      library_items: library.length,
+      library_with_process_id: matched,
+      options: options.length,
+      recommended_option_id: recommendedId ?? null,
+      transcripts: (payload.transcripts as unknown[] | undefined)?.length ?? 0,
+      research_chars: ((payload.research as { full_document_markdown?: string } | undefined)?.full_document_markdown || '').length,
     });
   } catch (error) {
     res.status(500).json({

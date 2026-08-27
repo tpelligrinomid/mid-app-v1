@@ -949,6 +949,25 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
     const persisted = row.metadata?.generation_request as Record<string, unknown> | undefined;
     const stored = inline ? { ...(persisted ?? {}), ...inline } : persisted;
 
+    // Inspect answers before requiring a stored request. Nothing stored is a legitimate
+    // state -- and the state in which you most want to see what the deliverable is.
+    if (req.query.inspect && !stored) {
+      const gen = row.metadata?.generation as Record<string, unknown> | undefined;
+      res.json({
+        success: true,
+        deliverable_id: deliverableId,
+        contract_id: row.contract_id,
+        title: row.title,
+        declared_type: row.deliverable_type,
+        generation: gen ?? null,
+        has_content: !!row.content_structured,
+        content_keys: row.content_structured ? Object.keys(row.content_structured) : null,
+        request_summary: null,
+        note: 'No stored generation_request; POST options inline to replay.',
+      });
+      return;
+    }
+
     if (!stored) {
       res.status(409).json({
         error: 'No stored generation_request for this deliverable',
@@ -970,6 +989,7 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       res.json({
         success: true,
         deliverable_id: deliverableId,
+        contract_id: row.contract_id,
         title: row.title,
         declared_type: row.deliverable_type,
         generation: gen ?? null,

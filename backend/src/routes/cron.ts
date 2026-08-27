@@ -710,13 +710,14 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
     const rate = req.query.rate ? Number(req.query.rate) : 150;
 
     const { data, error } = await dbProxy.select<Array<{
+      process_id: string;
       name: string;
       points: number | null;
       time_estimate_ms: number | null;
       service_category: string | null;
       phase: string | null;
     }>>('compass_process_library', {
-      columns: 'name,points,time_estimate_ms,service_category,phase',
+      columns: 'process_id,name,points,time_estimate_ms,service_category,phase',
       filters: { is_active: true },
     });
 
@@ -733,6 +734,7 @@ router.get('/process-library-value-check', verifyCronSecret, async (req: Request
         const hoursValue = hours * rate;
         return {
           name: r.name,
+          process_id: (r as unknown as { process_id?: string }).process_id ?? null,
           service_category: r.service_category,
           phase: r.phase,
           points: r.points,

@@ -453,6 +453,10 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
           has_previous_roadmap: !!previousRoadmap,
           transcript_count: context.primary_meetings.length,
           library_items: library.length,
+          // Proves what we send, so a field missing downstream can be attributed to the
+          // sender or the receiver without guessing.
+          library_with_process_id: library.filter(l => l.process_id).length,
+          option_keys: options[0] ? Object.keys(options[0]) : [],
           technology_warnings: techWarnings.length,
         }
       );

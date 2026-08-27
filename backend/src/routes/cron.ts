@@ -11,7 +11,7 @@ import { syncConfig } from '../config/sync-config.js';
 import { dbProxy } from '../utils/db-proxy.js';
 import { backfillServiceCategories } from '../services/clickup/service-category.js';
 import { generateDeliverableInBackground } from '../services/deliverable-generation/processor.js';
-import { select } from '../utils/edge-functions.js';
+import { insert, select } from '../utils/edge-functions.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 
 const router = Router();
@@ -878,12 +878,45 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
       return;
     }
 
-    console.log(`[Cron] Replaying generation for "${row.title}" (${row.deliverable_type})`);
+    /**
+     * ?clone=1 replays into a NEW deliverable instead of overwriting this one.
+     *
+     * Each generator fix wants a clean target, and comparing the new output against the old
+     * is most of how you tell whether the fix worked. Overwriting destroys the thing you are
+     * comparing against.
+     *
+     * The clone carries the stored request forward, so it can be replayed again in turn.
+     */
+    let targetId = deliverableId;
+    let targetTitle = row.title;
+
+    if (req.query.clone) {
+      const stamp = new Date().toISOString().slice(5, 16).replace('T', ' ');
+      targetTitle = `${row.title.replace(/ \(rerun .*\)$/, '')} (rerun ${stamp})`;
+
+      const created = await insert<Array<{ deliverable_id: string }>>('compass_deliverables', {
+        contract_id: row.contract_id,
+        title: targetTitle,
+        deliverable_type: row.deliverable_type,
+        status: 'planned',
+        metadata: { generation_request: stored },
+      });
+
+      const newId = created?.[0]?.deliverable_id;
+      if (!newId) {
+        res.status(500).json({ error: 'Could not create the cloned deliverable' });
+        return;
+      }
+      targetId = newId;
+      console.log(`[Cron] Cloned ${deliverableId} -> ${targetId} for rerun`);
+    }
+
+    console.log(`[Cron] Replaying generation for "${targetTitle}" (${row.deliverable_type})`);
 
     void generateDeliverableInBackground({
-      deliverableId: row.deliverable_id,
+      deliverableId: targetId,
       contractId: row.contract_id,
-      title: row.title,
+      title: targetTitle,
       deliverableType: row.deliverable_type,
       instructions: stored.instructions as string | undefined,
       primaryMeetingIds: stored.primary_meeting_ids as string[] | undefined,
@@ -900,8 +933,9 @@ router.post('/retry-deliverable-generation', verifyCronSecret, async (req: Reque
 
     res.status(202).json({
       success: true,
-      deliverable_id: deliverableId,
-      title: row.title,
+      deliverable_id: targetId,
+      cloned_from: req.query.clone ? deliverableId : undefined,
+      title: targetTitle,
       declared_type: row.deliverable_type,
       replayed_from: inline ? 'inline payload' : stored.saved_at,
       message: 'Generation replayed; watch metadata.generation for status.',

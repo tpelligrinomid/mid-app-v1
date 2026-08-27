@@ -842,10 +842,19 @@ router.post('/passthrough-generate', verifyCronSecret, async (req: Request, res:
       recommended: !!recommendedId && o.option_id === recommendedId,
     }));
 
+    /**
+     * Created as `roadmap`, not `program_roadmap`, to match what the generation form
+     * actually produces -- the hours form lives inside the roadmap dialog. A passthrough
+     * typed differently from production is not a faithful test of it, and the frontend's
+     * type badge does not recognise `program_roadmap`, so it renders as "Other".
+     *
+     * The submission below is still pinned to program_roadmap, which is what routes it to
+     * the right Master Marketer endpoint. Overridable for when the frontend adopts the type.
+     */
     const created = await insert<Array<{ deliverable_id: string }>>('compass_deliverables', {
       contract_id: contractId,
       title,
-      deliverable_type: 'program_roadmap',
+      deliverable_type: String(req.query.deliverable_type || 'roadmap'),
       status: 'planned',
     });
     const deliverableId = created?.[0]?.deliverable_id;

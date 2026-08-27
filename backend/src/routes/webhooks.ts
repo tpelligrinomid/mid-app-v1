@@ -80,6 +80,16 @@ router.post(
         }
       );
 
+      /**
+       * Everything else already stored under metadata.
+       *
+       * The writes below used to replace metadata outright, so every completion and every
+       * failure discarded whatever else lived there -- generation_request, context_summary,
+       * trigger_run_id. That is how a submission that saved correctly was gone by the time
+       * anyone came to replay it: not a race, just an unconditional overwrite on the way
+       * out.
+       */
+      const existingMetadata = (existing?.[0]?.metadata ?? {}) as Record<string, unknown>;
       const currentGenStatus = existing?.[0]?.metadata?.generation?.status;
       if (currentGenStatus === 'completed') {
         console.log(`[Webhooks] Deliverable ${deliverable_id} already completed, skipping`);
@@ -103,7 +113,9 @@ router.post(
             content_raw: output.content_raw,
             content_structured: output.content_structured,
             metadata: {
+              ...existingMetadata,
               generation: {
+                ...(existingMetadata.generation as Record<string, unknown> | undefined),
                 status: 'completed',
                 job_id,
                 completed_at: new Date().toISOString(),
@@ -139,7 +151,9 @@ router.post(
           {
             status: 'planned',
             metadata: {
+              ...existingMetadata,
               generation: {
+                ...(existingMetadata.generation as Record<string, unknown> | undefined),
                 status: 'failed',
                 job_id,
                 error: payload.error || 'Unknown error from Master Marketer',

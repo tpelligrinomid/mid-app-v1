@@ -227,7 +227,7 @@ Which categories a program may draw from. Configuration, exposed as data.
 | Organic social | ● | | |
 | Podcast & video | ● | | |
 | Paid media | | ● | ● |
-| Email & nurture | | ● | |
+| Email & nurture | | ● | ● |
 | Outbound | | | ● |
 
 **Strategy & account management is in no program's column, because it is not sold as one.

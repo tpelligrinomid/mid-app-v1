@@ -138,6 +138,10 @@ export const PROGRAM_MATRIX: Record<Program, string[]> = {
     'Marketing operations',
     'Analytics & reporting',
     'Paid media',
+    // Named accounts get nurtured once they engage, so a Pursuit engagement needs the
+    // sequence and lifecycle work that follows a reply -- not only the cold outreach that
+    // earns it.
+    'Email & nurture',
     'Outbound',
   ],
 };

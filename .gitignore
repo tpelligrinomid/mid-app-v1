@@ -28,3 +28,16 @@ docs/sample-payloads-tally.txt
 docs/task-analysis-q1-2026.html
 docs/task-analysis-q1-2026.md
 docs/top-contracts-q1-2026.md
+
+# Secrets. Never tracked -- .env was untracked but unignored, which is one
+# `git add -A` away from publishing API keys.
+.env
+.env.*
+!.env.example
+
+# Captured generation payloads and outputs. These carry client research and full
+# meeting transcripts (the Zaviant samples are ~1.2MB of both), so they stay local
+# the same way the data exports do.
+docs/program-roadmap-*payload*.json
+docs/program-roadmap-*payload*.txt
+docs/program-roadmap-output-sample.txt

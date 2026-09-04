@@ -13,6 +13,7 @@ import { select } from '../utils/edge-functions.js';
 import { getJobByRunId } from '../services/master-marketer/client.js';
 import { processScrapeResult, processFileExtractResult } from '../services/content-ingestion/processor.js';
 import { recoverDeliverable, normalizeOutput } from '../services/deliverable-generation/recover.js';
+import { attachTechnologyToOptions } from '../services/deliverable-generation/program-roadmap.js';
 
 interface DeliverableRow {
   metadata: GenerationState | null;
@@ -105,13 +106,21 @@ router.post(
 
         const output = normalizeOutput(payload.output as unknown as Record<string, unknown>);
 
+        // Program roadmaps only: lift the technology resolved at submission onto each
+        // option, so the viewer can name the stack the monthly platform figure pays for.
+        // A no-op for everything else.
+        const contentStructured = attachTechnologyToOptions(
+          output.content_structured,
+          existingMetadata
+        );
+
         // Write content + update status
         await edgeFnUpdate(
           'compass_deliverables',
           {
             status: 'planned',
             content_raw: output.content_raw,
-            content_structured: output.content_structured,
+            content_structured: contentStructured,
             metadata: {
               ...existingMetadata,
               generation: {
@@ -130,8 +139,8 @@ router.post(
         // Auto-embed (non-blocking)
         const contentToEmbed =
           output.content_raw ||
-          (output.content_structured
-            ? JSON.stringify(output.content_structured)
+          (contentStructured
+            ? JSON.stringify(contentStructured)
             : null);
 
         if (contentToEmbed && process.env.OPENAI_API_KEY) {

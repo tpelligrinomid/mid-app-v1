@@ -451,6 +451,87 @@ export async function resolveTechnology(
   return result;
 }
 
+/** One tool as the viewer sees it: what it is, not what it costs. */
+export interface TechnologyDisplayItem {
+  technology_id: string;
+  name: string;
+  vendor: string | null;
+  quantity: number;
+}
+
+/**
+ * Attach the resolved technology to each option in the generated document.
+ *
+ * Master Marketer is sent totals only -- `technology_monthly` and `technology_one_time` --
+ * because the items never become plan rows and never consume hours, so shipping them would
+ * be token cost on all six generation calls. That left the document with a number nobody
+ * could account for: platform spend with no way to see what it bought.
+ *
+ * The items are already resolved at submission time and stored on
+ * `metadata.generation.context_summary.technology`, keyed by option id. This lifts them
+ * onto the options as the output is written, so the viewer reads one object and needs no
+ * second call.
+ *
+ * Per-tool prices are deliberately dropped. The monthly total is the client-facing number;
+ * a line-by-line breakdown invites a negotiation over a $40 tool, and the client portal
+ * already itemises the durable billing record from `contract_technologies`.
+ *
+ * A no-op for every other deliverable type, and for a roadmap whose resolution is missing
+ * (anything generated before the webhook stopped replacing metadata wholesale).
+ */
+export function attachTechnologyToOptions(
+  contentStructured: Record<string, unknown> | null,
+  metadata: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  if (!contentStructured) return contentStructured;
+
+  const options = contentStructured.options;
+  if (!Array.isArray(options) || options.length === 0) return contentStructured;
+
+  const generation = (metadata as { generation?: { context_summary?: { technology?: unknown } } } | null | undefined)
+    ?.generation;
+  const resolved = generation?.context_summary?.technology as
+    | Record<string, TechnologyResolution>
+    | undefined;
+  if (!resolved || typeof resolved !== 'object') return contentStructured;
+
+  let attached = 0;
+  let missing = 0;
+
+  const merged = options.map((option) => {
+    if (!option || typeof option !== 'object') return option;
+    const o = option as Record<string, unknown>;
+
+    // Matched on option_id, which MM echoes back unchanged. Matching on position would
+    // silently mis-assign a stack the moment the generator reorders or drops an option.
+    const forOption = resolved[String(o.option_id)];
+    if (!forOption?.items?.length) {
+      // An option with no billable tools selected is ordinary, not a fault -- just counted.
+      missing++;
+      return o;
+    }
+
+    attached++;
+    const items: TechnologyDisplayItem[] = forOption.items.map((item) => ({
+      technology_id: item.technology_id,
+      name: item.name,
+      vendor: item.vendor,
+      quantity: item.quantity,
+    }));
+
+    return { ...o, technology: items };
+  });
+
+  if (attached === 0) return contentStructured;
+
+  console.log(
+    `[Program Roadmap] Attached technology to ${attached}/${options.length} option(s)` +
+    (missing ? `; ${missing} had no resolved items` : '')
+  );
+
+  return { ...contentStructured, options: merged };
+}
+
 // ---------------------------------------------------------------------------
 // Library
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ import { select } from '../../utils/edge-functions.js';
 import { setGenerationState } from './state.js';
 import { getJobByRunId } from '../master-marketer/client.js';
 import { ingestContent } from '../rag/ingestion.js';
+import { attachTechnologyToOptions } from './program-roadmap.js';
 import type { GenerationState } from './types.js';
 
 interface DeliverableRow {
@@ -142,6 +143,12 @@ export async function recoverDeliverable(
 
       const output = normalizeOutput(result.output as unknown as Record<string, unknown>);
 
+      // Same attachment the webhook does, so a recovered roadmap is not a lesser one.
+      const contentStructured = attachTechnologyToOptions(
+        output.content_structured,
+        row?.metadata as unknown as Record<string, unknown> | null
+      );
+
       await setGenerationState(
         deliverableId,
         {
@@ -153,14 +160,14 @@ export async function recoverDeliverable(
         {
           status: 'planned',
           content_raw: output.content_raw,
-          content_structured: output.content_structured,
+          content_structured: contentStructured,
         }
       );
 
       // Auto-embed (non-blocking)
       const contentToEmbed =
         output.content_raw ||
-        (output.content_structured ? JSON.stringify(output.content_structured) : null);
+        (contentStructured ? JSON.stringify(contentStructured) : null);
 
       if (contentToEmbed && process.env.OPENAI_API_KEY && row?.contract_id) {
         ingestContent({

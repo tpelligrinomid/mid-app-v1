@@ -538,6 +538,23 @@ hours; the only generator need is the executive summary's total-investment sente
 takes `technology_monthly` and `total_monthly`. The backend stores the resolved items on the
 deliverable for display. Sending them would be pure token cost on every call.
 
+**They reach the viewer on the way out instead.** When the generated document is written --
+webhook completion and recovery both -- the backend lifts the stored resolution onto each
+option as `technology`, matched on `option_id`:
+
+```jsonc
+"technology": [
+  { "technology_id": "...", "name": "HubSpot", "vendor": "HubSpot", "quantity": 1 },
+  { "technology_id": "...", "name": "Clay",    "vendor": "Clay",    "quantity": 2 }
+]
+```
+
+Names, vendor and quantity only -- **no per-tool price**. `technology_monthly` remains the
+one client-facing figure: a line-by-line breakdown invites a negotiation over a $40 tool, and
+the client portal already itemises the durable billing record from `contract_technologies`.
+The array is absent when an option selected no billable tools, so the viewer must treat it as
+optional.
+
 The library is sent as a **union** across options; Master Marketer applies `program_matrix`
 per option so a Reach-only option cannot draw an Authority category present for another.
 

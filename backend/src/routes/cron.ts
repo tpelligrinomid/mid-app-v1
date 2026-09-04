@@ -15,6 +15,7 @@ import { submitDeliverable } from '../services/master-marketer/client.js';
 import { setGenerationStateSafe } from '../services/deliverable-generation/state.js';
 import { insert, select } from '../utils/edge-functions.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
+import { resolveTechnology } from '../services/deliverable-generation/program-roadmap.js';
 
 const router = Router();
 
@@ -837,10 +838,33 @@ router.post('/passthrough-generate', verifyCronSecret, async (req: Request, res:
     });
 
     const recommendedId = payload.recommended_option_id as string | undefined;
-    const options = ((payload.roadmap_options as Array<Record<string, unknown>>) ?? []).map(o => ({
-      ...o,
-      recommended: !!recommendedId && o.option_id === recommendedId,
-    }));
+
+    /**
+     * Technology is the third thing rebuilt rather than passed through, and only when the
+     * body asks for it: a captured payload carries the totals but not `technology_ids`,
+     * because the ids are resolved server-side and never sent to Master Marketer. Add them
+     * back onto an option here and the passthrough stores the same resolution the form
+     * path does -- which is what the generated document's per-option technology list is
+     * built from. Omit them and the run behaves exactly as before.
+     */
+    const rawOptions = (payload.roadmap_options as Array<Record<string, unknown>>) ?? [];
+    const technology: Record<string, unknown> = {};
+
+    const options = [];
+    for (const raw of rawOptions) {
+      // Stripped before submission: MM has no field for it and never wanted one.
+      const { technology_ids: technologyIds, ...option } = raw;
+      const optionId = String(option.option_id || '');
+
+      if (Array.isArray(technologyIds) && technologyIds.length) {
+        technology[optionId] = await resolveTechnology(contractId, technologyIds as string[]);
+      }
+
+      options.push({
+        ...option,
+        recommended: !!recommendedId && option.option_id === recommendedId,
+      });
+    }
 
     /**
      * Created as `roadmap`, not `program_roadmap`, to match what the generation form
@@ -884,6 +908,14 @@ router.post('/passthrough-generate', verifyCronSecret, async (req: Request, res:
       job_id: jobId,
       trigger_run_id: triggerRunId,
       submitted_at: new Date().toISOString(),
+      ...(Object.keys(technology).length > 0 && {
+        context_summary: {
+          meetings_count: 0,
+          notes_count: 0,
+          processes_count: enrichedLibrary.length,
+          technology,
+        },
+      }),
     });
 
     console.log(
@@ -900,6 +932,7 @@ router.post('/passthrough-generate', verifyCronSecret, async (req: Request, res:
       library_items: library.length,
       library_with_process_id: matched,
       options: options.length,
+      options_with_technology: Object.keys(technology).length,
       recommended_option_id: recommendedId ?? null,
       transcripts: (payload.transcripts as unknown[] | undefined)?.length ?? 0,
       research_chars: ((payload.research as { full_document_markdown?: string } | undefined)?.full_document_markdown || '').length,

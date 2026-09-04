@@ -90,6 +90,9 @@ The adapter needs this concretely, so here it is in full.
     "commitment": "annual",
     "notes": "…",
     "flags": [],                       // option scope
+    "technology": [                    // optional; absent when no billable tools were selected
+      { "technology_id": "…", "name": "HubSpot", "vendor": "HubSpot", "quantity": 1 }
+    ],
 
     "goals": { },                      // each goal carries commitment_type
     "roadmap_phases":        { "section_description": "…", "phases": [] },
@@ -190,6 +193,13 @@ entries hold. You flagged this; budget for it explicitly.
 
 **Never show a summed total across options.** They are alternatives. Three options are not a
 $22,000 proposal. Each option card shows services / technology / total for that option only.
+
+**Name the technology, don't price it.** Each option may carry `technology[]` — the tools
+that option's `technology_monthly` pays for, with vendor and quantity but no per-tool price.
+Render it beside the technology figure on the option card: *Platform: HubSpot, Clay, HeyReach
+— $1,912/mo*. Per-tool prices are withheld on purpose; a breakdown invites a negotiation over
+a $40 tool. The array is absent when an option selected no billable tools, so treat it as
+optional and show only the figure in that case.
 
 **`selected_option_id`** collapses to one option with a persistent "compare all options"
 affordance. It is a label — it writes nothing to the contract or its technology.

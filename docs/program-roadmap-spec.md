@@ -555,6 +555,11 @@ the client portal already itemises the durable billing record from `contract_tec
 The array is absent when an option selected no billable tools, so the viewer must treat it as
 optional.
 
+Options may also carry **`technology_note`** — free text explaining the stack, written by the
+strategist against the generated document and saved through the ordinary deliverable update.
+Nothing on the backend generates, reads or validates it; it is frontend-owned, and it is
+replaced along with the rest of the document on regeneration.
+
 The library is sent as a **union** across options; Master Marketer applies `program_matrix`
 per option so a Reach-only option cannot draw an Authority category present for another.
 

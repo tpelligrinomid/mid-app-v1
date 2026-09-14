@@ -568,20 +568,44 @@ router.post(
      * The response has already been sent, so awaiting costs the caller nothing.
      */
     try {
-      const { error: persistError } = await req.supabase
-        .from('compass_deliverables')
-        .update({
+      /**
+       * Written with the SERVICE ROLE, not `req.supabase`.
+       *
+       * The user-session client reported success and wrote nothing: an update the row
+       * policy declines is not an error, it is zero rows affected, and the only signal
+       * was a `warn` nobody reads. Four consecutive submissions persisted no request,
+       * which is every retry this exists to serve.
+       *
+       * Every other write in the generation pipeline already goes through the edge
+       * functions for this reason. Select the row back so a silent no-op cannot pass
+       * for a write -- a throw is recoverable, a lie is not.
+       */
+      const persisted = await update<Array<{ deliverable_id: string }>>(
+        'compass_deliverables',
+        {
           metadata: {
             ...(deliverable.metadata as Record<string, unknown> | null),
             generation_request: { ...req.body, saved_at: new Date().toISOString() },
           },
-        })
-        .eq('deliverable_id', deliverableId);
-      if (persistError) {
-        console.warn('[Deliverables] Could not persist generation_request:', persistError.message);
+        },
+        { deliverable_id: deliverableId },
+        { select: 'deliverable_id' }
+      );
+
+      if (!persisted?.length) {
+        console.error(
+          `[Deliverables] generation_request NOT persisted for ${deliverableId} ` +
+          `(update matched no rows). If this generation fails, the submission cannot ` +
+          `be replayed and the form has to be re-entered by hand.`
+        );
       }
     } catch (err) {
-      console.warn('[Deliverables] Could not persist generation_request:', err);
+      console.error(
+        `[Deliverables] FAILED to persist generation_request for ${deliverableId}. ` +
+        `If this generation fails, the submission cannot be replayed and the form has ` +
+        `to be re-entered by hand. Error:`,
+        err instanceof Error ? err.message : err
+      );
     }
 
     // Fire-and-forget

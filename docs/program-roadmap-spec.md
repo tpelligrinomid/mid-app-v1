@@ -327,7 +327,8 @@ with nothing saying why.
 | Rule | Message |
 |---|---|
 | Tier does not match the capacity-hours band | "$4,000 at $175/hr is 22.9 hours — below Execute's 32." |
-| Program count exceeds tier | "Perform is two programs. Select which two." |
+| Program count exceeds tier — the number is a **ceiling**, not a quota | "Perform runs at most 2 programs; 3 selected." |
+| *(Not a rule)* Fewer programs than the tier allows | Legal. Tier is how many hours the fee buys; programs are what those hours are spent on. Authority alone at Grow is a content-heavy account, not an invalid plan. |
 | Pursuit at Execute | "Pursuit starts at Perform, paired with Authority or Reach." |
 | Pursuit sold alone at any tier | "Pursuit is never sold on its own." |
 | Category outside the sold programs' matrix | Names the category and the programs that include it |

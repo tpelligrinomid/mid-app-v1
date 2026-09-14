@@ -269,11 +269,11 @@ export function validateOptions(
     }
 
     // Nothing can stand in for this. The eligibility filter, the allocation map and the
-    // content-share flag all read it, and tier gives only the count, never which.
+    // content-share flag all read it, and tier gives only the ceiling, never which.
     if (!opt.programs?.length) {
       errors.push(
-        `${where}: programs are required — ${TIER_BANDS[opt.tier]?.programs ?? 1} of ` +
-        `authority, reach, pursuit.`
+        `${where}: at least one program is required — up to ` +
+        `${TIER_BANDS[opt.tier]?.programs ?? 1} of authority, reach, pursuit.`
       );
     }
 
@@ -299,12 +299,25 @@ export function validateOptions(
       );
     }
 
-    const expected = TIER_BANDS[opt.tier].programs;
+    /**
+     * The tier's program number is a CEILING, not a quota.
+     *
+     * Tier and programs are independent axes: tier is how many hours the fee buys,
+     * programs are what those hours get spent on. Requiring an exact match conflated
+     * them, and refused plans the model allows -- 120 hours poured into Authority and
+     * Reach, or a content-heavy account running Authority alone at Grow. Running two
+     * programs deep instead of three thin is a strategist's call, and the spec has
+     * always read "program count EXCEEDS tier" for exactly that reason.
+     *
+     * Nothing downstream counts programs: programAllocation() iterates the list it is
+     * given and soldPrograms is a set union, so a short list flows through unchanged.
+     */
+    const ceiling = TIER_BANDS[opt.tier].programs;
     const programs = opt.programs || [];
-    if (programs.length !== expected) {
+    if (programs.length > ceiling) {
       errors.push(
-        `${where}: ${opt.tier} runs ${expected} ${expected === 1 ? 'program' : 'programs'}; ` +
-        `${programs.length} selected.`
+        `${where}: ${opt.tier} runs at most ${ceiling} ` +
+        `${ceiling === 1 ? 'program' : 'programs'}; ${programs.length} selected.`
       );
     }
 

@@ -20,7 +20,7 @@ Tracks a curated set of **keywords** and **AI prompts** per contract, collects p
 | **Cadence config** | `/api/compass/content/tracking-config` | Settings panel | — |
 | **Collection cron** | `POST /api/cron/search-visibility` — due-query scheduler | — | — |
 | **SERP ranks** | Typed client wrapper | — | `POST /api/v1/seo/rank-batch` |
-| **GSC ingest** | OAuth + pull + trailing re-pull | Connect-GSC flow | — |
+| **GSC ingest** | Service-account client + pull + trailing re-pull | Grant-access instructions + Test access button | — |
 | **Prompt sampling** | Sampler, mention detection, aggregation | — | `POST /api/v1/seo/llm-responses` |
 | **Rollup refresh** | Post-run recompute of `content_query_current` | — | — |
 | **Trends endpoints** | Series + summary endpoints | — | — |
@@ -207,8 +207,7 @@ Retain 90 days of raw text, indefinitely for aggregates. Prune on the cron.
 | prompt_samples_per_run | int | Default 5 |
 | location_code / language_code | int / text | Defaults for new queries |
 | gsc_property | text | e.g. `sc-domain:example.com` |
-| gsc_refresh_token | text | Encrypted |
-| gsc_connected_at | timestamptz | |
+| gsc_access_verified_at | timestamptz | Last successful read — see §4.4. No per-contract token; access is via the shared service account. |
 | enabled | boolean | Master switch |
 
 ### `content_tracking_runs` — run log
@@ -273,7 +272,21 @@ Two rules, both non-optional:
 
 Also: **GSC withholds anonymized low-volume queries.** Per-query rows will never sum to the property totals. Surface this as a footnote in the report or you will answer the question every month.
 
-### 4.4 Failure handling
+### 4.4 GSC access: one service account, not per-client OAuth
+
+Access is granted through a **single MiD GCP service account**, matching how client property access is already handled today. There is no OAuth flow, no consent screen, no refresh tokens, and no per-contract token storage — the spec carries only `gsc_property` and a `gsc_access_verified_at` timestamp.
+
+**Onboarding a contract:** the client adds the service account's `client_email` as a user on their GSC property (Settings → Users and permissions → Add user) at **Full** permission, which is adequate for reading Search Analytics. Lovable's settings panel shows the email with a copy button, the three-step instruction, and a **Test access** button that performs a one-row Search Analytics read and stamps `gsc_access_verified_at`.
+
+Do **not** ask clients for Owner. Owner is required for the Indexing API, which this module does not use, and it is a much larger ask.
+
+*Worth testing once:* whether **Restricted** also satisfies Search Analytics reads. If it does, make it the standard ask — it is both a smaller request and least-privilege. Full permits some destructive actions in GSC, which is not ideal for a credential shared across every client.
+
+**Quota.** Search Analytics allows 1,200 QPM per user and 30M QPD per project. One service account is one user, so every contract shares that 1,200 QPM — comfortable for daily pulls at any client count this business will reach. Revisit only if pulls become continuous rather than scheduled.
+
+**The tradeoff to accept knowingly:** one credential fronts every client property. A leak exposes all of them simultaneously, and rotation means re-granting on every property. Store the key with the same handling as other service credentials, never in the repo.
+
+### 4.5 Failure handling
 
 A failed rank check writes **no row** — it does not write `position: null`. Null means *checked and not ranking*, which is real data; a gap means *not checked*. Conflating them puts a false cliff in the chart. Leave `next_run_at` unchanged on failure so the next daily run retries.
 
@@ -304,7 +317,7 @@ DataForSEO's LLM Responses endpoints are a **proxy to the official provider APIs
 
 Every request **must** set `web_search: true`. With it off, the model answers from training recall and the `annotations` array returns **null** — no citations, no sources, no live grounding. That measures what a model memorized, not what it retrieves and cites, and it is useless for this purpose.
 
-With it on, `annotations` returns source URLs and titles mapped to spans in the response text. That array is what populates `citation_domains` and `citations`, and it drives chart 9. **A sample that comes back with null annotations is a misconfigured call, not a zero-citation result** — the sampler should treat it as a failure and not write a snapshot, for the same reason §4.4 distinguishes "not checked" from "checked and not ranking."
+With it on, `annotations` returns source URLs and titles mapped to spans in the response text. That array is what populates `citation_domains` and `citations`, and it drives chart 9. **A sample that comes back with null annotations is a misconfigured call, not a zero-citation result** — the sampler should treat it as a failure and not write a snapshot, for the same reason §4.5 distinguishes "not checked" from "checked and not ranking."
 
 Note that `web_search` increases output tokens beyond any configured limit, so the per-sample provider cost is higher than a bare completion. That is already reflected in the §4.2 estimate.
 
@@ -424,7 +437,7 @@ POST   /api/compass/content/discoveries/bulk
 # Config
 GET    /api/compass/content/tracking-config?contract_id
 PUT    /api/compass/content/tracking-config
-POST   /api/compass/content/tracking-config/gsc/connect
+POST   /api/compass/content/tracking-config/gsc/test-access
 ```
 
 Series endpoints read snapshot tables; table and summary endpoints read `content_query_current` only.
@@ -483,7 +496,7 @@ Ship this before the report. **Rank history cannot be backfilled** — every wee
 
 ## 10. Open questions
 
-1. **GSC OAuth ownership.** Per-contract client OAuth (each client grants access, tokens stored per contract) or a single MiD service account added as a user on each GSC property? The service account is far less support burden but requires the client to add a user, which some won't do.
+1. ~~**GSC OAuth ownership.**~~ **Resolved:** single MiD service account, per §4.4 — matching current practice. No OAuth, no per-contract tokens. One item remains: confirm on a live property whether **Restricted** permission satisfies Search Analytics reads, and if so make it the standard ask instead of Full.
 2. **Location granularity.** One location per query is assumed. Clients with multi-region or local-pack strategies will want several, which multiplies both cost and row count. Deferred, but `location_code` on the query row leaves the door open.
 3. **Prompt list seeding.** Manual entry in v1; the `mentions_db` sweep (§5.3) supplies candidates from Phase 4 onward via `source = 'dfs_suggestion'`. Whether that sweep gets its own triage queue in the Discovery tab, or just surfaces inline on the Prompts tab, is a UI call for Phase 4.
 4. **Cost ceiling per contract.** Costed in §4.1 at roughly $5–15/contract/month, so no metering in v1 — consistent with `spec-content-optimization.md`. Revisit if `prompt_cadence` goes weekly across the portfolio or `samples_per_run` rises; the LLM provider pass-through is the only line item that can move fast. Folds into the platform-level API observability workstream.

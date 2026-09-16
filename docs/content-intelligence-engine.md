@@ -1,5 +1,7 @@
 # Content Intelligence Engine
 
+> **Status note (2026-09-16):** Phases 1–2 below (keyword tables, snapshot collection, trend detection) are superseded by [`spec-search-visibility-tracking.md`](./spec-search-visibility-tracking.md), which generalizes the data model to cover prompts and GSC alongside keywords and settles the vendor question on DataForSEO. Phases 3–5 (ideation, auto-generation, dashboard) are unchanged and read from the tables defined there.
+
 ## Overview
 
 An automated content pipeline that combines **SEO data**, **competitor gap analysis**, and **existing content library intelligence** to continuously generate, refresh, and optimize content — with minimal manual intervention.

@@ -14,13 +14,13 @@ Tracks a curated set of **keywords** and **AI prompts** per contract, collects p
 
 | | Backend (this repo) | Lovable (frontend) | Master Marketer |
 |---|---|---|---|
-| **Schema** | Migration `020_search_visibility.sql` — 7 tables + 1 rollup | — | — |
+| **Schema** | Migration `020_search_visibility.sql` — 8 tables + 1 rollup | — | — |
 | **Tracked list CRUD** | `/api/compass/content/queries/*` | Keyword & prompt list management UI | — |
 | **Discovery triage** | `/api/compass/content/discoveries/*` | Review queue UI | — |
 | **Cadence config** | `/api/compass/content/tracking-config` | Settings panel | — |
 | **Collection cron** | `POST /api/cron/search-visibility` — due-query scheduler | — | — |
 | **SERP ranks** | Typed client wrapper | — | `POST /api/v1/seo/rank-batch` |
-| **GSC ingest** | Service-account client + pull + trailing re-pull | Grant-access instructions + property picker (`sites.list`) | — |
+| **GSC ingest** | Shared-account client + pull + trailing re-pull | Grant-access instructions + property picker (`sites.list`) | — |
 | **Prompt sampling** | Sampler, mention detection, aggregation | — | `POST /api/v1/seo/llm-responses` |
 | **Rollup refresh** | Post-run recompute of `content_query_current` | — | — |
 | **Trends endpoints** | Series + summary endpoints | — | — |
@@ -274,36 +274,70 @@ Two rules, both non-optional:
 
 Also: **GSC withholds anonymized low-volume queries.** Per-query rows will never sum to the property totals. Surface this as a footnote in the report or you will answer the question every month.
 
-### 4.4 GSC access: one service account, not per-client OAuth
+### 4.4 GSC access: the existing shared MiD account
 
-Access is granted through a **single MiD GCP service account**, matching how client property access is already handled today. There is no OAuth flow, no consent screen, no refresh tokens, and no per-contract token storage — the spec carries only `gsc_property` and a `gsc_access_verified_at` timestamp.
+Access uses the **single MiD/NewNorth Google account that already holds verified
+access to the client portfolio** — the same credential Master Marketer runs on
+(`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_GSC_REFRESH_TOKEN`), one
+long-lived refresh token, no per-contract OAuth and no token storage. A contract
+carries only `gsc_property` and a `gsc_access_verified_at` timestamp.
 
-**Ask for Restricted.** Google's permission table grants Restricted users "View Performance reports" and "View all reports," which is exactly and only what this module needs. It is the smallest ask and the least-privilege option — Full permits destructive actions (URL removals, settings changes, disavows) that no part of this design uses, and that is not a capability to hold across every client property on one shared credential.
+A GCP service account was considered and rejected. On its own merits it is the
+better shape for unattended server access — no refresh token to be revoked, no
+dependency on a human account. But it is a *different identity*, and roughly
+fifteen client properties have already granted the existing account. Re-granting
+all of them to gain a marginally sturdier credential is not a trade worth making.
 
-Do **not** ask for Owner. Owner is an Indexing API requirement; this module does not index.
+**Consequences of the shared refresh token**, which are the real cost here:
 
-*(The permission table documents UI rights. `siteRestrictedUser` is a first-class value in the API's own `permissionLevel` enum, but confirm empirically on the first property before making it the standard ask across the client base.)*
+- It is a single point of failure for **every** contract at once. A revocation —
+  password change, a Google security event, removing the account from the
+  workspace — takes all collection down simultaneously, not one property.
+- The token error is surfaced explicitly as "the shared refresh token may have
+  been revoked" rather than as a per-property access failure, because the
+  symptom otherwise looks like fifteen clients revoking access on the same day.
+- Whoever owns that Google account effectively owns the pipeline. It should be a
+  role account, not a person's login.
+
+**Permission level.** Restricted is sufficient — Google's permission table grants
+Restricted users "View Performance reports," which is exactly and only what this
+module reads. Ask for it on *new* grants; existing grants at Full or Owner work
+unchanged and are not worth downgrading.
+
+Do **not** ask for Owner on new properties. Owner is an Indexing API
+requirement; this module does not index.
+
+*(The permission table documents UI rights. `siteRestrictedUser` is a
+first-class value in the API's own `permissionLevel` enum, but confirm
+empirically on the first new property before making it the standard ask.)*
 
 ### Binding a property to a contract
 
 `gsc_property` is **never hand-typed.** A typo or the wrong property format yields an empty or partial dataset that reads as poor SEO performance rather than as a misconfiguration — the worst class of bug this module can have.
 
-Instead, `GET /sites` (Search Console API `sites.list`), called with the service account, returns every property it has been granted:
+Instead, `GET /sites` (Search Console API `sites.list`), called with the shared account, returns every property it has been granted:
 
 ```json
 { "siteEntry": [
   { "siteUrl": "sc-domain:example.com",     "permissionLevel": "siteRestrictedUser" },
-  { "siteUrl": "https://www.example.com/",  "permissionLevel": "siteFullUser" }
+  { "siteUrl": "https://www.example.com/",  "permissionLevel": "siteFullUser" },
+  { "siteUrl": "https://newnorth.com/",     "permissionLevel": "siteUnverifiedUser" }
 ]}
 ```
 
 Onboarding flow:
 
-1. Client adds the service account's `client_email` in Settings → Users and permissions → Add user, at Restricted.
+1. Client adds the MiD account's address in Settings → Users and permissions → Add user, at Restricted. *(For most existing contracts this is already done.)*
 2. Strategist opens the contract's tracking settings and clicks **Refresh properties** → backend calls `sites.list` → dropdown of available properties.
 3. Strategist selects one. Backend stores `siteUrl`, derives `gsc_property_type`, records `permissionLevel`, stamps `gsc_access_verified_at`.
 
 The same call validates access, so the picker and the permission check are one request. A property absent from the list, or returning `siteUnverifiedUser`, means the grant hasn't landed — surface that as "not yet granted," not as an error.
+
+**`siteUnverifiedUser` is common and not the same as absent.** The account's
+property list already includes unverified entries; they appear in the picker but
+are marked unusable and cannot be bound. Verification is a separate step on the
+client's side, so the UI says which is missing rather than treating both as one
+"no access" state.
 
 **Warn on URL-prefix selection when a domain property is available for the same host.** The two are not equivalent:
 
@@ -314,11 +348,18 @@ https://www.example.com/    → that exact prefix only
 
 Choosing the URL-prefix form silently drops apex, other subdomains, and http traffic. Totals look plausible, just low, and nothing surfaces the omission. Prefer the domain property whenever one exists.
 
+This is not hypothetical for this portfolio. The shared account's existing
+properties are overwhelmingly URL-prefix, and at least one host is registered
+**twice — once as `http://` and once as `https://`** — so neither entry alone
+sees that site's full traffic. A strategist picking one from a dropdown has no
+way to know that. Hence the warning, and hence recording `gsc_property_type` on
+the contract rather than inferring it at read time.
+
 **Re-check `permissionLevel` on every run.** Client-side user changes are invisible to us otherwise; a revoked grant should appear in the UI as lost access rather than as a flat line in the trend chart.
 
-**Quota.** Search Analytics allows 1,200 QPM per user and 30M QPD per project. One service account is one user, so every contract shares that 1,200 QPM — comfortable for daily pulls at any client count this business will reach. Revisit only if pulls become continuous rather than scheduled.
+**Quota.** Search Analytics allows 1,200 QPM per user and 30M QPD per project. The shared account is one user, so every contract draws on that same 1,200 QPM — comfortable for daily pulls at any client count this business will reach, but note that Master Marketer's SEO audits draw on the same budget. Revisit only if pulls become continuous rather than scheduled.
 
-**The tradeoff to accept knowingly:** one credential fronts every client property. A leak exposes all of them simultaneously, and rotation means re-granting on every property. Store the key with the same handling as other service credentials, never in the repo.
+**The tradeoff to accept knowingly:** one credential fronts every client property, and it is now load-bearing for two systems. A revocation takes down both this module and MM's audit enrichment at once. Keep it on a role account, and treat rotation as a coordinated change across both repos.
 
 ### 4.5 Failure handling
 
@@ -531,7 +572,7 @@ Ship this before the report. **Rank history cannot be backfilled** — every wee
 
 ## 10. Open questions
 
-1. ~~**GSC OAuth ownership.**~~ **Resolved:** single MiD service account at Restricted permission, with properties bound via `sites.list` rather than hand-entry (§4.4). No OAuth, no per-contract tokens. Confirm Restricted empirically on the first property during Phase 1.
+1. ~~**GSC OAuth ownership.**~~ **Resolved:** the existing shared MiD Google account (the one already granted on ~15 client properties), with properties bound via `sites.list` rather than hand-entry (§4.4). One shared refresh token, no per-contract tokens. Confirm Restricted empirically on the first *new* property grant.
 2. **Location granularity.** One location per query is assumed. Clients with multi-region or local-pack strategies will want several, which multiplies both cost and row count. Deferred, but `location_code` on the query row leaves the door open.
 3. **Prompt list seeding.** Manual entry in v1; the `mentions_db` sweep (§5.3) supplies candidates from Phase 4 onward via `source = 'dfs_suggestion'`. Whether that sweep gets its own triage queue in the Discovery tab, or just surfaces inline on the Prompts tab, is a UI call for Phase 4.
 4. **Cost ceiling per contract.** Costed in §4.1 at roughly $5–15/contract/month, so no metering in v1 — consistent with `spec-content-optimization.md`. Revisit if `prompt_cadence` goes weekly across the portfolio or `samples_per_run` rises; the LLM provider pass-through is the only line item that can move fast. Folds into the platform-level API observability workstream.

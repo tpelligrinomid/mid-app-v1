@@ -15,7 +15,7 @@ import {
   listSites,
   verifyAccess,
   canReadAnalytics,
-  getServiceAccountEmail,
+  getGscAccountEmail,
   isConfigured as gscConfigured,
 } from '../../services/search-visibility/gsc-client.js';
 import { runContract } from '../../services/search-visibility/collector.js';
@@ -418,7 +418,7 @@ router.get('/tracking-config', async (req: Request, res: Response): Promise<void
       config,
       // The address the client has to add on their side. Surfaced here so the
       // settings panel can show it with a copy button.
-      service_account_email: gscConfigured() ? getServiceAccountEmail() : null,
+      gsc_account_email: gscConfigured() ? getGscAccountEmail() : null,
       gsc_configured: gscConfigured(),
     });
   } catch (error) {
@@ -489,7 +489,7 @@ router.put(
 /**
  * GET /api/compass/content/tracking-config/gsc/properties
  *
- * Every property the shared service account can see. This is the picker AND the
+ * Every property the shared MiD account can see. This is the picker AND the
  * access check: a contract's property is chosen from here, never typed, because
  * a wrong property returns a thin dataset that reads as poor SEO performance
  * rather than as a misconfiguration.
@@ -518,7 +518,7 @@ router.get(
       }));
 
       res.json({
-        service_account_email: getServiceAccountEmail(),
+        gsc_account_email: getGscAccountEmail(),
         properties,
       });
     } catch (error) {
@@ -561,18 +561,30 @@ router.post(
 
       if (!match) {
         res.status(404).json({
-          error: 'Property not available to the service account',
+          error: 'Property not visible to the MiD account',
+          // Distinct from the unverified case below: here there is no grant at
+          // all, so the fix is on the client's side.
+          remediation: 'client_grant',
           details:
-            'The client has not added the service account to this property yet, or it was removed.',
-          service_account_email: getServiceAccountEmail(),
+            'The client has not added the MiD account to this property yet, or it was removed. ' +
+            'Ask them to add it under Settings → Users and permissions, at Restricted.',
+          gsc_account_email: getGscAccountEmail(),
         });
         return;
       }
 
       if (!canReadAnalytics(match.permissionLevel)) {
+        // siteUnverifiedUser is an OWNERSHIP verification lapse on a property we
+        // hold directly — usually a site rebuild dropped the verification HTML
+        // file. Nothing for the client to do; we re-verify. Telling a strategist
+        // to chase a client here would send them somewhere with no fix.
         res.status(403).json({
-          error: 'Access granted but not usable',
-          details: `Permission level is ${match.permissionLevel}. Ask the client to re-add the service account as a Restricted user.`,
+          error: 'Property ownership is unverified',
+          remediation: 'reverify_ownership',
+          details:
+            `Permission level is ${match.permissionLevel}. This property needs ownership re-verified in ` +
+            'Search Console by MiD, not a new grant from the client. Prefer the DNS method (or a ' +
+            'domain property) over the HTML file, which the next site deploy will remove again.',
         });
         return;
       }

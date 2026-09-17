@@ -69,7 +69,7 @@ export function isConfigured(): boolean {
  * A refresh token doesn't carry the account address, so this is configured
  * separately and is cosmetic — it never affects which account actually calls.
  */
-export function getServiceAccountEmail(): string {
+export function getGscAccountEmail(): string {
   return process.env.GSC_ACCOUNT_EMAIL || 'the MiD Google account';
 }
 
@@ -152,12 +152,12 @@ async function gscFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     const detail = await response.text();
 
-    // 403 here almost always means the client hasn't added the service account
+    // 403 here almost always means our account was never added to this property
     // yet, which is an onboarding state rather than a bug. Typed so callers can
     // surface "not yet granted" instead of a stack trace.
     if (response.status === 403 || response.status === 404) {
       throw new GscAccessError(
-        `Search Console denied access (${response.status}). The service account may not be added to this property.`,
+        `Search Console denied access (${response.status}). The MiD account may not have access to this property.`,
         response.status
       );
     }
@@ -178,7 +178,7 @@ export interface GscSite {
 }
 
 /**
- * Every property the service account has been granted.
+ * Every property the shared MiD account can see.
  *
  * This is both the property picker and the access check — a contract's property
  * is chosen from this list, never hand-typed, because a wrong or mistyped
@@ -191,8 +191,18 @@ export async function listSites(): Promise<GscSite[]> {
 }
 
 /**
- * siteUnverifiedUser means the grant exists but isn't usable. Everything else
- * can read Search Analytics — Restricted included, which is all we ask for.
+ * Whether a permission level can read Search Analytics.
+ *
+ * Restricted is enough — it grants "view Performance reports", which is the
+ * whole of what this module reads.
+ *
+ * `siteUnverifiedUser` is the one that cannot, and it means something specific:
+ * the property is one we hold directly rather than one a client delegated to
+ * us, and its *ownership verification* has lapsed — typically because a site
+ * rebuild removed the verification HTML file. The fix is re-verifying
+ * ownership on our side, not asking the client for a user grant. Those two
+ * remediations are completely different, so callers must not collapse this
+ * into a generic "no access" state.
  */
 export function canReadAnalytics(permissionLevel: string): boolean {
   return permissionLevel !== 'siteUnverifiedUser';

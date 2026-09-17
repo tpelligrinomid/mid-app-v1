@@ -333,11 +333,27 @@ Onboarding flow:
 
 The same call validates access, so the picker and the permission check are one request. A property absent from the list, or returning `siteUnverifiedUser`, means the grant hasn't landed — surface that as "not yet granted," not as an error.
 
-**`siteUnverifiedUser` is common and not the same as absent.** The account's
-property list already includes unverified entries; they appear in the picker but
-are marked unusable and cannot be bound. Verification is a separate step on the
-client's side, so the UI says which is missing rather than treating both as one
-"no access" state.
+**Two different failures, two different fixes.** The bind endpoint returns a
+`remediation` field because collapsing these into one "no access" error sends
+strategists somewhere with nothing to do:
+
+| State | What it means | Who fixes it |
+|---|---|---|
+| Property absent from `sites.list` | No grant exists | **Client** adds the MiD account as a Restricted user |
+| `siteUnverifiedUser` | A property we hold directly whose **ownership verification lapsed** | **MiD** re-verifies in Search Console |
+
+The second is already present in the portfolio — several properties, including
+`newnorth.com`, currently sit in Search Console's "Not verified" group. Nothing
+is wrong with the client relationship there; the usual cause is a site rebuild
+removing the verification HTML file. Asking the client to re-grant would not fix
+it.
+
+**Verify by DNS, not by HTML file.** The file method is what lapses: it survives
+until the next deploy that doesn't carry it, which is why these properties drift
+back to unverified. A DNS TXT record persists across rebuilds. Where the domain
+is ours to configure, adding a **domain property** (`sc-domain:example.com`)
+solves both problems at once — DNS-verified so it stays verified, and covering
+every subdomain and both protocols so the URL-prefix gap below disappears too.
 
 **Warn on URL-prefix selection when a domain property is available for the same host.** The two are not equivalent:
 

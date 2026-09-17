@@ -16,6 +16,7 @@ import { setGenerationStateSafe } from '../services/deliverable-generation/state
 import { insert, select } from '../utils/edge-functions.js';
 import { classifyProcessLibrary } from '../services/clickup/process-library-category.js';
 import { resolveTechnology } from '../services/deliverable-generation/program-roadmap.js';
+import { runAllContracts } from '../services/search-visibility/collector.js';
 
 const router = Router();
 
@@ -1381,6 +1382,67 @@ router.post('/recover-deliverables', verifyCronSecret, async (req: Request, res:
     });
   } catch (error) {
     console.error('[Cron] Deliverable recovery failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// POST /api/cron/search-visibility
+// Collects keyword rankings and Search Console data for every enabled contract.
+//
+// Render Cron Job Configuration:
+// - Name: search-visibility-collect
+// - Schedule: 0 6 * * * (daily at 06:00 UTC)
+// - Command: curl -X POST https://your-app.onrender.com/api/cron/search-visibility -H "Authorization: Bearer $CRON_SECRET"
+//
+// Runs DAILY even though most queries are weekly or monthly. Cadence lives on
+// the data (next_run_at per query), so this job simply processes whatever is
+// due. Changing a contract to monthly, or promoting twenty keywords to weekly,
+// is then a settings change rather than a cron change.
+router.post('/search-visibility', verifyCronSecret, async (_req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Cron] Starting search visibility collection...');
+
+  try {
+    const results = await runAllContracts();
+
+    const failed = results.filter((r) => r.status === 'failed');
+    const partial = results.filter((r) => r.status === 'partial');
+
+    const totals = results.reduce(
+      (acc, r) => ({
+        gsc_rows: acc.gsc_rows + r.gsc_rows,
+        snapshots: acc.snapshots + r.snapshots_written,
+        discoveries: acc.discoveries + r.discoveries_found,
+        api_calls: acc.api_calls + r.api_calls,
+      }),
+      { gsc_rows: 0, snapshots: 0, discoveries: 0, api_calls: 0 }
+    );
+
+    console.log(
+      `[Cron] Search visibility complete: ${results.length} contracts, ` +
+        `${totals.snapshots} rank snapshots, ${totals.gsc_rows} GSC rows, ` +
+        `${partial.length} partial, ${failed.length} failed`
+    );
+
+    // A partial or failed contract is reported in the body but does not fail the
+    // job: one contract with a revoked GSC grant must not stop the other 29.
+    res.json({
+      success: true,
+      contracts_processed: results.length,
+      partial: partial.length,
+      failed: failed.length,
+      totals,
+      results,
+      duration_ms: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[Cron] Search visibility collection failed:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

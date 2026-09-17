@@ -24,6 +24,7 @@ import contentRouter from './routes/compass/content.js';
 import chatRouter from './routes/compass/chat.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
 import brandVoiceRouter from './routes/compass/brand-voice.js';
+import searchVisibilityRouter from './routes/compass/search-visibility.js';
 import taskAnalysisReportRouter from './routes/admin/task-analysis-report.js';
 import programSizingCheckRouter from './routes/admin/program-sizing-check.js';
 
@@ -126,6 +127,10 @@ app.use('/api/compass/roadmap-config', authMiddleware, roadmapConfigRouter);
 
 // Compass content module (require authentication)
 app.use('/api/compass/content', authMiddleware, contentRouter);
+
+// Search visibility tracking — shares the /content prefix and falls through
+// from contentRouter, which owns no /queries or /tracking-config paths.
+app.use('/api/compass/content', authMiddleware, searchVisibilityRouter);
 
 // Compass RAG chat (require authentication)
 app.use('/api/compass/chat', authMiddleware, chatRouter);

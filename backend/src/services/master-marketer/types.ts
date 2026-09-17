@@ -67,3 +67,31 @@ export interface ProcessingState {
     error?: string;
   };
 }
+
+// ============================================================================
+// SEO rank batch (search visibility tracking)
+// ============================================================================
+
+export interface RankBatchSubmission {
+  domain: string;
+  keywords: string[];
+  location_code?: number;
+  language_code?: string;
+}
+
+export interface RankBatchResult {
+  keyword: string;
+  /** null = checked and not ranking in the top 100. Absent from results = not checked. */
+  position: number | null;
+  ranking_url?: string | null;
+  serp_features?: string[];
+  in_ai_overview?: boolean;
+  search_volume?: number | null;
+  difficulty?: number | null;
+  /** Vendor methodology tag, so a mid-series change can be annotated not hidden. */
+  volume_method?: string | null;
+}
+
+export interface RankBatchResponse {
+  results: RankBatchResult[];
+}

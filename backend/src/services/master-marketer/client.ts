@@ -15,6 +15,7 @@ import type {
   JobStatusResponse,
 } from './types.js';
 import type { DeliverableSubmission, DeliverableConvertSubmission } from '../deliverable-generation/types.js';
+import type { RankBatchSubmission, RankBatchResponse } from './types.js';
 import type { BlogScrapeSubmission, FileExtractSubmission } from '../content-ingestion/types.js';
 
 interface MasterMarketerConfig {
@@ -233,4 +234,26 @@ export async function pollUntilComplete(
   }
 
   throw new Error(`Master Marketer job ${jobId} timed out after ${timeoutMs / 1000}s`);
+}
+
+/**
+ * Batch SERP rank check for tracked keywords.
+ *
+ * MM is a stateless data API here — it gathers positions via its DataForSEO
+ * infrastructure and returns them; this repo owns all history. Same position
+ * established for SEO enrichment in docs/spec-content-optimization.md.
+ *
+ * A keyword that is genuinely not ranking comes back with position: null.
+ * That is data, and it gets stored. A keyword MM could not check at all is
+ * omitted from `results` entirely, and the caller must not write a row for it.
+ *
+ * Spec: docs/spec-search-visibility-tracking.md §8
+ */
+export async function fetchRankBatch(
+  data: RankBatchSubmission
+): Promise<RankBatchResponse> {
+  return masterMarketerFetch<RankBatchResponse>('/api/v1/seo/rank-batch', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }

@@ -14,7 +14,13 @@ import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
+// Answers run on Opus 5.5 at low effort: thinking is always on for this model
+// and effort is the only control, so low keeps the pause before the first
+// streamed token short. Opus 5.5 rejects temperature/top_p, so none are sent.
+const ANSWER_MODEL = 'claude-opus-5-5';
+const ANSWER_EFFORT = 'low';
+// Intent classification runs before every answer — small and fast wins there.
+const CLASSIFIER_MODEL = 'claude-haiku-4-5';
 const API_VERSION = '2023-06-01';
 
 // ============================================================================
@@ -71,7 +77,7 @@ async function classifyIntent(
         'anthropic-version': API_VERSION,
       },
       body: JSON.stringify({
-        model: DEFAULT_MODEL,
+        model: CLASSIFIER_MODEL,
         max_tokens: 200,
         temperature: 0,
         system: `You classify user questions about a content library into one of three categories. Respond with ONLY valid JSON, no other text.
@@ -602,9 +608,10 @@ export async function streamChatResponse(
         'anthropic-version': API_VERSION,
       },
       body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        max_tokens: 4096,
-        temperature: 0.3,
+        model: ANSWER_MODEL,
+        // Thinking counts toward max_tokens, so leave room beyond the reply.
+        max_tokens: 16000,
+        output_config: { effort: ANSWER_EFFORT },
         system: systemPrompt,
         messages,
         stream: true,
@@ -635,6 +642,7 @@ export async function streamChatResponse(
   let buffer = '';
   let inputTokens = 0;
   let outputTokens = 0;
+  let stopReason: string | null = null;
 
   try {
     while (true) {
@@ -654,7 +662,9 @@ export async function streamChatResponse(
 
         let event: {
           type: string;
-          delta?: { type: string; text?: string };
+          // Thinking blocks stream as thinking_delta/signature_delta and are
+          // skipped below; only text_delta reaches the client.
+          delta?: { type?: string; text?: string; stop_reason?: string | null };
           usage?: { input_tokens: number; output_tokens: number };
           message?: { usage?: { input_tokens: number; output_tokens: number } };
         };
@@ -672,8 +682,9 @@ export async function streamChatResponse(
           inputTokens = event.message.usage.input_tokens;
         }
 
-        if (event.type === 'message_delta' && event.usage) {
-          outputTokens = event.usage.output_tokens;
+        if (event.type === 'message_delta') {
+          if (event.usage) outputTokens = event.usage.output_tokens;
+          if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
         }
       }
     }
@@ -684,6 +695,14 @@ export async function streamChatResponse(
     return;
   } finally {
     reader.releaseLock();
+  }
+
+  // A safety-classifier decline arrives as a normal 200 stream that ends with
+  // stop_reason "refusal" — without this the answer would just stop short.
+  if (stopReason === 'refusal') {
+    console.warn('[RAG Chat] Claude declined the request (stop_reason: refusal)');
+    onChunk({ type: 'error', message: 'Claude declined to answer this question. Try rephrasing it.' });
+    return;
   }
 
   onChunk({

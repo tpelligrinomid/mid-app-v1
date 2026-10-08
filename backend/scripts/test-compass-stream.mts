@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const repo = process.cwd();
-const { relayClaudeStream } = await import(pathToFileURL(`${repo}/src/services/rag/chat.ts`).href);
+const { relayClaudeStream, withExplicitLinks } = await import(pathToFileURL(`${repo}/src/services/rag/chat.ts`).href);
 const apiKey =
   process.env.ANTHROPIC_API_KEY ??
   readFileSync(`${repo}/.env`, 'utf8').match(/^ANTHROPIC_API_KEY=(.*)$/m)?.[1]?.trim().replace(/^"|"$/g, '');
@@ -40,7 +40,7 @@ const response = await fetch('https://api.anthropic.com/v1/messages', {
   headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
   body: JSON.stringify({
     model, max_tokens: 16000, output_config: { effort }, system,
-    messages: [{ role: 'user', content: question }], tools: webTools, stream: true,
+    messages: [{ role: 'user', content: withExplicitLinks(question) }], tools: webTools, stream: true,
   }),
 });
 if (!response.ok) { console.error(response.status, await response.text()); process.exit(1); }

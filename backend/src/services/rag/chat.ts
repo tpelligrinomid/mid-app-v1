@@ -637,7 +637,7 @@ export async function streamChatResponse(
 
   const messages = [
     ...conversation_history.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user' as const, content: message },
+    { role: 'user' as const, content: withExplicitLinks(message) },
   ];
 
   // 5. Call Claude with streaming
@@ -687,6 +687,24 @@ export async function streamChatResponse(
 
   // 6. Relay Claude's stream to the client
   await relayClaudeStream(response, onChunk);
+}
+
+// web_fetch only opens URLs that literally appear in a user message (or in
+// search results), and a bare domain like "newnorth.com" doesn't count. Bare
+// domains the user mentions are appended as full URLs so Claude can open them.
+const BARE_DOMAIN = /(?<![@\w./:-])((?:[a-z0-9-]+\.)+(?:com|io|co|ai|net|org|app|dev|us|uk|ca|au|de|biz|info|tech|agency|consulting|marketing|so|xyz|me))(\/[^\s,;)]*)?(?![\w-])/gi;
+
+export function withExplicitLinks(message: string): string {
+  const urls = new Set<string>();
+  for (const match of message.matchAll(BARE_DOMAIN)) {
+    const path = (match[2] ?? '/').replace(/[.?!]+$/, '') || '/';
+    urls.add(`https://${match[1].toLowerCase()}${path}`);
+    if (urls.size >= 10) break;
+  }
+  if (urls.size === 0) return message;
+  return `${message}
+
+(Links: ${Array.from(urls).join(' ')})`;
 }
 
 // Text shorter than this that is followed by a tool call is treated as a

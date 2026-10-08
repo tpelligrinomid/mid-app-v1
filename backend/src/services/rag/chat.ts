@@ -8,8 +8,10 @@
  *   - "hybrid"     → both structured + RAG
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { searchKnowledge } from './search.js';
 import { select } from '../../utils/edge-functions.js';
+import { DATABOX_TOOLS, DataboxToolRunner, isDataboxTool } from '../databox/tools.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
@@ -28,7 +30,7 @@ const API_VERSION = '2023-06-01';
 // Research across several companies routinely takes 10+ searches, and this
 // version can fire several in parallel, so search gets a looser cap than
 // fetch ($10 per 1,000 searches, so 15 is at most $0.15 a message).
-const WEB_TOOLS = [
+const WEB_TOOLS: Anthropic.ToolUnion[] = [
   {
     type: 'web_search_20260209',
     name: 'web_search',
@@ -44,7 +46,7 @@ const WEB_TOOLS = [
   },
 ];
 
-const WEB_GUIDANCE = `## Web access
+export const WEB_GUIDANCE = `## Web access
 
 You can search the web (web_search) and read web pages (web_fetch). The client's own data above is the source of truth for anything about this client; use the web for outside information such as competitors, market and industry facts, companies or people to research, recent news, or when the user asks you to look something up. Don't search for what the client data already answers.
 
@@ -640,53 +642,142 @@ export async function streamChatResponse(
     { role: 'user' as const, content: withExplicitLinks(message) },
   ];
 
-  // 5. Call Claude with streaming
-  const callClaude = (withWebTools: boolean) =>
-    fetch(CLAUDE_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION,
-      },
-      body: JSON.stringify({
+  // 5. Marketing data tools, when the contract has a Databox account
+  const databoxAccountId = await getDataboxAccountId(contract_id);
+  if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
+
+  // 6. Answer, running tools as Claude asks for them
+  await runAnswer(
+    {
+      apiKey,
+      system: systemPrompt,
+      messages: [
+        ...conversation_history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user' as const, content: withExplicitLinks(message) },
+      ],
+      databox: databoxAccountId ? new DataboxToolRunner(databoxAccountId) : null,
+    },
+    onChunk
+  );
+}
+
+async function getDataboxAccountId(contractId: string): Promise<string | null> {
+  try {
+    const row = await select<{ databox_account_id: string | null }>('contracts', {
+      select: 'databox_account_id',
+      filters: { id: contractId },
+      single: true,
+    });
+    return row?.databox_account_id || null;
+  } catch (err) {
+    // Missing column (migration 021 not applied) or no row: answer without marketing tools.
+    console.warn('[RAG Chat] No Databox account for contract:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+export function marketingGuidance(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `## Marketing performance data
+
+You can read this client's own marketing performance (for example Google Analytics 4, Google Ads, LinkedIn Ads) with list_marketing_sources, list_source_metrics and get_marketing_metric. Use them for questions about the client's traffic, ad spend, campaigns, ads, keywords, conversions or results. Start with list_marketing_sources, then list_source_metrics to get exact metric keys and dimensions; don't guess keys.
+
+Today is ${today}. Turn relative periods ("last month", "this quarter", "last 30 days") into exact dates, and say which dates you used. Every result includes the previous period of the same length, so you can describe the change without another call. Report values with the currency or unit shown, and if sources use different currencies, keep them separate rather than adding them up. Work out derived figures (cost per lead, ROAS, share of spend) from the returned totals and show how.
+
+These numbers are the client's own data and take priority over anything from the web.`;
+}
+
+// ============================================================================
+// Answer loop
+// ============================================================================
+
+// Upper bound on model turns in one answer (each Databox tool round is a turn).
+const MAX_ANSWER_TURNS = 12;
+
+export interface AnswerParams {
+  apiKey: string;
+  system: string;
+  messages: Anthropic.MessageParam[];
+  databox: DataboxToolRunner | null;
+}
+
+/**
+ * Stream an answer, executing Compass's own tools (Databox) between turns.
+ * Web search and fetch run on Anthropic's side inside each turn; a paused
+ * server-tool turn is resumed by sending it back.
+ */
+export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk) => void): Promise<void> {
+  const client = new Anthropic({ apiKey: params.apiKey });
+  const relay = new StreamRelay(onChunk);
+  const messages = [...params.messages];
+  let webTools = true;
+  let stopReason: string | null = null;
+
+  for (let turn = 0; turn < MAX_ANSWER_TURNS; turn++) {
+    const tools: Anthropic.ToolUnion[] = [
+      ...(webTools ? WEB_TOOLS : []),
+      ...(params.databox ? DATABOX_TOOLS : []),
+    ];
+
+    let message: Anthropic.Message;
+    try {
+      const stream = client.messages.stream({
         model: ANSWER_MODEL,
         // Thinking counts toward max_tokens, so leave room beyond the reply.
         max_tokens: 16000,
         output_config: { effort: ANSWER_EFFORT },
-        system: systemPrompt,
+        system: params.system,
         messages,
-        ...(withWebTools && { tools: WEB_TOOLS }),
-        stream: true,
-      }),
-    });
-
-  let response: Response;
-  try {
-    response = await callClaude(true);
-    // If the web tools are rejected (e.g. web search turned off for the org),
-    // answer without them rather than failing every chat.
-    if (response.status === 400) {
-      const errorText = await response.text();
-      console.error('[RAG Chat] Claude API 400 with web tools, retrying without them:', errorText.substring(0, 300));
-      response = await callClaude(false);
+        ...(tools.length > 0 && { tools }),
+      });
+      for await (const event of stream) relay.handle(event);
+      message = await stream.finalMessage();
+    } catch (err) {
+      // If the web tools are rejected (e.g. web search turned off for the
+      // org), answer without them rather than failing every chat.
+      if (err instanceof Anthropic.BadRequestError && webTools && turn === 0) {
+        console.error('[RAG Chat] Claude API 400 with web tools, retrying without them:', err.message.substring(0, 300));
+        webTools = false;
+        turn--;
+        continue;
+      }
+      const errMsg = err instanceof Error ? err.message : 'Claude API request failed';
+      console.error('[RAG Chat] Claude API request failed:', errMsg);
+      onChunk({ type: 'error', message: `Claude API request failed: ${errMsg.substring(0, 200)}` });
+      return;
     }
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'Failed to reach Claude API';
-    console.error('[RAG Chat] Claude API request failed:', errMsg);
-    onChunk({ type: 'error', message: `Claude API request failed: ${errMsg}` });
-    return;
+
+    relay.addUsage(message.usage);
+    stopReason = message.stop_reason;
+
+    if (stopReason === 'pause_turn') {
+      messages.push({ role: 'assistant', content: message.content });
+      continue;
+    }
+
+    const toolUses = message.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    if (stopReason !== 'tool_use' || toolUses.length === 0) break;
+
+    messages.push({ role: 'assistant', content: message.content });
+    const results = await Promise.all(
+      toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
+        const input = (toolUse.input ?? {}) as Record<string, unknown>;
+        try {
+          if (!params.databox || !isDataboxTool(toolUse.name)) throw new Error(`Unknown tool: ${toolUse.name}`);
+          onChunk({ type: 'status', message: await params.databox.describe(toolUse.name, input) });
+          return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.databox.run(toolUse.name, input) };
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn(`[RAG Chat] Tool ${toolUse.name} failed:`, errMsg);
+          return { type: 'tool_result', tool_use_id: toolUse.id, content: errMsg, is_error: true };
+        }
+      })
+    );
+    // All results go back in one user message so parallel calls stay parallel.
+    messages.push({ role: 'user', content: results });
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[RAG Chat] Claude API ${response.status}:`, errorText.substring(0, 300));
-    onChunk({ type: 'error', message: `Claude API error (${response.status})` });
-    return;
-  }
-
-  // 6. Relay Claude's stream to the client
-  await relayClaudeStream(response, onChunk);
+  relay.finish(stopReason);
 }
 
 // web_fetch only opens URLs that literally appear in a user message (or in
@@ -702,9 +793,7 @@ export function withExplicitLinks(message: string): string {
     if (urls.size >= 10) break;
   }
   if (urls.size === 0) return message;
-  return `${message}
-
-(Links: ${Array.from(urls).join(' ')})`;
+  return `${message}\n\n(Links: ${Array.from(urls).join(' ')})`;
 }
 
 // Text shorter than this that is followed by a tool call is treated as a
@@ -712,204 +801,165 @@ export function withExplicitLinks(message: string): string {
 const NOTE_HOLD_CHARS = 200;
 
 /**
- * Parse Claude's SSE stream and relay it as SSEChunks: answer text, web
- * search/fetch progress, web sources, and the closing done/error event.
+ * Turns Claude's stream events, across every turn of an answer, into
+ * SSEChunks: answer text, tool progress, web sources, and the closing
+ * done/error event.
  */
-export async function relayClaudeStream(
-  response: Response,
-  onChunk: (chunk: SSEChunk) => void
-): Promise<void> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    onChunk({ type: 'error', message: 'No response body from Claude API' });
-    return;
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let stopReason: string | null = null;
-
+class StreamRelay {
   // Server tool calls stream their input as JSON fragments; collect them per
   // content block so a status line can be sent once the input is complete.
-  const pendingToolInputs = new Map<number, { name: string; json: string }>();
-  const webSources = new Map<string, WebSource>();
-  let sentText = false;
-  let toolUsedSinceText = false;
+  private pendingToolInputs = new Map<number, { name: string; json: string }>();
+  private webSources = new Map<string, WebSource>();
+  private sentText = false;
+  private toolUsedSinceText = false;
   // Each text block is held until it passes NOTE_HOLD_CHARS, another text
-  // block starts, or the message ends; a tool call starting first drops it.
-  let heldText = '';
-  let textBlockStreaming = false;
-  const emitText = (text: string) => {
+  // block starts, or the turn ends; a tool call starting first drops it.
+  private heldText = '';
+  private textBlockStreaming = false;
+  private inputTokens = 0;
+  private outputTokens = 0;
+
+  constructor(private readonly onChunk: (chunk: SSEChunk) => void) {}
+
+  addUsage(usage: Anthropic.Usage): void {
+    this.inputTokens += usage.input_tokens;
+    this.outputTokens += usage.output_tokens;
+  }
+
+  private emitText(text: string): void {
     // Text that resumes after a tool call starts a new paragraph instead of
     // running on from whatever was shown before the call.
-    const prefix = toolUsedSinceText && sentText ? '\n\n' : '';
-    toolUsedSinceText = false;
-    sentText = true;
-    onChunk({ type: 'delta', text: prefix + text });
-  };
-  const flushHeldText = () => {
-    if (heldText) emitText(heldText);
-    heldText = '';
-  };
-  const addWebSource = (url: string | undefined, title: string | undefined) => {
-    if (url && !webSources.has(url)) webSources.set(url, { url, title: title || url });
-  };
+    const prefix = this.toolUsedSinceText && this.sentText ? '\n\n' : '';
+    this.toolUsedSinceText = false;
+    this.sentText = true;
+    this.onChunk({ type: 'delta', text: prefix + text });
+  }
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  private flushHeldText(): void {
+    if (this.heldText) this.emitText(this.heldText);
+    this.heldText = '';
+  }
 
-      buffer += decoder.decode(value, { stream: true });
+  private addWebSource(url: string | undefined, title: string | undefined): void {
+    if (url && !this.webSources.has(url)) this.webSources.set(url, { url, title: title || url });
+  }
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') continue;
-
-        let event: {
-          type: string;
-          index?: number;
-          // Thinking blocks stream as thinking_delta/signature_delta and are
-          // skipped below; only text_delta reaches the client.
-          delta?: {
-            type?: string;
-            text?: string;
-            partial_json?: string;
-            stop_reason?: string | null;
-            citation?: { type?: string; url?: string; title?: string };
-          };
-          content_block?: {
-            type?: string;
-            name?: string;
-            input?: Record<string, unknown>;
-            content?: { type?: string; url?: string; error_code?: string; content?: { title?: string } };
-          };
-          usage?: { input_tokens: number; output_tokens: number };
-          message?: { usage?: { input_tokens: number; output_tokens: number } };
-        };
-        try {
-          event = JSON.parse(data);
-        } catch {
-          continue;
-        }
-
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
-          if (textBlockStreaming) {
-            emitText(event.delta.text);
-          } else {
-            heldText += event.delta.text;
-            if (heldText.length >= NOTE_HOLD_CHARS) {
-              flushHeldText();
-              textBlockStreaming = true;
-            }
-          }
-        }
-
-        if (event.type === 'content_block_start' && event.index !== undefined) {
-          const block = event.content_block;
-          if (block?.type === 'text') {
-            flushHeldText();
-            textBlockStreaming = false;
-          }
-          if (block?.type === 'server_tool_use' && block.name) {
-            if (heldText) console.log(`[RAG Chat] Dropped working note before ${block.name}: ${heldText.trim()}`);
-            heldText = '';
-            // Calls made from code execution arrive with their input already
-            // filled in rather than streamed as input_json_delta.
-            const startInput = block.input && Object.keys(block.input).length ? JSON.stringify(block.input) : '';
-            pendingToolInputs.set(event.index, { name: block.name, json: startInput });
-            toolUsedSinceText = true;
-          }
-          // A fetched page is a source even when no sentence cites it directly.
-          if (block?.type === 'web_fetch_tool_result' && block.content?.type === 'web_fetch_result') {
-            addWebSource(block.content.url, block.content.content?.title);
-          }
-          // Tool errors come back as a 200 with an error object instead of
-          // results; log them, since otherwise only the answer's wording shows it.
-          if (
-            (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result') &&
-            block.content?.error_code
-          ) {
-            console.warn(`[RAG Chat] ${block.type} error: ${block.content.error_code}`);
-          }
-        }
-
-        if (event.type === 'content_block_delta' && event.index !== undefined) {
-          if (event.delta?.type === 'input_json_delta' && event.delta.partial_json) {
-            const pending = pendingToolInputs.get(event.index);
-            if (pending) pending.json += event.delta.partial_json;
-          }
-          if (event.delta?.type === 'citations_delta' && event.delta.citation?.type === 'web_search_result_location') {
-            addWebSource(event.delta.citation.url, event.delta.citation.title);
-          }
-        }
-
-        if (event.type === 'content_block_stop' && event.index !== undefined) {
-          const pending = pendingToolInputs.get(event.index);
-          if (pending) {
-            pendingToolInputs.delete(event.index);
-            let input: { query?: string; url?: string } = {};
-            try {
-              input = JSON.parse(pending.json || '{}');
-            } catch {
-              // Leave the status generic
-            }
-            if (pending.name === 'web_search') {
-              onChunk({ type: 'status', message: input.query ? `Searching the web for "${input.query}"` : 'Searching the web' });
-            } else if (pending.name === 'web_fetch') {
-              onChunk({ type: 'status', message: input.url ? `Reading ${input.url}` : 'Reading a web page' });
-            }
-          }
-        }
-
-        if (event.type === 'message_start' && event.message?.usage) {
-          inputTokens = event.message.usage.input_tokens;
-        }
-
-        if (event.type === 'message_delta') {
-          if (event.usage) outputTokens = event.usage.output_tokens;
-          if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
+  handle(event: Anthropic.RawMessageStreamEvent): void {
+    if (event.type === 'content_block_start') {
+      // Loosely typed: server tool result shapes vary by tool version.
+      const block = event.content_block as {
+        type: string;
+        name?: string;
+        input?: Record<string, unknown>;
+        content?: { type?: string; url?: string; error_code?: string; content?: { title?: string } };
+      };
+      if (block.type === 'text') {
+        this.flushHeldText();
+        this.textBlockStreaming = false;
+      }
+      if ((block.type === 'server_tool_use' || block.type === 'tool_use') && block.name) {
+        if (this.heldText) console.log(`[RAG Chat] Dropped working note before ${block.name}: ${this.heldText.trim()}`);
+        this.heldText = '';
+        this.toolUsedSinceText = true;
+        if (block.type === 'server_tool_use') {
+          // Calls made from code execution arrive with their input already
+          // filled in rather than streamed as input_json_delta.
+          const startInput = block.input && Object.keys(block.input).length ? JSON.stringify(block.input) : '';
+          this.pendingToolInputs.set(event.index, { name: block.name, json: startInput });
         }
       }
+      // A fetched page is a source even when no sentence cites it directly.
+      if (block.type === 'web_fetch_tool_result' && block.content?.type === 'web_fetch_result') {
+        this.addWebSource(block.content.url, block.content.content?.title);
+      }
+      // Tool errors come back as a 200 with an error object instead of
+      // results; log them, since otherwise only the answer's wording shows it.
+      if ((block.type === 'web_search_tool_result' || block.type === 'web_fetch_tool_result') && block.content?.error_code) {
+        console.warn(`[RAG Chat] ${block.type} error: ${block.content.error_code}`);
+      }
+      return;
     }
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'Stream reading error';
-    console.error('[RAG Chat] Stream error:', errMsg);
-    onChunk({ type: 'error', message: `Stream error: ${errMsg}` });
-    return;
-  } finally {
-    reader.releaseLock();
-  }
-  flushHeldText();
 
-  // A safety-classifier decline arrives as a normal 200 stream that ends with
-  // stop_reason "refusal" — without this the answer would just stop short.
-  if (stopReason === 'refusal') {
-    console.warn('[RAG Chat] Claude declined the request (stop_reason: refusal)');
-    onChunk({ type: 'error', message: 'Claude declined to answer this question. Try rephrasing it.' });
-    return;
+    if (event.type === 'content_block_delta') {
+      const delta = event.delta as {
+        type: string;
+        text?: string;
+        partial_json?: string;
+        citation?: { type?: string; url?: string; title?: string };
+      };
+      if (delta.type === 'text_delta' && delta.text) {
+        if (this.textBlockStreaming) {
+          this.emitText(delta.text);
+        } else {
+          this.heldText += delta.text;
+          if (this.heldText.length >= NOTE_HOLD_CHARS) {
+            this.flushHeldText();
+            this.textBlockStreaming = true;
+          }
+        }
+      }
+      if (delta.type === 'input_json_delta' && delta.partial_json) {
+        const pending = this.pendingToolInputs.get(event.index);
+        if (pending) pending.json += delta.partial_json;
+      }
+      if (delta.type === 'citations_delta' && delta.citation?.type === 'web_search_result_location') {
+        this.addWebSource(delta.citation.url, delta.citation.title);
+      }
+      return;
+    }
+
+    if (event.type === 'content_block_stop') {
+      const pending = this.pendingToolInputs.get(event.index);
+      if (!pending) return;
+      this.pendingToolInputs.delete(event.index);
+      let input: { query?: string; url?: string } = {};
+      try {
+        input = JSON.parse(pending.json || '{}');
+      } catch {
+        // Leave the status generic
+      }
+      if (pending.name === 'web_search') {
+        this.onChunk({ type: 'status', message: input.query ? `Searching the web for "${input.query}"` : 'Searching the web' });
+      } else if (pending.name === 'web_fetch') {
+        this.onChunk({ type: 'status', message: input.url ? `Reading ${input.url}` : 'Reading a web page' });
+      }
+      return;
+    }
+
+    if (event.type === 'message_stop') {
+      // Text still held at the end of a turn is answer text, not a note.
+      this.flushHeldText();
+      this.pendingToolInputs.clear();
+    }
   }
 
-  // The server-side tool loop stopped at its step limit before finishing.
-  // Resuming would mean replaying the full assistant turn, so flag it instead.
-  if (stopReason === 'pause_turn') {
-    console.warn('[RAG Chat] Web research hit the server tool step limit (stop_reason: pause_turn)');
-    onChunk({ type: 'delta', text: '\n\n_I hit my limit on web lookups for one message, so this answer may be incomplete. Ask a narrower follow-up to dig further._' });
-  }
+  finish(stopReason: string | null): void {
+    this.flushHeldText();
 
-  if (webSources.size > 0) {
-    onChunk({ type: 'web_sources', sources: Array.from(webSources.values()) });
-  }
+    // A safety-classifier decline arrives as a normal stream that ends with
+    // stop_reason "refusal"; without this the answer would just stop short.
+    if (stopReason === 'refusal') {
+      console.warn('[RAG Chat] Claude declined the request (stop_reason: refusal)');
+      this.onChunk({ type: 'error', message: 'Claude declined to answer this question. Try rephrasing it.' });
+      return;
+    }
 
-  onChunk({
-    type: 'done',
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
-  });
+    // Still paused or still calling tools after MAX_ANSWER_TURNS.
+    if (stopReason === 'pause_turn' || stopReason === 'tool_use') {
+      console.warn(`[RAG Chat] Answer stopped at the turn limit (stop_reason: ${stopReason})`);
+      this.onChunk({
+        type: 'delta',
+        text: '\n\n_I hit my limit on lookups for one message, so this answer may be incomplete. Ask a narrower follow-up to dig further._',
+      });
+    }
+
+    if (this.webSources.size > 0) {
+      this.onChunk({ type: 'web_sources', sources: Array.from(this.webSources.values()) });
+    }
+
+    this.onChunk({
+      type: 'done',
+      usage: { input_tokens: this.inputTokens, output_tokens: this.outputTokens },
+    });
+  }
 }

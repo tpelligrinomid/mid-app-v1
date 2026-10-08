@@ -17,7 +17,7 @@ if (!apiKey) throw new Error('No ANTHROPIC_API_KEY');
 
 // Pull the live constants out of chat.ts so the test can't drift from the code.
 const src = readFileSync(`${repo}/src/services/rag/chat.ts`, 'utf8');
-const webTools = eval(src.match(/const WEB_TOOLS = (\[[\s\S]*?\n\]);/)[1]);
+const webTools = eval(src.match(/const WEB_TOOLS[^=]*= (\[[\s\S]*?\n\]);/)[1]);
 const webGuidance = eval(src.match(/const WEB_GUIDANCE = (`[\s\S]*?`);/)[1]);
 const model = src.match(/const ANSWER_MODEL = '([^']+)'/)[1];
 const effort = src.match(/const ANSWER_EFFORT = '([^']+)'/)[1];

@@ -41,3 +41,7 @@ docs/top-contracts-q1-2026.md
 docs/program-roadmap-*payload*.json
 docs/program-roadmap-*payload*.txt
 docs/program-roadmap-output-sample.txt
+
+# Databox OAuth tokens saved locally by backend/scripts/connect-databox.mts
+*.databox-tokens.local.json
+.databox-tokens.local.json

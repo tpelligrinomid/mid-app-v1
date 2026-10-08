@@ -25,11 +25,14 @@ const API_VERSION = '2023-06-01';
 
 // Anthropic-hosted web tools: they run inside the same request, so the answer
 // call needs no tool loop. Caps keep a single message from fanning out.
+// Research across several companies routinely takes 10+ searches, and this
+// version can fire several in parallel, so search gets a looser cap than
+// fetch ($10 per 1,000 searches, so 15 is at most $0.15 a message).
 const WEB_TOOLS = [
   {
     type: 'web_search_20260209',
     name: 'web_search',
-    max_uses: 5,
+    max_uses: 15,
     user_location: { type: 'approximate', country: 'US' },
   },
   {
@@ -730,7 +733,7 @@ export async function streamChatResponse(
           content_block?: {
             type?: string;
             name?: string;
-            content?: { type?: string; url?: string; content?: { title?: string } };
+            content?: { type?: string; url?: string; error_code?: string; content?: { title?: string } };
           };
           usage?: { input_tokens: number; output_tokens: number };
           message?: { usage?: { input_tokens: number; output_tokens: number } };
@@ -753,6 +756,14 @@ export async function streamChatResponse(
           // A fetched page is a source even when no sentence cites it directly.
           if (block?.type === 'web_fetch_tool_result' && block.content?.type === 'web_fetch_result') {
             addWebSource(block.content.url, block.content.content?.title);
+          }
+          // Tool errors come back as a 200 with an error object instead of
+          // results; log them, since otherwise only the answer's wording shows it.
+          if (
+            (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result') &&
+            block.content?.error_code
+          ) {
+            console.warn(`[RAG Chat] ${block.type} error: ${block.content.error_code}`);
           }
         }
 

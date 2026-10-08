@@ -48,7 +48,7 @@ const WEB_GUIDANCE = `## Web access
 
 You can search the web (web_search) and read web pages (web_fetch). The client's own data above is the source of truth for anything about this client; use the web for outside information such as competitors, market and industry facts, companies or people to research, recent news, or when the user asks you to look something up. Don't search for what the client data already answers.
 
-web_fetch can only open a URL that already appeared in a web_search result or in the user's own message. Websites or URLs mentioned only in the client data above can't be fetched directly, and a blocked fetch still uses up an attempt. To read a site, first web_search for it (for example the company name or domain), then fetch the URL from the search results. Don't retry a fetch that failed.
+web_fetch can only open a URL that already appeared in a web_search result or in the user's own message. Websites or URLs mentioned only in the client data above can't be fetched directly, and a blocked fetch still uses up an attempt. To read a site, first web_search for it (for example the company name or domain), then fetch the URL from the search results. If the results don't include the exact page you need (such as a homepage), search again more specifically, for example "site:example.com", before settling for a different page. Don't retry a fetch that failed.
 
 Write only the final answer as text: no notes to yourself before or between tool calls.
 
@@ -685,7 +685,22 @@ export async function streamChatResponse(
     return;
   }
 
-  // 6. Parse SSE stream from Claude
+  // 6. Relay Claude's stream to the client
+  await relayClaudeStream(response, onChunk);
+}
+
+// Text shorter than this that is followed by a tool call is treated as a
+// working note ("Need homepages first.") and dropped instead of shown.
+const NOTE_HOLD_CHARS = 200;
+
+/**
+ * Parse Claude's SSE stream and relay it as SSEChunks: answer text, web
+ * search/fetch progress, web sources, and the closing done/error event.
+ */
+export async function relayClaudeStream(
+  response: Response,
+  onChunk: (chunk: SSEChunk) => void
+): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) {
     onChunk({ type: 'error', message: 'No response body from Claude API' });
@@ -704,6 +719,22 @@ export async function streamChatResponse(
   const webSources = new Map<string, WebSource>();
   let sentText = false;
   let toolUsedSinceText = false;
+  // Each text block is held until it passes NOTE_HOLD_CHARS, another text
+  // block starts, or the message ends; a tool call starting first drops it.
+  let heldText = '';
+  let textBlockStreaming = false;
+  const emitText = (text: string) => {
+    // Text that resumes after a tool call starts a new paragraph instead of
+    // running on from whatever was shown before the call.
+    const prefix = toolUsedSinceText && sentText ? '\n\n' : '';
+    toolUsedSinceText = false;
+    sentText = true;
+    onChunk({ type: 'delta', text: prefix + text });
+  };
+  const flushHeldText = () => {
+    if (heldText) emitText(heldText);
+    heldText = '';
+  };
   const addWebSource = (url: string | undefined, title: string | undefined) => {
     if (url && !webSources.has(url)) webSources.set(url, { url, title: title || url });
   };
@@ -739,6 +770,7 @@ export async function streamChatResponse(
           content_block?: {
             type?: string;
             name?: string;
+            input?: Record<string, unknown>;
             content?: { type?: string; url?: string; error_code?: string; content?: { title?: string } };
           };
           usage?: { input_tokens: number; output_tokens: number };
@@ -751,18 +783,30 @@ export async function streamChatResponse(
         }
 
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
-          // Text that resumes after a tool call starts a new paragraph instead
-          // of running on from whatever was written before the call.
-          const text = toolUsedSinceText && sentText ? `\n\n${event.delta.text}` : event.delta.text;
-          toolUsedSinceText = false;
-          sentText = true;
-          onChunk({ type: 'delta', text });
+          if (textBlockStreaming) {
+            emitText(event.delta.text);
+          } else {
+            heldText += event.delta.text;
+            if (heldText.length >= NOTE_HOLD_CHARS) {
+              flushHeldText();
+              textBlockStreaming = true;
+            }
+          }
         }
 
         if (event.type === 'content_block_start' && event.index !== undefined) {
           const block = event.content_block;
+          if (block?.type === 'text') {
+            flushHeldText();
+            textBlockStreaming = false;
+          }
           if (block?.type === 'server_tool_use' && block.name) {
-            pendingToolInputs.set(event.index, { name: block.name, json: '' });
+            if (heldText) console.log(`[RAG Chat] Dropped working note before ${block.name}: ${heldText.trim()}`);
+            heldText = '';
+            // Calls made from code execution arrive with their input already
+            // filled in rather than streamed as input_json_delta.
+            const startInput = block.input && Object.keys(block.input).length ? JSON.stringify(block.input) : '';
+            pendingToolInputs.set(event.index, { name: block.name, json: startInput });
             toolUsedSinceText = true;
           }
           // A fetched page is a source even when no sentence cites it directly.
@@ -825,6 +869,7 @@ export async function streamChatResponse(
   } finally {
     reader.releaseLock();
   }
+  flushHeldText();
 
   // A safety-classifier decline arrives as a normal 200 stream that ends with
   // stop_reason "refusal" — without this the answer would just stop short.

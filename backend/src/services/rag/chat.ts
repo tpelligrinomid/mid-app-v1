@@ -665,7 +665,7 @@ async function getDataboxAccountId(contractId: string): Promise<string | null> {
   try {
     const row = await select<{ databox_account_id: string | null }>('contracts', {
       select: 'databox_account_id',
-      filters: { id: contractId },
+      filters: { contract_id: contractId },
       single: true,
     });
     return row?.databox_account_id || null;

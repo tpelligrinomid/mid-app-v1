@@ -23,6 +23,30 @@ const ANSWER_EFFORT = 'low';
 const CLASSIFIER_MODEL = 'claude-haiku-4-5';
 const API_VERSION = '2023-06-01';
 
+// Anthropic-hosted web tools: they run inside the same request, so the answer
+// call needs no tool loop. Caps keep a single message from fanning out.
+const WEB_TOOLS = [
+  {
+    type: 'web_search_20260209',
+    name: 'web_search',
+    max_uses: 5,
+    user_location: { type: 'approximate', country: 'US' },
+  },
+  {
+    type: 'web_fetch_20260209',
+    name: 'web_fetch',
+    max_uses: 5,
+    max_content_tokens: 20000,
+    citations: { enabled: true },
+  },
+];
+
+const WEB_GUIDANCE = `## Web access
+
+You can search the web (web_search) and read web pages (web_fetch). The client's own data above is the source of truth for anything about this client; use the web for outside information such as competitors, market and industry facts, companies or people to research, recent news, or when the user asks you to look something up. Don't search for what the client data already answers.
+
+Never invent company names, people, figures or URLs. If searching doesn't turn up something solid, say so plainly. When a point comes from the web, name the source in your answer, and keep it clear which points come from the client's data and which from the web.`;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -47,8 +71,17 @@ export interface ContextSource {
   similarity: number;
 }
 
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
 export type SSEChunk =
   | { type: 'context'; sources: ContextSource[] }
+  // Progress while Claude searches or reads a page, e.g. 'Searching the web for "..."'.
+  | { type: 'status'; message: string }
+  // Web pages the answer cited or read, sent once before `done`.
+  | { type: 'web_sources'; sources: WebSource[] }
   | { type: 'delta'; text: string }
   | { type: 'done'; usage?: { input_tokens: number; output_tokens: number } }
   | { type: 'error'; message: string };
@@ -497,7 +530,9 @@ ${dataBlocks}
 ${contextBlocks}`;
 }
 
-const NO_CONTENT_PROMPT = 'You are a knowledgeable content analyst for a marketing agency. The user is asking about their content library, but no relevant content was found in the knowledge base. Let them know you couldn\'t find matching content and suggest they try rephrasing their question or check that content has been ingested.';
+const NO_CONTENT_PROMPT = `You are a knowledgeable content analyst for a marketing agency. No content in the client's library matched this question.
+
+If the question needs outside information (market, competitors, companies, people, news) or the user asks you to research something, use the web. If it is about the client's own content and the web can't answer it, say you couldn't find matching content and suggest rephrasing the question or checking that the content has been ingested.`;
 
 // ============================================================================
 // Stream Chat Response
@@ -591,6 +626,7 @@ export async function streamChatResponse(
   } else {
     systemPrompt = NO_CONTENT_PROMPT;
   }
+  systemPrompt += `\n\n${WEB_GUIDANCE}`;
 
   const messages = [
     ...conversation_history.map((m) => ({ role: m.role, content: m.content })),
@@ -598,9 +634,8 @@ export async function streamChatResponse(
   ];
 
   // 5. Call Claude with streaming
-  let response: Response;
-  try {
-    response = await fetch(CLAUDE_API_URL, {
+  const callClaude = (withWebTools: boolean) =>
+    fetch(CLAUDE_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -614,9 +649,21 @@ export async function streamChatResponse(
         output_config: { effort: ANSWER_EFFORT },
         system: systemPrompt,
         messages,
+        ...(withWebTools && { tools: WEB_TOOLS }),
         stream: true,
       }),
     });
+
+  let response: Response;
+  try {
+    response = await callClaude(true);
+    // If the web tools are rejected (e.g. web search turned off for the org),
+    // answer without them rather than failing every chat.
+    if (response.status === 400) {
+      const errorText = await response.text();
+      console.error('[RAG Chat] Claude API 400 with web tools, retrying without them:', errorText.substring(0, 300));
+      response = await callClaude(false);
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Failed to reach Claude API';
     console.error('[RAG Chat] Claude API request failed:', errMsg);
@@ -644,6 +691,14 @@ export async function streamChatResponse(
   let outputTokens = 0;
   let stopReason: string | null = null;
 
+  // Server tool calls stream their input as JSON fragments; collect them per
+  // content block so a status line can be sent once the input is complete.
+  const pendingToolInputs = new Map<number, { name: string; json: string }>();
+  const webSources = new Map<string, WebSource>();
+  const addWebSource = (url: string | undefined, title: string | undefined) => {
+    if (url && !webSources.has(url)) webSources.set(url, { url, title: title || url });
+  };
+
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -662,9 +717,21 @@ export async function streamChatResponse(
 
         let event: {
           type: string;
+          index?: number;
           // Thinking blocks stream as thinking_delta/signature_delta and are
           // skipped below; only text_delta reaches the client.
-          delta?: { type?: string; text?: string; stop_reason?: string | null };
+          delta?: {
+            type?: string;
+            text?: string;
+            partial_json?: string;
+            stop_reason?: string | null;
+            citation?: { type?: string; url?: string; title?: string };
+          };
+          content_block?: {
+            type?: string;
+            name?: string;
+            content?: { type?: string; url?: string; content?: { title?: string } };
+          };
           usage?: { input_tokens: number; output_tokens: number };
           message?: { usage?: { input_tokens: number; output_tokens: number } };
         };
@@ -676,6 +743,45 @@ export async function streamChatResponse(
 
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
           onChunk({ type: 'delta', text: event.delta.text });
+        }
+
+        if (event.type === 'content_block_start' && event.index !== undefined) {
+          const block = event.content_block;
+          if (block?.type === 'server_tool_use' && block.name) {
+            pendingToolInputs.set(event.index, { name: block.name, json: '' });
+          }
+          // A fetched page is a source even when no sentence cites it directly.
+          if (block?.type === 'web_fetch_tool_result' && block.content?.type === 'web_fetch_result') {
+            addWebSource(block.content.url, block.content.content?.title);
+          }
+        }
+
+        if (event.type === 'content_block_delta' && event.index !== undefined) {
+          if (event.delta?.type === 'input_json_delta' && event.delta.partial_json) {
+            const pending = pendingToolInputs.get(event.index);
+            if (pending) pending.json += event.delta.partial_json;
+          }
+          if (event.delta?.type === 'citations_delta' && event.delta.citation?.type === 'web_search_result_location') {
+            addWebSource(event.delta.citation.url, event.delta.citation.title);
+          }
+        }
+
+        if (event.type === 'content_block_stop' && event.index !== undefined) {
+          const pending = pendingToolInputs.get(event.index);
+          if (pending) {
+            pendingToolInputs.delete(event.index);
+            let input: { query?: string; url?: string } = {};
+            try {
+              input = JSON.parse(pending.json || '{}');
+            } catch {
+              // Leave the status generic
+            }
+            if (pending.name === 'web_search') {
+              onChunk({ type: 'status', message: input.query ? `Searching the web for "${input.query}"` : 'Searching the web' });
+            } else if (pending.name === 'web_fetch') {
+              onChunk({ type: 'status', message: input.url ? `Reading ${input.url}` : 'Reading a web page' });
+            }
+          }
         }
 
         if (event.type === 'message_start' && event.message?.usage) {
@@ -703,6 +809,17 @@ export async function streamChatResponse(
     console.warn('[RAG Chat] Claude declined the request (stop_reason: refusal)');
     onChunk({ type: 'error', message: 'Claude declined to answer this question. Try rephrasing it.' });
     return;
+  }
+
+  // The server-side tool loop stopped at its step limit before finishing.
+  // Resuming would mean replaying the full assistant turn, so flag it instead.
+  if (stopReason === 'pause_turn') {
+    console.warn('[RAG Chat] Web research hit the server tool step limit (stop_reason: pause_turn)');
+    onChunk({ type: 'delta', text: '\n\n_I hit my limit on web lookups for one message, so this answer may be incomplete. Ask a narrower follow-up to dig further._' });
+  }
+
+  if (webSources.size > 0) {
+    onChunk({ type: 'web_sources', sources: Array.from(webSources.values()) });
   }
 
   onChunk({

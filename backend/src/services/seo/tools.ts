@@ -161,12 +161,15 @@ export class SeoToolRunner {
   }
 }
 
-export function seoGuidance(): string {
+export function seoGuidance(clientDomain?: string | null): string {
+  const domainLine = clientDomain
+    ? `The client's own website is ${clientDomain}. Use it as the client's domain unless the user names another.`
+    : "The client's own domain: take it from the documents or the conversation; if you can't tell, ask instead of guessing.";
   return `## SEO research data
 
 You can look up Google search data (US) with the seo_* tools: what any domain ranks for (seo_ranked_keywords), keywords a competitor ranks for that the client doesn't (seo_keyword_gap), search competitors (seo_competitor_domains), volume and difficulty for specific keywords (seo_keyword_data), related keywords (seo_related_keywords) and backlinks (seo_backlink_summary). Use them whenever a question involves keywords, rankings, search volume, competitors' SEO or content ideas, and never state a search volume, difficulty or ranking you didn't get from them. They cost money per call, so plan the few calls you need (at most ${MAX_SEO_CALLS} per answer).
 
-The client's own domain: take it from the documents or the conversation; if you can't tell, ask instead of guessing.
+${domainLine}
 
 When suggesting content from keyword data:
 - Prefer keywords with commercial or transactional intent (someone looking to buy or choose a provider) over informational ones, unless the user asks otherwise, and say which intent each has.

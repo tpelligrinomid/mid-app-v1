@@ -12,6 +12,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { searchKnowledge } from './search.js';
 import { select } from '../../utils/edge-functions.js';
 import { DATABOX_TOOLS, DataboxToolRunner, isDataboxTool } from '../databox/tools.js';
+import { getContractPrimaryDomain } from '../contracts/primary-domain.js';
 import { SEO_TOOLS, SeoToolRunner, isSeoTool, seoGuidance, seoToolsAvailable } from '../seo/tools.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
@@ -644,10 +645,14 @@ export async function streamChatResponse(
   ];
 
   // 5. Marketing data tools, when the contract has a Databox account
-  const databoxAccountId = await getDataboxAccountId(contract_id);
+  const [databoxAccountId, primaryDomain] = await Promise.all([
+    getDataboxAccountId(contract_id),
+    getContractPrimaryDomain(contract_id),
+  ]);
   if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
   const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
-  if (seo) systemPrompt += `\n\n${seoGuidance()}`;
+  if (seo) systemPrompt += `\n\n${seoGuidance(primaryDomain)}`;
+  else if (primaryDomain) systemPrompt += `\n\nThe client's website is ${primaryDomain}.`;
 
   // 6. Answer, running tools as Claude asks for them
   await runAnswer(

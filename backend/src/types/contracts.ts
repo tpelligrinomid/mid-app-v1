@@ -145,10 +145,41 @@ export interface CreateContractDTO {
   hosting?: boolean;
   priority?: PriorityTier;
   contract_description?: string;
+  databox_account_id?: string | null;
+  /** Client's main website as a bare host, e.g. "newnorth.com". */
+  primary_domain?: string | null;
 }
 
 export interface UpdateContractDTO extends Partial<CreateContractDTO> {
   contract_id: string;
+}
+
+const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+
+/**
+ * Reduce whatever was typed ("https://www.NewNorth.com/about") to a bare host
+ * ("newnorth.com"). Empty means no domain. Returns undefined if it can't be
+ * a domain.
+ */
+export function normalizeDomain(input: string | null | undefined): string | null | undefined {
+  const host = (input ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, '')
+    .replace(/[/?#:].*$/, '')
+    .replace(/^www\./, '')
+    .replace(/\.$/, '');
+  if (!host) return null;
+  return DOMAIN_RE.test(host) ? host : undefined;
+}
+
+/** Normalizes data.primary_domain in place; returns an error message if invalid. */
+export function normalizeContractDomain(data: Partial<CreateContractDTO>): string | null {
+  if (!('primary_domain' in data)) return null;
+  const domain = normalizeDomain(data.primary_domain);
+  if (domain === undefined) return `Invalid primary_domain: ${data.primary_domain}. Use a domain like example.com`;
+  data.primary_domain = domain;
+  return null;
 }
 
 // Validation helper for create/update operations

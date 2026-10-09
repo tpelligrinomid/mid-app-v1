@@ -19,6 +19,7 @@ import { submitDeliverable } from '../master-marketer/client.js';
 import { assembleContext } from './context.js';
 import type { GenerationState, ResearchInputs } from './types.js';
 import { setGenerationStateSafe } from './state.js';
+import { getContractPrimaryDomain } from '../contracts/primary-domain.js';
 
 /** Options for generateDeliverableInBackground */
 export interface GenerateOptions {
@@ -129,6 +130,28 @@ async function resolvePreviousRoadmap(
  * Generic helper: resolve the latest completed deliverable of a given type for a contract.
  * Returns the full content_structured or undefined.
  */
+/**
+ * Client name and website from the contract, for deliverables with no
+ * explicit client. Domain is '' when the contract has no primary_domain.
+ */
+async function clientFromContract(contractId: string): Promise<{ company_name: string; domain: string } | undefined> {
+  try {
+    const [rows, domain] = await Promise.all([
+      select<Array<{ contract_name: string }>>('contracts', {
+        select: 'contract_name',
+        filters: { contract_id: contractId },
+        limit: 1,
+      }),
+      getContractPrimaryDomain(contractId),
+    ]);
+    if (!rows?.[0]) return undefined;
+    return { company_name: rows[0].contract_name, domain: domain ?? '' };
+  } catch (err) {
+    console.warn('[Deliverable Generation] Failed to resolve client from contract:', err);
+    return undefined;
+  }
+}
+
 async function resolvePriorDeliverable(
   contractId: string,
   type: string,
@@ -316,6 +339,10 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         if (profiles?.length) {
           competitors = profiles.map(p => ({ company_name: p.company_name as string, domain: p.domain as string }));
         }
+      }
+      if (!client) {
+        const fromContract = await clientFromContract(contractId);
+        if (fromContract?.domain) client = fromContract;
       }
 
       console.log(
@@ -809,17 +836,8 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
       // Resolve client: use explicit research_inputs if provided, otherwise auto-resolve from contract
       let briefClient = researchInputs?.client;
       if (!briefClient) {
-        try {
-          const contractRows = await select<Array<{ contract_name: string }>>(
-            'contracts',
-            { select: 'contract_name', filters: { contract_id: contractId }, limit: 1 }
-          );
-          if (contractRows?.[0]) {
-            briefClient = { company_name: contractRows[0].contract_name, domain: 'n/a' };
-          }
-        } catch (err) {
-          console.warn('[Deliverable Generation] Failed to resolve client from contract:', err);
-        }
+        const fromContract = await clientFromContract(contractId);
+        if (fromContract) briefClient = { ...fromContract, domain: fromContract.domain || 'n/a' };
       }
 
       console.log(

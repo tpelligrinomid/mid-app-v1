@@ -7,7 +7,7 @@
 // Run from backend/:
 //   npx tsx scripts/test-compass-stream.mts "<question>"
 //   npx tsx scripts/test-compass-stream.mts --databox 768359 "<question>"
-//   npx tsx scripts/test-compass-stream.mts --seo "<question>"
+//   npx tsx scripts/test-compass-stream.mts --seo [--domain newnorth.com] "<question>"
 // Needs ANTHROPIC_API_KEY (environment or backend/.env); --databox also needs
 // the Supabase settings in .env and a Databox connection (connect-databox.mts);
 // --seo needs MASTER_MARKETER_URL and MASTER_MARKETER_API_KEY.
@@ -35,7 +35,7 @@ const system = `You are a knowledgeable content analyst for a marketing agency. 
 [1] Title: "New North - Marketing Research Report"
 Source: deliverable
 ---
-Client: New North (newnorth.com), a B2B marketing agency for tech companies.
+Client: New North, a B2B marketing agency for tech companies.
 Competitors analyzed: Refine Labs (refinelabs.com), Ironpaper (ironpaper.com), NoGood (nogood.io), Elevation B2B (elevationb2b.com).
 
 ${WEB_GUIDANCE}`;
@@ -44,6 +44,8 @@ ${WEB_GUIDANCE}`;
 const args = process.argv.slice(2);
 const databoxIdx = args.indexOf('--databox');
 const databoxAccount = databoxIdx >= 0 ? args.splice(databoxIdx, 2)[1] : null;
+const domainIdx = args.indexOf('--domain');
+const clientDomain = domainIdx >= 0 ? args.splice(domainIdx, 2)[1] : null;
 const seoIdx = args.indexOf('--seo');
 const useSeo = seoIdx >= 0 && args.splice(seoIdx, 1).length > 0;
 const question = args[0] ?? 'Can you check out our biggest competitors and let me know what their H1 on their website looks like? Provide the response in a markdown table.';
@@ -52,7 +54,7 @@ let text = '';
 await runAnswer(
   {
     apiKey,
-    system: [system, databoxAccount && marketingGuidance(), useSeo && seoGuidance()].filter(Boolean).join('\n\n'),
+    system: [system, databoxAccount && marketingGuidance(), useSeo && seoGuidance(clientDomain)].filter(Boolean).join('\n\n'),
     messages: [{ role: 'user', content: withExplicitLinks(question) }],
     databox: databoxAccount ? new DataboxToolRunner(databoxAccount) : null,
     seo: useSeo ? new SeoToolRunner() : null,

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import {
   validateContractEnums,
+  normalizeContractDomain,
   CreateContractDTO,
   UpdateContractDTO,
   ContractListItem,
@@ -378,6 +379,8 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 
     // Validate enum values
     const validationErrors = validateContractEnums(contractData);
+    const domainError = normalizeContractDomain(contractData);
+    if (domainError) validationErrors.push(domainError);
     if (validationErrors.length > 0) {
       res.status(400).json({
         error: 'Invalid enum values',
@@ -431,6 +434,8 @@ router.put('/:id', async (req: Request, res: Response): Promise<void> => {
 
     // Validate enum values if provided
     const validationErrors = validateContractEnums(updateData);
+    const domainError = normalizeContractDomain(updateData);
+    if (domainError) validationErrors.push(domainError);
     if (validationErrors.length > 0) {
       res.status(400).json({
         error: 'Invalid enum values',

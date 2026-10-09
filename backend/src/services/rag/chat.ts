@@ -12,6 +12,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { searchKnowledge } from './search.js';
 import { select } from '../../utils/edge-functions.js';
 import { DATABOX_TOOLS, DataboxToolRunner, isDataboxTool } from '../databox/tools.js';
+import { SEO_TOOLS, SeoToolRunner, isSeoTool, seoGuidance, seoToolsAvailable } from '../seo/tools.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
@@ -645,6 +646,8 @@ export async function streamChatResponse(
   // 5. Marketing data tools, when the contract has a Databox account
   const databoxAccountId = await getDataboxAccountId(contract_id);
   if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
+  const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
+  if (seo) systemPrompt += `\n\n${seoGuidance()}`;
 
   // 6. Answer, running tools as Claude asks for them
   await runAnswer(
@@ -656,6 +659,7 @@ export async function streamChatResponse(
         { role: 'user' as const, content: withExplicitLinks(message) },
       ],
       databox: databoxAccountId ? new DataboxToolRunner(databoxAccountId) : null,
+      seo,
     },
     onChunk
   );
@@ -691,7 +695,7 @@ These numbers are the client's own data and take priority over anything from the
 // Answer loop
 // ============================================================================
 
-// Upper bound on model turns in one answer (each Databox tool round is a turn).
+// Upper bound on model turns in one answer (each round of tool calls is a turn).
 const MAX_ANSWER_TURNS = 12;
 
 export interface AnswerParams {
@@ -699,10 +703,11 @@ export interface AnswerParams {
   system: string;
   messages: Anthropic.MessageParam[];
   databox: DataboxToolRunner | null;
+  seo?: SeoToolRunner | null;
 }
 
 /**
- * Stream an answer, executing Compass's own tools (Databox) between turns.
+ * Stream an answer, executing Compass's own tools (Databox, SEO) between turns.
  * Web search and fetch run on Anthropic's side inside each turn; a paused
  * server-tool turn is resumed by sending it back.
  */
@@ -717,6 +722,7 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
     const tools: Anthropic.ToolUnion[] = [
       ...(webTools ? WEB_TOOLS : []),
       ...(params.databox ? DATABOX_TOOLS : []),
+      ...(params.seo ? SEO_TOOLS : []),
     ];
 
     let message: Anthropic.Message;
@@ -763,6 +769,10 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
         const input = (toolUse.input ?? {}) as Record<string, unknown>;
         try {
+          if (params.seo && isSeoTool(toolUse.name)) {
+            onChunk({ type: 'status', message: params.seo.describe(toolUse.name, input) });
+            return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.seo.run(toolUse.name, input) };
+          }
           if (!params.databox || !isDataboxTool(toolUse.name)) throw new Error(`Unknown tool: ${toolUse.name}`);
           onChunk({ type: 'status', message: await params.databox.describe(toolUse.name, input) });
           return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.databox.run(toolUse.name, input) };

@@ -83,6 +83,7 @@ interface DataSource {
   id: string;
   name: string;
   type: string;
+  created_at?: string;
 }
 
 interface MetricDefinition {
@@ -115,6 +116,8 @@ interface MetricDataResponse {
 const GRANULARITY_UNIT: Record<string, number> = { day: 2, week: 3, month: 4 };
 const MAX_DIMENSION_ROWS = 25;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// A newly connected source can take hours to backfill its history.
+const SYNC_GRACE_MS = 2 * 24 * 60 * 60 * 1000;
 
 /**
  * Runs Databox tools for one contract's account. Caches the account's source
@@ -159,7 +162,12 @@ export class DataboxToolRunner {
           sources: sources
             // Push/token sources hold no marketing metrics.
             .filter((s) => !['Push custom data'].includes(s.type))
-            .map((s) => ({ source_id: Number(s.id), name: s.name, type: s.type })),
+            .map((s) => ({
+              source_id: Number(s.id),
+              name: s.name,
+              type: s.type,
+              connected_on: s.created_at?.slice(0, 10) ?? null,
+            })),
         });
       }
 
@@ -202,7 +210,7 @@ export class DataboxToolRunner {
             end_date: end,
             dimension,
             granularity: granularity ? String(input.granularity) : undefined,
-          })
+          }, source.created_at)
         );
       }
 
@@ -210,6 +218,19 @@ export class DataboxToolRunner {
         throw new Error(`Unknown marketing tool: ${name}`);
     }
   }
+}
+
+/**
+ * An empty result from a just-connected source means Databox is still
+ * backfilling, not that the connection is broken; say so, so the answer
+ * doesn't tell the user to fix a working connection.
+ */
+function noDataNote(sourceCreatedAt?: string): string {
+  const connected = sourceCreatedAt ? Date.parse(sourceCreatedAt) : NaN;
+  if (!Number.isNaN(connected) && Date.now() - connected < SYNC_GRACE_MS) {
+    return `No data yet. This source was connected in Databox on ${sourceCreatedAt!.slice(0, 10)} and is probably still importing its history; try again in a few hours. The connection itself is fine.`;
+  }
+  return 'No data for this metric and date range.';
 }
 
 function value(point: ChartPoint | undefined) {
@@ -229,7 +250,8 @@ function changePercent(point: ChartPoint | undefined): number | null {
  */
 export function summarizeMetric(
   data: MetricDataResponse,
-  request: { source: string; metric_key: string; start_date: string; end_date: string; dimension?: string; granularity?: string }
+  request: { source: string; metric_key: string; start_date: string; end_date: string; dimension?: string; granularity?: string },
+  sourceCreatedAt?: string
 ) {
   const series = data.chart?.visualizationData ?? [];
   const totals = series.filter((s) => s.seriesType === 'number');
@@ -245,7 +267,7 @@ export function summarizeMetric(
 
   const result: Record<string, unknown> = {
     ...request,
-    note: rows.length === 0 ? 'No data for this metric and date range.' : undefined,
+    note: rows.length === 0 ? noDataNote(sourceCreatedAt) : undefined,
   };
 
   if (request.dimension) {

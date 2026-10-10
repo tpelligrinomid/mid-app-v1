@@ -45,3 +45,9 @@ docs/program-roadmap-output-sample.txt
 # Databox OAuth tokens saved locally by backend/scripts/connect-databox.mts
 *.databox-tokens.local.json
 .databox-tokens.local.json
+
+# Database exports (never commit)
+backend/backups/
+*.backup
+*.backup.zip
+*.dump

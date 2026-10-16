@@ -712,7 +712,8 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         metadata: { deliverable_id: deliverableId },
         ...(roadmapData && { roadmap: roadmapData }),
         ...(researchData && { research: researchData }),
-        ...(transcripts.length > 0 && { transcripts }),
+        // MM's ABM schema requires the key, but an empty array is fine
+        transcripts,
         ...(targetSegments && { target_segments: targetSegments }),
         ...(offers && { offers }),
         ...(normalizedChannels && { channels: normalizedChannels }),

@@ -4,6 +4,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolContext, ToolDefinition } from './define-tool.js';
+import { recordToolCall } from './audit.js';
 
 import listContracts from './tools/list-contracts.js';
 import getContract from './tools/get-contract.js';
@@ -69,12 +70,18 @@ export function buildMcpServer(ctx: ToolContext): McpServer {
         annotations: tool.annotations,
       },
       async (args: Record<string, unknown>) => {
+        const started = Date.now();
         try {
-          return await tool.handler(args, ctx);
+          const result = await tool.handler(args, ctx);
+          const errorText = result.isError ? result.content.map((c) => ('text' in c ? c.text : '')).join(' ') : undefined;
+          recordToolCall(ctx, { tool: tool.name, args, ok: !result.isError, durationMs: Date.now() - started, error: errorText });
+          return result;
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           console.error(`[MCP] ${tool.name} failed:`, err);
+          recordToolCall(ctx, { tool: tool.name, args, ok: false, durationMs: Date.now() - started, error: message });
           return {
-            content: [{ type: 'text' as const, text: `${tool.name} failed: ${err instanceof Error ? err.message : String(err)}` }],
+            content: [{ type: 'text' as const, text: `${tool.name} failed: ${message}` }],
             isError: true,
           };
         }

@@ -220,7 +220,9 @@ export DUMP=growth-pulse-grid_<date>.backup
 | Edge functions | All 12 deployed (`--use-api`, CLI 2.121); `verify_jwt` matches the old project; MCP discovery advertises the new issuer; cron endpoints return 401 without `x-cron-secret` |
 | Auth users + identities | 1 s |
 | 74 smaller public tables | 81 s |
-| `pulse_tasks`, `compass_knowledge` | **Failed** at ~108 s: 8 GB disk full (spend cap on), Postgres crashed and recovered. Retry after the disk cooldown |
+| `pulse_tasks`, `compass_knowledge` | First try **failed** at ~108 s: 8 GB disk full (spend cap on), Postgres crashed and recovered. Retried 2026-10-17 on a 30 GB disk (`--big-only`): `compass_knowledge` 181 s, `pulse_tasks` 306 s in parallel; view refresh + `ANALYZE` 4 s. Database 4–5 GB on disk |
+| Row-count check | **All 78 tables match** the export (incl. `auth.users` 142, `auth.identities` 170, `pulse_tasks` 73,161, `compass_knowledge` 145,065); 23 s |
+| **Cutover window estimate** | Lovable export + download, + ~6 min data load, ~1 min storage delta, ~0.5 min counts, ~45 min switching + smoke test → **about 1–1.5 h offline** |
 | Storage | 266/266 files, 69 s |
 | Smoke test (local backend + local frontend on the new project) | Google login works (after adding the new callback URI to the Google OAuth client); dashboard MRR and active contracts **match production**; points/delivery figures wait on `pulse_tasks` |
 

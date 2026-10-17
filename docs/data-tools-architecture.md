@@ -52,3 +52,18 @@ The paused in-house rank tracker (`docs/spec-search-visibility-tracking.md`, mig
 5. Test against real trial projects; then the release note.
 
 **Open from trial:** which clients get tracked first, keywords per client, and who owns keyword lists (strategist per account).
+
+### Status 2026-10-17 — built and live (backend `1af7dcb`, `83a5a77`; frontend `4a282f9`)
+
+- **Read tools** (REST API): `get_seo_rankings`, `get_seo_ranking_history`, `get_seo_movers`, `get_seo_competitors`.
+- **Management tools** (Nightwatch **MCP**, `https://mcp.nightwatch.io/mcp`, streamable HTTP): `add_seo_keywords`, `remove_seo_keywords`, `tag_seo_keywords`, `manage_seo_competitor` (two-step: preview, then `confirm=true` only after the user agrees), plus read-only `get_seo_serp` (full SERP incl. AI Overview citations), `suggest_seo_keywords`, `suggest_ai_prompts`.
+- Available in Compass chat / Ask Compass (when the contract has a Nightwatch site) and the MiD MCP (contract-scoped; MCP calls audited).
+- Contract settings: "Nightwatch site (SEO rankings)" picker; stored in `contract_integrations`.
+
+**Gotchas learned:**
+- One agency key (`NIGHTWATCH_API_KEY`) serves both REST (`access_token` query param) and MCP. The MCP wants it as **`x-auth-token: Bearer <key>`** — with the standard `Authorization` header it lists tools but refuses calls ("API token is required"). The SSE endpoint (`/sse`) is retired (404).
+- Cloudflare blocks requests without a normal `User-Agent` (error 1010).
+- REST `/user` returns the account's API token and a Google OAuth token — never proxy it.
+- "Position" = best across result types (local pack, AI Overview, snippets); "organic position" can be far lower (e.g. 3 vs 33). Tools always show both.
+- **Not available via API or MCP:** AI prompt (LLM) tracking setup and results — `add_keywords` only supports google/youtube/places/bing/yahoo/duckduckgo. Prompts are set up in the Nightwatch app (Settings → AI Tracking); `suggest_ai_prompts` helps choose them. Ask Nightwatch support for an endpoint.
+- Not exposed (deliberately): `delete_url`, group management, `list_urls`/`list_groups` (cross-client). Site creation (`create_url`) is a candidate next step for no-login client setup.

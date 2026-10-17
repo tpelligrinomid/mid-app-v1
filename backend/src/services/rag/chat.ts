@@ -487,18 +487,67 @@ async function fetchStructuredData(
 // System Prompts
 // ============================================================================
 
-function buildRagPrompt(results: SimilarityResult[]): string {
-  const contextBlocks = results
+// Dates aren't stored on knowledge chunks, so look them up from each source
+// record (one query per source type) and show them in the retrieved content.
+type SourceDates = Map<string, string>;
+
+const DATE_SOURCES: Record<string, { table: string; id: string; columns: string[] }> = {
+  meeting: { table: 'compass_meetings', id: 'meeting_id', columns: ['meeting_date'] },
+  note: { table: 'compass_notes', id: 'note_id', columns: ['note_date', 'created_at'] },
+  deliverable: { table: 'compass_deliverables', id: 'deliverable_id', columns: ['delivered_date', 'updated_at'] },
+  content: { table: 'content_assets', id: 'asset_id', columns: ['published_date', 'created_at'] },
+};
+
+async function fetchSourceDates(results: SimilarityResult[]): Promise<SourceDates> {
+  const dates: SourceDates = new Map();
+  const idsByType = new Map<string, Set<string>>();
+  for (const r of results) {
+    if (!DATE_SOURCES[r.source_type]) continue;
+    if (!idsByType.has(r.source_type)) idsByType.set(r.source_type, new Set());
+    idsByType.get(r.source_type)!.add(r.source_id);
+  }
+
+  await Promise.all(
+    Array.from(idsByType, async ([type, ids]) => {
+      const { table, id, columns } = DATE_SOURCES[type];
+      try {
+        const rows = await select<Record<string, unknown>[]>(table, {
+          select: [id, ...columns].join(', '),
+          filters: { [id]: { in: Array.from(ids) } },
+        });
+        for (const row of rows || []) {
+          const value = columns.map((c) => row[c]).find((v) => typeof v === 'string' && v);
+          if (value) dates.set(String(row[id]), (value as string).slice(0, 10));
+        }
+      } catch (err) {
+        console.warn(`[RAG Chat] Could not load ${type} dates:`, err instanceof Error ? err.message : err);
+      }
+    })
+  );
+  return dates;
+}
+
+function formatRetrieved(results: SimilarityResult[], dates: SourceDates): string {
+  return results
     .map((r, i) => {
-      return `[${i + 1}] Title: "${r.title}"\nSource: ${r.source_type}\n---\n${r.content}`;
+      const date = dates.get(r.source_id);
+      return `[${i + 1}] Title: "${r.title}"\nSource: ${r.source_type}${date ? `\nDate: ${date}` : ''}\n---\n${r.content}`;
     })
     .join('\n\n');
+}
+
+const DATE_GUIDANCE = `Each retrieved item shows its date when one is known (meeting date, note date, delivery date or publish date). Use these dates to order events and to answer questions about what is recent, latest or within a time period, and give dates when you describe meetings or decisions. Several items can come from the same meeting or document.`;
+
+function buildRagPrompt(results: SimilarityResult[], dates: SourceDates): string {
+  const contextBlocks = formatRetrieved(results, dates);
 
   return `You are a knowledgeable content analyst for a marketing agency. You have access to the following content from the client's content library. Use ONLY this context to answer questions. If the context doesn't contain enough information to answer, say so clearly.
 
 When referencing specific content, mention the title so the user knows which piece you're referring to.
 
 Keep your responses concise and actionable. If the user asks about topics, themes, or patterns, synthesize across multiple pieces of content.
+
+${DATE_GUIDANCE}
 
 ## Retrieved Content
 
@@ -517,20 +566,18 @@ Present numbers and statistics clearly. If the data reveals interesting patterns
 ${dataBlocks}`;
 }
 
-function buildHybridPrompt(structuredData: StructuredData[], ragResults: SimilarityResult[]): string {
+function buildHybridPrompt(structuredData: StructuredData[], ragResults: SimilarityResult[], dates: SourceDates): string {
   const dataBlocks = structuredData
     .map(d => `## ${d.label}\n${d.data}`)
     .join('\n\n');
 
-  const contextBlocks = ragResults
-    .map((r, i) => {
-      return `[${i + 1}] Title: "${r.title}"\nSource: ${r.source_type}\n---\n${r.content}`;
-    })
-    .join('\n\n');
+  const contextBlocks = formatRetrieved(ragResults, dates);
 
   return `You are a knowledgeable content analyst for a marketing agency. You have access to both structured data and content from the client's library. Use ALL of this context to give a comprehensive answer.
 
 When referencing specific content, mention the title. Present numbers and statistics clearly. Keep your response concise and actionable.
+
+${DATE_GUIDANCE}
 
 ## Structured Data
 
@@ -628,12 +675,14 @@ export async function streamChatResponse(
   // 4. Build system prompt based on what data we have
   let systemPrompt: string;
 
+  const sourceDates = ragResults.length > 0 ? await fetchSourceDates(ragResults) : new Map<string, string>();
+
   if (structuredData.length > 0 && ragResults.length > 0) {
-    systemPrompt = buildHybridPrompt(structuredData, ragResults);
+    systemPrompt = buildHybridPrompt(structuredData, ragResults, sourceDates);
   } else if (structuredData.length > 0) {
     systemPrompt = buildStructuredPrompt(structuredData);
   } else if (ragResults.length > 0) {
-    systemPrompt = buildRagPrompt(ragResults);
+    systemPrompt = buildRagPrompt(ragResults, sourceDates);
   } else {
     systemPrompt = NO_CONTENT_PROMPT;
   }

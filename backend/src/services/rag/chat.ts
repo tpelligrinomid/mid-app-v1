@@ -14,6 +14,9 @@ import { select } from '../../utils/edge-functions.js';
 import { DATABOX_TOOLS, DataboxToolRunner, isDataboxTool } from '../databox/tools.js';
 import { getContractPrimaryDomain } from '../contracts/primary-domain.js';
 import { SEO_TOOLS, SeoToolRunner, isSeoTool, seoGuidance, seoToolsAvailable } from '../seo/tools.js';
+import { NIGHTWATCH_TOOLS, NightwatchToolRunner, isNightwatchTool, nightwatchGuidance } from '../nightwatch/tools.js';
+import { nightwatchConfigured } from '../nightwatch/client.js';
+import { getContractIntegration } from '../integrations.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
@@ -785,11 +788,13 @@ export async function streamChatResponse(
   ];
 
   // 5. Marketing data tools, when the contract has a Databox account
-  const [databoxAccountId, primaryDomain] = await Promise.all([
+  const [databoxAccountId, primaryDomain, nightwatchUrlId] = await Promise.all([
     getDataboxAccountId(contract_id),
     getContractPrimaryDomain(contract_id),
+    nightwatchConfigured() ? getContractIntegration(contract_id, 'nightwatch') : Promise.resolve(null),
   ]);
   if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
+  if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}`;
   const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
   if (seo) systemPrompt += `\n\n${seoGuidance(primaryDomain)}`;
   else if (primaryDomain) systemPrompt += `\n\nThe client's website is ${primaryDomain}.`;
@@ -805,6 +810,7 @@ export async function streamChatResponse(
       ],
       databox: databoxAccountId ? new DataboxToolRunner(databoxAccountId) : null,
       seo,
+      nightwatch: nightwatchUrlId ? new NightwatchToolRunner(nightwatchUrlId) : null,
     },
     onChunk
   );
@@ -849,6 +855,7 @@ export interface AnswerParams {
   messages: Anthropic.MessageParam[];
   databox: DataboxToolRunner | null;
   seo?: SeoToolRunner | null;
+  nightwatch?: NightwatchToolRunner | null;
 }
 
 /**
@@ -868,6 +875,7 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       ...(webTools ? WEB_TOOLS : []),
       ...(params.databox ? DATABOX_TOOLS : []),
       ...(params.seo ? SEO_TOOLS : []),
+      ...(params.nightwatch ? NIGHTWATCH_TOOLS : []),
     ];
 
     let message: Anthropic.Message;
@@ -914,6 +922,10 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
         const input = (toolUse.input ?? {}) as Record<string, unknown>;
         try {
+          if (params.nightwatch && isNightwatchTool(toolUse.name)) {
+            onChunk({ type: 'status', message: await params.nightwatch.describe(toolUse.name, input) });
+            return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.nightwatch.run(toolUse.name, input) };
+          }
           if (params.seo && isSeoTool(toolUse.name)) {
             onChunk({ type: 'status', message: params.seo.describe(toolUse.name, input) });
             return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.seo.run(toolUse.name, input) };

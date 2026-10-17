@@ -23,6 +23,7 @@ import roadmapConfigRouter from './routes/compass/roadmap-config.js';
 import contentRouter from './routes/compass/content.js';
 import chatRouter from './routes/compass/chat.js';
 import databoxRouter from './routes/compass/databox.js';
+import nightwatchRouter from './routes/compass/nightwatch.js';
 import noteConfigsRouter from './routes/compass/note-configs.js';
 import brandVoiceRouter from './routes/compass/brand-voice.js';
 import searchVisibilityRouter from './routes/compass/search-visibility.js';
@@ -143,6 +144,9 @@ app.use('/api/compass/chat', authMiddleware, chatRouter);
 
 // Databox account picker for contracts (Compass marketing data)
 app.use('/api/compass/databox', authMiddleware, databoxRouter);
+
+// Nightwatch site picker for contracts (SEO rankings in Compass)
+app.use('/api/compass/nightwatch', authMiddleware, nightwatchRouter);
 
 // Compass note configs (require authentication)
 app.use('/api/compass/note-configs', authMiddleware, noteConfigsRouter);

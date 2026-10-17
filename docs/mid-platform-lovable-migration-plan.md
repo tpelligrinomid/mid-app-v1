@@ -347,6 +347,7 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
       4. `send-email`: replace the n8n POST with `POST https://api.resend.com/emails` (`RESEND_API_KEY` secret); return Resend's error to the caller instead of failing silently.
       5. Test each type to a team inbox (reset link must land on `SITE_URL`), then switch the backend senders, then deactivate the n8n workflow.
     - Plan the New North domain move (§10) into the sender address so it's changed once.
+    - **Logo:** the email templates and the backend status report (`client-status-report.ts:537`) load `marketersindemand.com/wp-content/uploads/2025/11/mid-logo-scaled.png`, which now 308-redirects (the marketing site left WordPress), so the logo is broken in every email. Host it with the app (`public/email-logo.png` → `app.marketersindemand.com/email-logo.png`) and point all templates at it.
 
 ---
 

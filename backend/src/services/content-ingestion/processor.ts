@@ -8,7 +8,7 @@
  *   submitBulkScrape → MM scrapes → webhook callback → processScrapeResult
  */
 
-import { insert, select, update } from '../../utils/edge-functions.js';
+import { del, insert, select, update } from '../../utils/edge-functions.js';
 import { submitBlogScrape } from '../master-marketer/client.js';
 import { ingestContent } from '../rag/ingestion.js';
 import type {
@@ -837,6 +837,52 @@ export async function requestLiveSync(
   return { batch_id: batchId };
 }
 
+/**
+ * Retire an asset in favor of another: status 'superseded', linked to its
+ * replacement, and removed from the knowledge base so answers cite the new one.
+ */
+export async function supersedeAsset(sourceAssetId: string, replacementAssetId: string): Promise<void> {
+  await update(
+    'content_assets',
+    { status: 'superseded', superseded_by_asset_id: replacementAssetId, updated_at: new Date().toISOString() },
+    { asset_id: sourceAssetId }
+  );
+  await del('compass_knowledge', { source_id: sourceAssetId }).catch((err) =>
+    console.warn(`[Content] Could not remove chunks for superseded asset ${sourceAssetId}:`, err)
+  );
+  console.log(`[Content] Asset ${sourceAssetId} superseded by ${replacementAssetId}`);
+}
+
+/** URL identity for "same page": host without www, path without trailing slash, no query/hash. */
+function pageKey(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    return `${u.hostname.toLowerCase().replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '').toLowerCase()}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Other current assets of the contract for the same page; the live-synced asset replaces them. */
+async function supersedeOtherAssetsForPage(assetId: string, contractId: string, url: string): Promise<string[]> {
+  const key = pageKey(url);
+  if (!key) return [];
+  const path = key.slice(key.indexOf('/'));
+  if (path.length < 2) return []; // never match on a bare homepage
+  const rows = await select<Array<{ asset_id: string; title: string; status: string; external_url: string | null }>>('content_assets', {
+    select: 'asset_id, title, status, external_url',
+    filters: { contract_id: contractId, external_url: { ilike: `%${path}%` } },
+  });
+  const retired: string[] = [];
+  for (const r of rows ?? []) {
+    if (r.asset_id === assetId || r.status === 'superseded' || r.status === 'archived') continue;
+    if (!r.external_url || pageKey(r.external_url) !== key) continue;
+    await supersedeAsset(r.asset_id, assetId);
+    retired.push(r.title);
+  }
+  return retired;
+}
+
 /** Marks a live sync failed on its asset (no-op for ordinary ingestion items). */
 async function failLiveSync(assetId: string | null, url: string, error: string): Promise<void> {
   if (!assetId) return;
@@ -909,6 +955,23 @@ async function applyLiveSyncResult(
     } catch (err) {
       console.error(`[LiveSync] Embedding failed for asset ${assetId} (non-blocking):`, err);
     }
+  }
+
+  // The live page replaces any older asset for the same URL (e.g. a post rewritten in place).
+  try {
+    const retired = await supersedeOtherAssetsForPage(assetId, asset.contract_id, liveUrl);
+    if (retired.length > 0) {
+      await setLiveSyncState(assetId, {
+        status: 'synced',
+        url: liveUrl,
+        synced_at: syncedAt,
+        ...(output.title && { page_title: output.title }),
+        ...(output.word_count && { word_count: output.word_count }),
+        superseded: retired,
+      });
+    }
+  } catch (err) {
+    console.error(`[LiveSync] Superseding older assets for ${liveUrl} failed (non-blocking):`, err);
   }
 
   await update('content_ingestion_items', { status: 'categorized', updated_at: new Date().toISOString() }, { item_id: itemId });

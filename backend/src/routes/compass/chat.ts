@@ -19,6 +19,24 @@ const router = Router();
 // UUID v4 regex for contract_id validation
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Long conversations keep going: only the most recent turns are sent to the
+// model, within a message and character budget.
+const MAX_HISTORY_MESSAGES = 40;
+const MAX_HISTORY_CHARS = 150_000;
+
+function recentHistory(history: ChatMessage[]): ChatMessage[] {
+  const kept: ChatMessage[] = [];
+  let chars = 0;
+  for (let i = history.length - 1; i >= 0 && kept.length < MAX_HISTORY_MESSAGES; i--) {
+    chars += history[i].content.length;
+    if (chars > MAX_HISTORY_CHARS && kept.length > 0) break;
+    kept.unshift(history[i]);
+  }
+  // The model expects the history to open with a user turn.
+  while (kept.length > 0 && kept[0].role !== 'user') kept.shift();
+  return kept;
+}
+
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   if (!req.supabase || !req.user) {
     res.status(401).json({ error: 'Not authenticated' });
@@ -45,17 +63,13 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       res.status(400).json({ error: 'conversation_history must be an array' });
       return;
     }
-    if (conversation_history.length > 20) {
-      res.status(400).json({ error: 'conversation_history cannot exceed 20 messages' });
-      return;
-    }
     for (const msg of conversation_history) {
       if (!msg || typeof msg.content !== 'string' || (msg.role !== 'user' && msg.role !== 'assistant')) {
         res.status(400).json({ error: 'Each conversation_history entry must have role ("user"|"assistant") and content (string)' });
         return;
       }
     }
-    history = conversation_history;
+    history = recentHistory(conversation_history);
   }
 
   // Validate source_types if provided

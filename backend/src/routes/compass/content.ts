@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { select, insert, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
-import { submitBulkScrape, getBatchStatus, applyCategorizationViaEdgeFn, requestLiveSync, isOnDomain, urlHost } from '../../services/content-ingestion/processor.js';
+import { submitBulkScrape, getBatchStatus, applyCategorizationViaEdgeFn, requestLiveSync, isOnDomain, urlHost, supersedeAsset } from '../../services/content-ingestion/processor.js';
 import { getContractPrimaryDomain } from '../../services/contracts/primary-domain.js';
 import { submitFileExtract } from '../../services/master-marketer/client.js';
 import { insert as edgeFnInsert, select as edgeFnSelect, update as edgeFnUpdate } from '../../utils/edge-functions.js';
@@ -1539,6 +1539,72 @@ router.put(
     }
 
     res.json({ asset, live_sync_started: liveSyncStarted });
+  }
+);
+
+/**
+ * POST /api/compass/content/assets/:id/supersede
+ * Retire this asset in favor of a replacement (e.g. an optimized version):
+ * status 'superseded', linked to the replacement, chunks removed from the
+ * knowledge base. The replacement inherits the URL and published date if it
+ * has none. Body: { superseded_by_asset_id }.
+ */
+router.post(
+  '/assets/:id/supersede',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const sourceId = req.params.id;
+    const replacementId = req.body?.superseded_by_asset_id;
+    if (typeof replacementId !== 'string' || !replacementId || replacementId === sourceId) {
+      res.status(400).json({ error: 'superseded_by_asset_id is required and must be a different asset' });
+      return;
+    }
+
+    const { data: rows, error } = await req.supabase
+      .from('content_assets')
+      .select('asset_id, contract_id, status, external_url, published_date')
+      .in('asset_id', [sourceId, replacementId]);
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+    const source = rows?.find((r) => r.asset_id === sourceId);
+    const replacement = rows?.find((r) => r.asset_id === replacementId);
+    if (!source || !replacement) {
+      res.status(404).json({ error: 'Asset not found' });
+      return;
+    }
+    if (source.contract_id !== replacement.contract_id) {
+      res.status(400).json({ error: 'Both assets must belong to the same contract' });
+      return;
+    }
+    if (source.status === 'superseded') {
+      res.status(409).json({ error: 'This asset is already superseded' });
+      return;
+    }
+
+    try {
+      const inherit: Record<string, unknown> = {};
+      if (!replacement.external_url && source.external_url) inherit.external_url = source.external_url;
+      if (!replacement.published_date && source.published_date) inherit.published_date = source.published_date;
+      if (Object.keys(inherit).length > 0) {
+        await edgeFnUpdate('content_assets', { ...inherit, updated_at: new Date().toISOString() }, { asset_id: replacementId });
+      }
+      await supersedeAsset(sourceId, replacementId);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to supersede' });
+      return;
+    }
+
+    const { data: updated } = await req.supabase.from('content_assets').select('*').in('asset_id', [sourceId, replacementId]);
+    res.json({
+      source: updated?.find((r) => r.asset_id === sourceId),
+      replacement: updated?.find((r) => r.asset_id === replacementId),
+    });
   }
 );
 

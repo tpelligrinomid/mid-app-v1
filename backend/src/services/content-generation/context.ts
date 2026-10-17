@@ -103,11 +103,112 @@ interface DeliverableRow {
   content_structured: Record<string, unknown> | null;
 }
 
+interface MeetingRow {
+  meeting_id: string;
+  title: string | null;
+  meeting_date: string | null;
+  transcript: unknown;
+}
+
+interface NoteRow {
+  note_id: string;
+  title: string | null;
+  note_type: string | null;
+  note_date: string | null;
+  meeting_id: string | null;
+  content_raw: string | null;
+}
+
+/** A referenced meeting or note, ready to quote: meetings carry their notes summary plus the transcript. */
+interface ReferenceConversation {
+  title: string;
+  kind: string;
+  date: string | null;
+  body: string;
+}
+
+// Caps per referenced meeting/note so a few long transcripts don't crowd out everything else.
+const MAX_TRANSCRIPT_CHARS = 40000;
+const MAX_NOTE_CHARS = 15000;
+
+/** Transcript segments ({speaker, text}) as "Speaker: text" lines, merging consecutive turns by the same speaker. */
+function formatTranscript(transcript: unknown): string {
+  if (typeof transcript === 'string') return transcript;
+  if (!Array.isArray(transcript)) return '';
+  const lines: string[] = [];
+  let speaker: string | null = null;
+  for (const seg of transcript as Array<{ speaker?: string; text?: string }>) {
+    if (!seg?.text) continue;
+    if (seg.speaker && seg.speaker === speaker && lines.length > 0) {
+      lines[lines.length - 1] += ` ${seg.text}`;
+    } else {
+      speaker = seg.speaker ?? null;
+      lines.push(`${speaker ?? 'Speaker'}: ${seg.text}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.substring(0, max)}\n[... truncated]` : text;
+}
+
+async function fetchReferenceConversations(meetingIds: string[] = [], noteIds: string[] = []): Promise<ReferenceConversation[]> {
+  const out: ReferenceConversation[] = [];
+  for (const meetingId of meetingIds.slice(0, 5)) {
+    try {
+      const [meetings, notes] = await Promise.all([
+        select<MeetingRow[]>('compass_meetings', {
+          select: 'meeting_id, title, meeting_date, transcript',
+          filters: { meeting_id: meetingId },
+          limit: 1,
+        }),
+        select<NoteRow[]>('compass_notes', {
+          select: 'note_id, title, note_type, note_date, meeting_id, content_raw',
+          filters: { meeting_id: meetingId },
+        }),
+      ]);
+      const m = meetings?.[0];
+      if (!m) continue;
+      const summary = (notes ?? []).map((n) => n.content_raw).filter(Boolean).join('\n\n');
+      const transcript = formatTranscript(m.transcript);
+      const parts = [
+        summary && `Meeting notes:\n${truncate(summary, MAX_NOTE_CHARS)}`,
+        transcript && `Transcript:\n${truncate(transcript, MAX_TRANSCRIPT_CHARS)}`,
+      ].filter(Boolean);
+      out.push({ title: m.title ?? 'Meeting', kind: 'meeting', date: m.meeting_date, body: parts.join('\n\n') || '(no content)' });
+    } catch (err) {
+      console.error(`[ContentGen] Failed to fetch reference meeting ${meetingId}:`, err);
+    }
+  }
+  for (const noteId of noteIds.slice(0, 5)) {
+    try {
+      const rows = await select<NoteRow[]>('compass_notes', {
+        select: 'note_id, title, note_type, note_date, meeting_id, content_raw',
+        filters: { note_id: noteId },
+        limit: 1,
+      });
+      const n = rows?.[0];
+      if (!n) continue;
+      out.push({
+        title: n.title ?? 'Note',
+        kind: n.note_type ? `${n.note_type} note` : 'note',
+        date: n.note_date,
+        body: truncate(n.content_raw ?? '(no content)', MAX_NOTE_CHARS),
+      });
+    } catch (err) {
+      console.error(`[ContentGen] Failed to fetch reference note ${noteId}:`, err);
+    }
+  }
+  return out;
+}
+
 function formatReferenceBlock(
   ragResults: SimilarityResult[],
   manualAssets: AssetRow[],
   referenceDeliverables: DeliverableRow[],
-  additionalInstructions?: string
+  additionalInstructions?: string,
+  referenceConversations: ReferenceConversation[] = []
 ): string {
   const sections: string[] = [];
 
@@ -126,6 +227,19 @@ function formatReferenceBlock(
       sections.push(content || '(no content)');
       sections.push('');
     }
+  }
+
+  // Referenced meetings and notes — what the client and team actually said
+  if (referenceConversations.length > 0) {
+    sections.push('## Reference Meetings & Notes\n');
+    sections.push('The following meetings and notes were selected as specific context for this piece.');
+    sections.push('Use them for the client\'s own points, examples, language and priorities. Don\'t invent quotes; only quote what is actually said here.\n');
+    referenceConversations.forEach((c, i) => {
+      sections.push(`[${i + 1}] "${c.title}" (${c.kind}${c.date ? `, ${c.date.slice(0, 10)}` : ''})`);
+      sections.push('---');
+      sections.push(c.body);
+      sections.push('');
+    });
   }
 
   // Reference content assets + RAG results — supplementary context
@@ -269,11 +383,13 @@ export async function gatherGenerationContext(params: {
   asset_id: string;
   reference_asset_ids?: string[];
   reference_deliverable_ids?: string[];
+  reference_meeting_ids?: string[];
+  reference_note_ids?: string[];
   user_variables?: Record<string, string>;
   auto_retrieve?: boolean;
   additional_instructions?: string;
 }): Promise<GenerationContext> {
-  const { contract_id, asset_id, reference_asset_ids, reference_deliverable_ids, user_variables, auto_retrieve = true, additional_instructions } = params;
+  const { contract_id, asset_id, reference_asset_ids, reference_deliverable_ids, reference_meeting_ids, reference_note_ids, user_variables, auto_retrieve = true, additional_instructions } = params;
 
   // Fetch contract, brand voice, and asset in parallel
   const [contractRows, brandVoiceRows, assetRows] = await Promise.all([
@@ -403,7 +519,8 @@ export async function gatherGenerationContext(params: {
     }
   }
 
-  const referenceBlock = formatReferenceBlock(ragResults, manualAssets, referenceDeliverables, additional_instructions);
+  const referenceConversations = await fetchReferenceConversations(reference_meeting_ids, reference_note_ids);
+  const referenceBlock = formatReferenceBlock(ragResults, manualAssets, referenceDeliverables, additional_instructions, referenceConversations);
 
   // Fetch relevant published URLs for internal linking (non-blocking — if it fails, we just skip it)
   const publishedUrls = await fetchRelevantPublishedUrls(

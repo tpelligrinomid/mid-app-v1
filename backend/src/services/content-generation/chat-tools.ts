@@ -19,12 +19,45 @@ const AUTO_VARIABLES = new Set(['company_name', 'industry', 'brand_voice', 'publ
 // Sequences name the target keyword differently; a keyword given to the tool fills any of these.
 const KEYWORD_VARIABLES = ['primary_keyword', 'keyword', 'target_keyword'];
 
+// Things that can be attached to a piece as specific context, as in the Generate dialog.
+const REFERENCE_KINDS = {
+  deliverable: { table: 'compass_deliverables', id: 'deliverable_id', date: 'created_at', extra: 'deliverable_type', field: 'deliverable_ids' },
+  meeting: { table: 'compass_meetings', id: 'meeting_id', date: 'meeting_date', extra: null, field: 'meeting_ids' },
+  // Meeting notes are left out: attaching the meeting brings its notes along with the transcript.
+  note: { table: 'compass_notes', id: 'note_id', date: 'note_date', extra: 'note_type', field: 'note_ids' },
+  asset: { table: 'content_assets', id: 'asset_id', date: 'created_at', extra: 'status', field: 'asset_ids' },
+} as const;
+type ReferenceKind = keyof typeof REFERENCE_KINDS;
+const KINDS = Object.keys(REFERENCE_KINDS) as ReferenceKind[];
+const MAX_REFS_PER_KIND = 5;
+
+const idList = (what: string) => ({
+  type: 'array',
+  items: { type: 'string' },
+  maxItems: MAX_REFS_PER_KIND,
+  description: `Up to ${MAX_REFS_PER_KIND} ${what} ids from find_content_references.`,
+});
+
 export const CONTENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'list_content_options',
     description:
       "List the content types this client can generate and each one's prompt sequences (the custom prompts set up in Content Ops), with the variables each sequence takes. Call before generate_content.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'find_content_references',
+    description:
+      "Find this client's deliverables (creative briefs, roadmaps, content plans, research), meetings, notes and existing content assets to attach to a new piece as specific context. A meeting includes its notes summary and transcript. Matches words in the title; with no query, returns the most recent of each kind.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to look for in titles, e.g. "creative brief", "case study", "roadmap".' },
+        kinds: { type: 'array', items: { type: 'string', enum: KINDS }, description: 'Limit to these kinds (default all).' },
+        limit: { type: 'number', description: 'Results per kind (default 8, max 20).' },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'generate_content',
@@ -43,6 +76,18 @@ export const CONTENT_TOOLS: Anthropic.Tool[] = [
           description: "Values for the sequence's variables, by variable name (e.g. angle, audience, secondary_keywords, word_count).",
         },
         additional_instructions: { type: 'string', description: 'Extra direction for the writer, from the user.' },
+        references: {
+          type: 'object',
+          description:
+            'Specific context to attach, as in the Generate dialog: deliverables and meetings/notes are treated as primary source material, assets as reference content.',
+          properties: {
+            deliverable_ids: idList('deliverable'),
+            meeting_ids: idList('meeting'),
+            note_ids: idList('note'),
+            asset_ids: idList('content asset'),
+          },
+          additionalProperties: false,
+        },
         confirm: {
           type: 'boolean',
           description: 'Leave unset first to get a preview; set true only after the user has confirmed that exact request.',
@@ -65,8 +110,9 @@ export function contentGuidance(): string {
 You can create content for this client with the same prompts the team uses in Content Ops (list_content_options, generate_content). When someone gives you a keyword or topic to write about:
 1. Call list_content_options to see the content types and prompt sequences.
 2. Propose 3-5 working titles that target the keyword, fit the client's audience and brand, and suit the content type. Use the SEO tools if search volume, ranking data or the current results page would help. Let the user pick or edit one.
-3. Call generate_content without confirm to preview it. Fill the sequence's variables from the conversation and what you know about the client; ask about required ones you can't reasonably fill.
-4. Show the preview, and call again with confirm=true only after the user agrees.
+3. Ask whether to attach anything as specific context: a deliverable (creative brief, roadmap, content plan, research), a meeting or note, or an existing asset. Before asking, call find_content_references (once with a short query from the topic, e.g. "case stud", and once without a query for the most recent items) and suggest 2-4 likely candidates by title and date; attach the ones the user picks (or none). Attached material shapes the piece far more than general retrieval, so always ask.
+4. Call generate_content without confirm to preview it. Fill the sequence's variables from the conversation and what you know about the client; ask about required ones you can't reasonably fill.
+5. Show the preview, including what's attached, and call again with confirm=true only after the user agrees.
 Never say content was created or generated unless generate_content returned confirm=true success, and share the link it returns.`;
 }
 
@@ -107,11 +153,13 @@ export class ContentGenerator {
 
   describe(name: string, input: Record<string, unknown>): string {
     if (name === 'list_content_options') return 'Checking content types and prompts';
+    if (name === 'find_content_references') return input.query ? `Looking for "${String(input.query)}" to attach` : 'Looking for context to attach';
     return input.confirm === true ? `Starting generation: ${String(input.title ?? '')}` : `Preparing a preview: ${String(input.title ?? '')}`;
   }
 
   async run(name: string, input: Record<string, unknown>): Promise<string> {
     if (name === 'list_content_options') return JSON.stringify(await this.listOptions());
+    if (name === 'find_content_references') return JSON.stringify(await this.findReferences(input));
     if (name === 'generate_content') return JSON.stringify(await this.generate(input));
     throw new Error(`Unknown content tool: ${name}`);
   }
@@ -185,6 +233,64 @@ export class ContentGenerator {
     };
   }
 
+  /** Recent items of one kind for this contract, filtered to titles containing every query word. */
+  private async searchKind(kind: ReferenceKind, words: string[], limit: number) {
+    const k = REFERENCE_KINDS[kind];
+    const rows = await select<Array<Record<string, string | null>>>(k.table, {
+      select: [k.id, 'title', k.date, k.extra].filter(Boolean).join(', '),
+      filters: { contract_id: this.contractId, ...(kind === 'note' && { meeting_id: { is: null } }) },
+      order: [{ column: k.date, ascending: false }],
+      limit: words.length > 0 ? 300 : limit,
+    });
+    return (rows ?? [])
+      .filter((r) => {
+        const hay = `${r.title ?? ''} ${k.extra ? (r[k.extra] ?? '') : ''}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      })
+      .slice(0, limit)
+      .map((r) => ({
+        id: r[k.id],
+        title: r.title,
+        date: r[k.date]?.slice(0, 10) ?? null,
+        ...(k.extra && r[k.extra] && { [k.extra]: r[k.extra] }),
+      }));
+  }
+
+  private async findReferences(input: Record<string, unknown>) {
+    const words = String(input.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const kinds = Array.isArray(input.kinds) && input.kinds.length > 0 ? (input.kinds as ReferenceKind[]).filter((k) => k in REFERENCE_KINDS) : KINDS;
+    const limit = Math.min(Math.max(Number(input.limit) || 8, 1), 20);
+    const results = await Promise.all(kinds.map(async (kind) => [kind, await this.searchKind(kind, words, limit)] as const));
+    return Object.fromEntries(results.map(([kind, items]) => [`${kind}s`, items]));
+  }
+
+  /** Keeps only ids that belong to this contract, with their titles for the preview. */
+  private async resolveReferences(input: Record<string, unknown>) {
+    const given = (input.references && typeof input.references === 'object' ? input.references : {}) as Record<string, unknown>;
+    const ids: Partial<Record<ReferenceKind, string[]>> = {};
+    const attached: Array<{ kind: ReferenceKind; title: string | null; date: string | null }> = [];
+    const unknown: string[] = [];
+    await Promise.all(
+      KINDS.map(async (kind) => {
+        const k = REFERENCE_KINDS[kind];
+        const wanted = Array.isArray(given[k.field]) ? [...new Set((given[k.field] as unknown[]).map(String))].slice(0, MAX_REFS_PER_KIND) : [];
+        if (wanted.length === 0) return;
+        const rows = await select<Array<Record<string, string | null>>>(k.table, {
+          select: `${k.id}, title, ${k.date}`,
+          filters: { contract_id: this.contractId, [k.id]: { in: wanted } },
+        });
+        const found = new Map((rows ?? []).map((r) => [r[k.id] as string, r]));
+        ids[kind] = wanted.filter((id) => found.has(id));
+        for (const id of wanted) {
+          const r = found.get(id);
+          if (r) attached.push({ kind, title: r.title, date: r[k.date]?.slice(0, 10) ?? null });
+          else unknown.push(`${kind} ${id}`);
+        }
+      })
+    );
+    return { ids, attached, unknown };
+  }
+
   private async generate(input: Record<string, unknown>) {
     const title = String(input.title ?? '').trim();
     const slug = String(input.content_type ?? '').trim();
@@ -217,12 +323,17 @@ export class ContentGenerator {
 
     const missing = defs.filter((d) => d.required && !variables[d.name]).map((d) => d.label ?? d.name);
     const instructions = input.additional_instructions ? String(input.additional_instructions).trim() : '';
+    const refs = await this.resolveReferences(input);
+    if (refs.unknown.length > 0) {
+      return { error: `Not found for this client: ${refs.unknown.join(', ')}. Use ids from find_content_references.` };
+    }
     const plan = {
       title,
       content_type: type.name,
       sequence: { sequence_id: sequence.sequence_id, name: sequence.name, steps: sequence.steps?.length ?? 0 },
       variables,
       ...(instructions && { additional_instructions: instructions }),
+      attached: refs.attached.length > 0 ? refs.attached : 'nothing (general retrieval from the content library only)',
     };
 
     if (input.confirm !== true) {
@@ -264,7 +375,7 @@ export class ContentGenerator {
     if (!assetId) throw new Error('Could not create the asset');
 
     console.log(`[ContentGen] Ask Compass generation: asset=${assetId} sequence="${sequence.name}" user=${this.userId}`);
-    void this.runInBackground(assetId, sequence, variables, instructions, startedAt);
+    void this.runInBackground(assetId, sequence, variables, instructions, startedAt, refs.ids);
 
     return {
       success: true,
@@ -281,7 +392,8 @@ export class ContentGenerator {
     sequence: SequenceRow,
     variables: Record<string, string>,
     instructions: string,
-    startedAt: string
+    startedAt: string,
+    refs: Partial<Record<ReferenceKind, string[]>>
   ): Promise<void> {
     let failure = null as string | null;
     try {
@@ -292,6 +404,10 @@ export class ContentGenerator {
           sequence_id: sequence.sequence_id,
           variables,
           auto_retrieve: true,
+          reference_deliverable_ids: refs.deliverable,
+          reference_meeting_ids: refs.meeting,
+          reference_note_ids: refs.note,
+          reference_asset_ids: refs.asset,
           ...(instructions && { additional_instructions: instructions }),
         },
         (chunk) => {

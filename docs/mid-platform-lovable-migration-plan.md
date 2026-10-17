@@ -281,7 +281,7 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
        body := jsonb_build_object('time', now()));
    $$);
    ```
-6. **Switch Render** (production backend) env: `SUPABASE_URL`, `SUPABASE_ANON_KEY` (legacy `anon` JWT) → new project; `QUICKBOOKS_REDIRECT_URI` → new `quickbooks-auth/callback` URL; `FRONTEND_URL` unchanged if the domain stays. `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET` unchanged (the same value was reused). Redeploy and wait for `/health`.
+6. **Switch Render** (production backend) env: `SUPABASE_URL`, `SUPABASE_ANON_KEY` (legacy `anon` JWT) → new project. **Leave `QUICKBOOKS_REDIRECT_URI` alone**: it points at the backend's own `/api/auth/quickbooks/callback`; the app's Connect QuickBooks button uses the `quickbooks-auth` edge function, which derives its callback from `SUPABASE_URL` (one Intuit app serves all four companies; add the new edge-function callback there once). `FRONTEND_URL` unchanged if the domain stays. `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET` unchanged (the same value was reused). Redeploy and wait for `/health`.
 7. **Vercel:** set `VITE_API_URL=https://mid-app-v1.onrender.com` (production + preview), redeploy production from `self-hosted`. Add the domain `app.marketersindemand.com` to the Vercel project (it shows the DNS record to create).
 8. **DNS:** remove the custom domain from Lovable publishing, then point `app.marketersindemand.com` at Vercel (record from step 7). Wait for Vercel to show the domain valid with a certificate.
 9. **MCP clients:** remove and re-add the "MiD Pulse and Compass" connector in claude.ai (new URL `https://<new-ref>.supabase.co/functions/v1/mcp`); tell other users to do the same.
@@ -339,6 +339,14 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
       5. Merge `AGENTS.md` / `CLAUDE.md`; one CI workflow with per-folder jobs.
       6. Archive `pulse-compass` (read-only); point Supabase deploys and any agent workflows at the combined repo.
     - Not on cutover weekend: one change at a time, so a break is attributable.
+12. **Replace n8n + Gmail for app email with Resend** (decided 2026-10-17; week after cutover, ~half a day). Today `send-email` posts to the n8n "MiD Email Processor" webhook (`/webhook/mid-app-email-processor`), which renders templates in Set nodes and sends through a Gmail OAuth credential (`production@marketersindemand.com`). On cutover day that credential had expired and every invite/reset silently failed; templates also live outside the repo.
+    - **Steps:**
+      1. Inventory every sender: `send-email` email types (invitation, welcome, password_reset, contract_notification, weekly_report, custom, client status report) **and** the backend (`N8N_EMAIL_WEBHOOK_URL`, `N8N_WEBHOOK_URL` on Render) and any other workflow using that Gmail credential (e.g. `MiD_Automated_Status_Reports`).
+      2. Resend account; verify a sending domain (e.g. `notifications@marketersindemand.com`, or a `send.` subdomain) with its DKIM/SPF/MX records in Cloudflare.
+      3. Templates as code next to `send-email` (one module per type; HTML + text), copied from the n8n Set nodes.
+      4. `send-email`: replace the n8n POST with `POST https://api.resend.com/emails` (`RESEND_API_KEY` secret); return Resend's error to the caller instead of failing silently.
+      5. Test each type to a team inbox (reset link must land on `SITE_URL`), then switch the backend senders, then deactivate the n8n workflow.
+    - Plan the New North domain move (§10) into the sender address so it's changed once.
 
 ---
 

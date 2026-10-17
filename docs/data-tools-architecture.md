@@ -84,9 +84,22 @@ Possible label when SEO is in scope: "Content & SEO/GEO Plan" (cosmetic).
 
 Touches Master Marketer (content plan prompts and output schema), backend (apply step, quarterly inputs) and frontend (apply action on the deliverable).
 
-### Then: paid platforms
+### Then: paid platforms — direct APIs (decided 2026-10-17)
 
-Google Ads (MiD MCC), Meta (Business Manager system user), LinkedIn (Campaign Manager) — agency-level connections, per-contract account pick in `contract_integrations`, read-only first.
+**Owners: Colin and TP, working it from two angles.** Going direct to the platform APIs instead of a third-party agent layer (Ryze AI was evaluated 2026-10-17: useful audit/action product, but unverified track record, no documented server-side API for per-contract use, and it would hold write access to every client account). Databox stays the source of truth for reporting totals and the fallback for any platform not yet connected.
+
+Google Ads (MiD MCC), Meta (Business Manager system user), LinkedIn (Campaign Manager) — agency-level connections, per-contract account pick in `contract_integrations`, same pattern as Nightwatch (read tools + two-step change tools, staff only, MCP audited).
+
+**Access to start now (long lead times):**
+- **Google Ads developer token** — apply from the MCC (Admin → API Center). Starts at test-account access; Basic access (real client accounts) needs an application, days to a few weeks.
+- **Meta** — app in MiD's Business Manager + system user token (`ads_read`, later `ads_management`). Confirm client ad accounts are shared to the BM as partner assets. Advanced access via App Review may be needed at scale.
+- **LinkedIn Advertising API** — needs LinkedIn's approval (strictest); keep LinkedIn on Databox until approved.
+
+**Build order:**
+1. Google Ads read: campaigns, ad groups, keywords, search terms, spend/conversions with previous-period comparison.
+2. Google Ads changes (preview → confirm): negative keywords, pause/enable, budgets.
+3. Meta read, then changes.
+4. LinkedIn once the API is approved. Microsoft Ads optional.
 
 ### Open
 

@@ -111,7 +111,13 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 
   try {
     await streamChatResponse(
-      { message: message.trim(), contract_id, conversation_history: history, source_types: validatedSourceTypes },
+      {
+        message: message.trim(),
+        contract_id,
+        conversation_history: history,
+        source_types: validatedSourceTypes,
+        user: { user_id: req.user.user_id, role: req.user.role },
+      },
       (chunk) => {
         if (!clientDisconnected) {
           sendEvent(chunk);

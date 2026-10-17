@@ -18,6 +18,7 @@ import { NIGHTWATCH_TOOLS, NightwatchToolRunner, isNightwatchTool, nightwatchGui
 import { nightwatchConfigured } from '../nightwatch/client.js';
 import { NIGHTWATCH_MANAGE_TOOLS, NightwatchManager, isNightwatchManageTool, nightwatchManageGuidance } from '../nightwatch/manage.js';
 import { getContractIntegration } from '../integrations.js';
+import { CONTENT_TOOLS, ContentGenerator, contentGuidance, isContentTool } from '../content-generation/chat-tools.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
@@ -76,7 +77,11 @@ export interface ChatParams {
   contract_id: string;
   conversation_history?: ChatMessage[];
   source_types?: SourceType[];
+  /** Who is asking. Tools that change things (Nightwatch, content generation) are only offered to staff. */
+  user?: { user_id: string; role: string };
 }
+
+const STAFF_ROLES = new Set(['owner', 'admin', 'team_member']);
 
 export interface ContextSource {
   title: string;
@@ -682,7 +687,8 @@ export async function streamChatResponse(
   params: ChatParams,
   onChunk: (chunk: SSEChunk) => void
 ): Promise<void> {
-  const { message, contract_id, conversation_history = [], source_types } = params;
+  const { message, contract_id, conversation_history = [], source_types, user } = params;
+  const staffUserId = user && STAFF_ROLES.has(user.role) ? user.user_id : null;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -795,7 +801,9 @@ export async function streamChatResponse(
     nightwatchConfigured() ? getContractIntegration(contract_id, 'nightwatch') : Promise.resolve(null),
   ]);
   if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
-  if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}\n\n${nightwatchManageGuidance()}`;
+  if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}`;
+  if (nightwatchUrlId && staffUserId) systemPrompt += `\n\n${nightwatchManageGuidance()}`;
+  if (staffUserId) systemPrompt += `\n\n${contentGuidance()}`;
   const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
   if (seo) systemPrompt += `\n\n${seoGuidance(primaryDomain)}`;
   else if (primaryDomain) systemPrompt += `\n\nThe client's website is ${primaryDomain}.`;
@@ -812,7 +820,8 @@ export async function streamChatResponse(
       databox: databoxAccountId ? new DataboxToolRunner(databoxAccountId) : null,
       seo,
       nightwatch: nightwatchUrlId ? new NightwatchToolRunner(nightwatchUrlId) : null,
-      nightwatchManager: nightwatchUrlId ? new NightwatchManager(nightwatchUrlId) : null,
+      nightwatchManager: nightwatchUrlId && staffUserId ? new NightwatchManager(nightwatchUrlId) : null,
+      content: staffUserId ? new ContentGenerator(contract_id, staffUserId) : null,
     },
     onChunk
   );
@@ -859,6 +868,7 @@ export interface AnswerParams {
   seo?: SeoToolRunner | null;
   nightwatch?: NightwatchToolRunner | null;
   nightwatchManager?: NightwatchManager | null;
+  content?: ContentGenerator | null;
 }
 
 /**
@@ -880,6 +890,7 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       ...(params.seo ? SEO_TOOLS : []),
       ...(params.nightwatch ? NIGHTWATCH_TOOLS : []),
       ...(params.nightwatchManager ? NIGHTWATCH_MANAGE_TOOLS : []),
+      ...(params.content ? CONTENT_TOOLS : []),
     ];
 
     let message: Anthropic.Message;
@@ -926,6 +937,10 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
         const input = (toolUse.input ?? {}) as Record<string, unknown>;
         try {
+          if (params.content && isContentTool(toolUse.name)) {
+            onChunk({ type: 'status', message: params.content.describe(toolUse.name, input) });
+            return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.content.run(toolUse.name, input) };
+          }
           if (params.nightwatchManager && isNightwatchManageTool(toolUse.name)) {
             onChunk({ type: 'status', message: params.nightwatchManager.describe(toolUse.name, input) });
             const output = await params.nightwatchManager.run(toolUse.name, input);

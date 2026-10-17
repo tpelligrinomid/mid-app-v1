@@ -16,6 +16,7 @@ import { getContractPrimaryDomain } from '../contracts/primary-domain.js';
 import { SEO_TOOLS, SeoToolRunner, isSeoTool, seoGuidance, seoToolsAvailable } from '../seo/tools.js';
 import { NIGHTWATCH_TOOLS, NightwatchToolRunner, isNightwatchTool, nightwatchGuidance } from '../nightwatch/tools.js';
 import { nightwatchConfigured } from '../nightwatch/client.js';
+import { NIGHTWATCH_MANAGE_TOOLS, NightwatchManager, isNightwatchManageTool, nightwatchManageGuidance } from '../nightwatch/manage.js';
 import { getContractIntegration } from '../integrations.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
@@ -794,7 +795,7 @@ export async function streamChatResponse(
     nightwatchConfigured() ? getContractIntegration(contract_id, 'nightwatch') : Promise.resolve(null),
   ]);
   if (databoxAccountId) systemPrompt += `\n\n${marketingGuidance()}`;
-  if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}`;
+  if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}\n\n${nightwatchManageGuidance()}`;
   const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
   if (seo) systemPrompt += `\n\n${seoGuidance(primaryDomain)}`;
   else if (primaryDomain) systemPrompt += `\n\nThe client's website is ${primaryDomain}.`;
@@ -811,6 +812,7 @@ export async function streamChatResponse(
       databox: databoxAccountId ? new DataboxToolRunner(databoxAccountId) : null,
       seo,
       nightwatch: nightwatchUrlId ? new NightwatchToolRunner(nightwatchUrlId) : null,
+      nightwatchManager: nightwatchUrlId ? new NightwatchManager(nightwatchUrlId) : null,
     },
     onChunk
   );
@@ -856,6 +858,7 @@ export interface AnswerParams {
   databox: DataboxToolRunner | null;
   seo?: SeoToolRunner | null;
   nightwatch?: NightwatchToolRunner | null;
+  nightwatchManager?: NightwatchManager | null;
 }
 
 /**
@@ -876,6 +879,7 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       ...(params.databox ? DATABOX_TOOLS : []),
       ...(params.seo ? SEO_TOOLS : []),
       ...(params.nightwatch ? NIGHTWATCH_TOOLS : []),
+      ...(params.nightwatchManager ? NIGHTWATCH_MANAGE_TOOLS : []),
     ];
 
     let message: Anthropic.Message;
@@ -922,6 +926,12 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
         const input = (toolUse.input ?? {}) as Record<string, unknown>;
         try {
+          if (params.nightwatchManager && isNightwatchManageTool(toolUse.name)) {
+            onChunk({ type: 'status', message: params.nightwatchManager.describe(toolUse.name, input) });
+            const output = await params.nightwatchManager.run(toolUse.name, input);
+            if (input.confirm === true) console.log(`[RAG Chat] Nightwatch change applied: ${toolUse.name} ${JSON.stringify(input).slice(0, 300)}`);
+            return { type: 'tool_result', tool_use_id: toolUse.id, content: output };
+          }
           if (params.nightwatch && isNightwatchTool(toolUse.name)) {
             onChunk({ type: 'status', message: await params.nightwatch.describe(toolUse.name, input) });
             return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.nightwatch.run(toolUse.name, input) };

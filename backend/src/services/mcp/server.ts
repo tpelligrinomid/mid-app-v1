@@ -23,7 +23,19 @@ import createReleaseNote from './tools/create-release-note.js';
 import listPeople from './tools/list-people.js';
 import assigneeTasks from './tools/assignee-tasks.js';
 import compassAsk from './tools/compass-ask.js';
-import { seoRankings, seoRankingHistory, seoMovers, seoCompetitors } from './tools/seo-rankings.js';
+import {
+  seoRankings,
+  seoRankingHistory,
+  seoMovers,
+  seoCompetitors,
+  seoAddKeywords,
+  seoRemoveKeywords,
+  seoTagKeywords,
+  seoManageCompetitor,
+  seoSerp,
+  seoSuggestKeywords,
+  seoSuggestPrompts,
+} from './tools/seo-rankings.js';
 
 const INSTRUCTIONS = [
   'Tools for the MiD platform (Pulse + Compass). Internal use only: Owner, Admin and Team Member accounts. Client accounts are denied on every tool and must use the MiD web app.',
@@ -34,7 +46,7 @@ const INSTRUCTIONS = [
   'For cross-client sentiment questions use `get_sentiment_pulse` (set trend=true for direction over time), then pull citable evidence with `get_sentiment_quotes` and drill into a single record with `get_note_or_meeting`.',
   "TECH STACK AUDITS: use `get_pulse_metrics` metric=tech_breakdown for one row per contract per tool (resolved cost, price, margin, card, dates) in a single call; `list_technologies` for the catalog/rate card; `get_contract` include_inactive=true to verify a canceled client's tools were switched off. Client-billable per-client tools are paid on the client's own card (not tracked).",
   "QUESTIONS NEEDING SYNTHESIS OR RESEARCH about one client (what was decided, how campaigns performed, competitors, market context) use `compass_ask` with that contract's id — it reads the client's notes/meetings/deliverables, the web, and the client's connected marketing and SEO data. Prefer the specific tools for plain lookups.",
-  'SEO RANKINGS for one client (tracked keywords, positions, what moved, history, competitors) use the get_seo_* tools with the contract id; they cover clients whose Nightwatch site is connected. Always say whether a rank is the overall position (can be a local pack or AI Overview) or the organic position.',
+  'SEO RANKINGS for one client (tracked keywords, positions, what moved, history, competitors) use the get_seo_* tools with the contract id; they cover clients whose Nightwatch site is connected. Always say whether a rank is the overall position (can be a local pack or AI Overview) or the organic position. Changes (add_seo_keywords, remove_seo_keywords, tag_seo_keywords, manage_seo_competitor) are two-step: preview first, show the user, and set confirm=true only after they agree.',
   'Agency-wide metrics and release-note publishing require Owner or Admin. All data is additionally scoped by the signed-in user\'s role and assigned contracts.',
 ].join(' ');
 
@@ -61,6 +73,13 @@ const TOOLS: ToolDefinition<any>[] = [
   seoRankingHistory,
   seoMovers,
   seoCompetitors,
+  seoAddKeywords,
+  seoRemoveKeywords,
+  seoTagKeywords,
+  seoManageCompetitor,
+  seoSerp,
+  seoSuggestKeywords,
+  seoSuggestPrompts,
 ];
 
 export function buildMcpServer(ctx: ToolContext): McpServer {

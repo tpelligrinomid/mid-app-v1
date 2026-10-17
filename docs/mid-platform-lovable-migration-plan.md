@@ -319,6 +319,16 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
 8. Consider dropping or trimming `pulse_tasks.raw_data` (2.9 GB of ClickUp payloads).
 9. Monitoring + billing alerts on Supabase and Vercel; restore DNS TTL; remove the old Google OAuth callback and Intuit redirect URI.
 10. Build MCP v2 inside the Render backend on a stable hostname (e.g. `mcp.marketersindemand.com`). Scope (see the team plan): `compass_ask`, Master Marketer job tools, Compass chat's research tools (Databox account resolved per contract server-side), ClickUp task creation with **per-user ClickUp OAuth** (no shared token), acting-for identity, audit log. Contract permissions come from Pulse/Compass only.
+11. **Combine `pulse-compass` into `mid-app-v1`** (decided 2026-10-17; 1–2 weeks after cutover, once stable, ~half a day). `master-marketer` stays a separate repo (separate deploy via Render + trigger.dev, its own API contract).
+    - **Why:** most features span API and UI (one PR, one preview); one migration history instead of three (`supabase/migrations`, `drizzle/`, `backend/migrations/`); shared request/response types instead of the hand-copied ones in `src/lib/api.ts`; one `AGENTS.md`, skill set and CI for the agents in §12–13 and for Ocean.
+    - **Steps:**
+      1. Import with history into `mid-app-v1/frontend/` (`git subtree add --prefix=frontend <pulse-compass> main`, or `git filter-repo --to-subdirectory-filter frontend` + merge).
+      2. Vercel: Root Directory `frontend`; Ignored Build Step so backend-only commits don't rebuild (e.g. `git diff --quiet HEAD^ HEAD -- frontend/ supabase/`).
+      3. Render (`mid-app-v1` web service + cron jobs): Root Directory `backend`; Build Filters to `backend/**` so frontend-only commits don't redeploy.
+      4. Move `supabase/` (config, functions, the single baseline migration from step 3) to the repo root.
+      5. Merge `AGENTS.md` / `CLAUDE.md`; one CI workflow with per-folder jobs.
+      6. Archive `pulse-compass` (read-only); point Supabase deploys and any agent workflows at the combined repo.
+    - Not on cutover weekend: one change at a time, so a break is attributable.
 
 ---
 

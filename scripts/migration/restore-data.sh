@@ -9,11 +9,13 @@
 # Three parallel streams: pulse_tasks (largest), compass_knowledge (embeddings),
 # everything else. Materialized views are refreshed at the end.
 #
-# Usage: bash scripts/migration/restore-data.sh <export.backup> [--skip-auth]
+# Usage: bash scripts/migration/restore-data.sh <export.backup> [--big-only]
+#   --big-only  load only pulse_tasks and compass_knowledge (resume after a
+#               failed run once the other tables and auth are already in)
 set -uo pipefail
 
 DUMP="$1"
-SKIP_AUTH="${2:-}"
+MODE="${2:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="$HOME/scoop/apps/postgresql/current/bin"
 LOGDIR="$(dirname "$DUMP")"
@@ -41,17 +43,19 @@ stream() { # name list
 total=$SECONDS
 failed=0
 
-if [ "$SKIP_AUTH" != "--skip-auth" ]; then
+if [ "$MODE" != "--big-only" ]; then
   grep -E ' TABLE DATA auth (users|identities) ' "$list" > "$LOGDIR/auth.list"
   stream auth "$LOGDIR/auth.list" || failed=1
 fi
 
 stream pulse_tasks "$LOGDIR/s1.list" & p1=$!
 stream compass_knowledge "$LOGDIR/s2.list" & p2=$!
-stream other_tables "$LOGDIR/s3.list" & p3=$!
+if [ "$MODE" != "--big-only" ]; then
+  stream other_tables "$LOGDIR/s3.list" & p3=$!
+  wait $p3 || failed=1
+fi
 wait $p1 || failed=1
 wait $p2 || failed=1
-wait $p3 || failed=1
 
 start=$SECONDS
 "$BIN/psql" "$DB" -w -q -v ON_ERROR_STOP=1 -c 'select public.refresh_contract_views();' -c 'analyze;' \

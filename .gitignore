@@ -51,3 +51,6 @@ backend/backups/
 *.backup
 *.backup.zip
 *.dump
+
+# Local migration secrets
+migration_from_lovable.env

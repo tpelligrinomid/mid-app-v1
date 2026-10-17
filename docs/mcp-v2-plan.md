@@ -65,7 +65,7 @@ Ideas and gaps found from real questions. Add to the bottom; move into a release
 |---|---|---|---|
 | B1 | **Participants in `get_sentiment_pulse` results**, split into MiD attendees (`@marketersindemand.com`) and client attendees | "In the last 30 days, which meetings had negative sentiment and who ran them?" — today the tool returns title/date/contract only, so Claude needs a lookup per meeting | Small. "Ran" = MiD attendees + the contract's account manager. A true host/organizer isn't stored; Fireflies has it (backfill `raw_metadata`) only if "who organized it" matters |
 | B2 | **New tool `get_talk_time`** (person by name or email, date window, optional contract) | "How much has Nathalie Mintjens talked in the meetings she attended?" — no tool does this; pulling full transcripts one by one would be slow and overflow context | Data is there: 1,314 of 1,316 meetings have transcripts with speaker + start/end per sentence. Return per meeting and in total: talk minutes, share of conversation %, turns, longest monologue, other speakers. Speaker names in transcripts are names; participants are emails — match via `users`/people |
-| B3 | **Dates in Compass RAG snippets** (`buildRagPrompt` in `services/rag/chat.ts`) | `compass_ask` and Compass chat answer "the notes don't have dates" | Prompt change; test against the real API first. Improves Compass chat too |
+| B3 | ✅ *Done 2026-10-17 (`backend` commit "Show source dates in Compass retrieved content").* **Dates in Compass RAG snippets** (`buildRagPrompt` in `services/rag/chat.ts`) | `compass_ask` and Compass chat answer "the notes don't have dates" | Prompt change; test against the real API first. Improves Compass chat too |
 
 ## Build plan — v2.0
 

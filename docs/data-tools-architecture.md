@@ -10,18 +10,26 @@ How client marketing data reaches Compass chat (Ask Compass) and the MiD MCP. De
 | **Nightwatch** | **SEO**: daily keyword rankings with 3-year history, AI-search visibility (ChatGPT, Claude, Gemini, Perplexity, AI Overviews), competitors | Traffic/conversions (Databox via GA4) |
 | **Ad platforms direct** (Google Ads, Meta, LinkedIn) | **Depth and actions**: campaign/ad/keyword detail, search terms, creatives; later **changes** (budgets, pausing) | Reporting totals (Databox stays the source of truth) |
 
-Supporting: **DataForSEO** for on-demand research (volumes, SERP snapshots, competitor gaps — already in Compass chat), **Google Search Console** for free 16-month query history.
+Supporting: **DataForSEO** for on-demand research (volumes, SERP snapshots, competitor gaps — already in Compass chat). **Google Search Console** is already connected in Databox, so it comes through the Databox layer — no separate GSC integration.
 
 **Single source for reporting totals:** when Databox and a platform disagree (time zones, attribution windows), reports use **Databox**. Platforms are for drill-down and actions.
 
-The paused in-house rank tracker (`docs/spec-search-visibility-tracking.md`, migration 020) is **superseded by Nightwatch** for rank and AI-visibility tracking. Keep only the GSC ingest idea.
+The paused in-house rank tracker (`docs/spec-search-visibility-tracking.md`, migration 020) is **superseded by Nightwatch** for rank and AI-visibility tracking (and its GSC ingest by Databox's GSC connection).
 
 ## Shared foundations (build once)
 
-1. **`contract_integrations` table** instead of a column per provider: `contract_id`, `provider` (`databox`, `nightwatch`, `google_ads`, `meta_ads`, `linkedin_ads`, `gsc`), `external_id` (account / project / customer id), `label`, `status`, `connected_by`, `connected_at`. Migrate `contracts.databox_account_id` into it (keep the column until callers move). One settings screen per contract: "what's connected".
+1. **`contract_integrations` table** instead of a column per provider: `contract_id`, `provider` (`databox`, `nightwatch`, `google_ads`, `meta_ads`, `linkedin_ads`), `external_id` (account / project / customer id), `label`, `status`, `connected_by`, `connected_at`. Migrate `contracts.databox_account_id` into it (keep the column until callers move). One settings screen per contract: "what's connected".
 2. **One tool framework** used by both Compass chat and the MCP: a runner per provider (like `DataboxToolRunner`, `SeoToolRunner`), registered in both places.
 3. **Scoping rules (same as MCP backlog B5), for every provider:** `contract_id` required; check the contract under the caller's RLS first; resolve the external account/project **server-side** from `contract_integrations` — tools have **no account/project input**; no mapping → explicit error, never a fallback; audit log records the contract.
-4. **Auth per provider type:** Databox and Nightwatch use an agency API key (backend env). Ad platforms use OAuth (Google Ads manager account + developer token, Meta Business system user, LinkedIn ad-account access) with tokens stored/refreshed like QuickBooks (`pulse_sync_tokens`).
+4. **Agency-level connections, per-contract picks (every provider works like Databox).** Clients share their accounts to MiD's own business accounts; we connect **once per provider at the agency level**, then each contract picks its account from a dropdown:
+   | Provider | One-time agency connection | Per-contract pick |
+   |---|---|---|
+   | Databox | Agency API key | Databox account |
+   | Nightwatch | Agency API key | Nightwatch URL (project) |
+   | Google Ads | MiD's **MCC** (one OAuth + developer token; calls use the MCC as login customer) | Client customer id under the MCC |
+   | Meta | MiD's **Business Manager** (system-user token) | Client ad account shared to the BM |
+   | LinkedIn | MiD's **Campaign Manager** access (one agency OAuth) | Client ad account MiD can access |
+   No per-client sign-in. Agency tokens are stored and refreshed in the background like QuickBooks (`pulse_sync_tokens`). A client account becomes pickable as soon as it's shared to MiD's MCC / Business Manager / Campaign Manager.
 5. **Writes** (ad platforms only): read-only first; then approval step + audit before any change.
 
 ## Nightwatch — plan

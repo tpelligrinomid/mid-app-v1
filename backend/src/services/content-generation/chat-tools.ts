@@ -11,6 +11,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { insert, select, update } from '../../utils/edge-functions.js';
 import { executeGeneration } from './engine.js';
+import { requestLiveSync, urlHost } from '../content-ingestion/processor.js';
 
 const APP_URL = (process.env.APP_URL ?? 'https://app.marketersindemand.com').replace(/\/+$/, '');
 
@@ -97,6 +98,24 @@ export const CONTENT_TOOLS: Anthropic.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'sync_from_live_page',
+    description:
+      "Once a piece is live on the website, make the live page the canonical version of its asset: scrape the URL, replace the asset's content with it, mark it published with the URL, and re-embed it so Compass uses the live wording. Find the asset with find_content_references (kinds: [\"asset\"]). Two-step: call without confirm to preview, show it, and call again with confirm=true only after the user agrees. The scrape takes about a minute.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        asset_id: { type: 'string', description: 'Asset id from find_content_references.' },
+        url: { type: 'string', description: "Live page URL. Defaults to the asset's External URL." },
+        confirm: {
+          type: 'boolean',
+          description: 'Leave unset first to get a preview; set true only after the user has confirmed.',
+        },
+      },
+      required: ['asset_id'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 const TOOL_NAMES = new Set(CONTENT_TOOLS.map((t) => t.name));
@@ -113,7 +132,9 @@ You can create content for this client with the same prompts the team uses in Co
 3. Ask whether to attach anything as specific context: a deliverable (creative brief, roadmap, content plan, research), a meeting or note, or an existing asset. Before asking, call find_content_references (once with a short query from the topic, e.g. "case stud", and once without a query for the most recent items) and suggest 2-4 likely candidates by title and date; attach the ones the user picks (or none). Attached material shapes the piece far more than general retrieval, so always ask.
 4. Call generate_content without confirm to preview it. Fill the sequence's variables from the conversation and what you know about the client; ask about required ones you can't reasonably fill.
 5. Show the preview, including what's attached, and call again with confirm=true only after the user agrees.
-Never say content was created or generated unless generate_content returned confirm=true success, and share the link it returns.`;
+Never say content was created or generated unless generate_content returned confirm=true success, and share the link it returns.
+
+When someone says a piece is now live ("that post is up at ..."), find its asset with find_content_references and offer sync_from_live_page, so the published wording replaces the generated draft.`;
 }
 
 interface VariableDef {
@@ -153,7 +174,8 @@ export class ContentGenerator {
 
   describe(name: string, input: Record<string, unknown>): string {
     if (name === 'list_content_options') return 'Checking content types and prompts';
-    if (name === 'find_content_references') return input.query ? `Looking for "${String(input.query)}" to attach` : 'Looking for context to attach';
+    if (name === 'sync_from_live_page') return input.confirm === true ? 'Pulling in the live page' : 'Preparing a live-page sync';
+    if (name === 'find_content_references') return input.query ? `Looking for "${String(input.query)}"` : 'Looking through deliverables, meetings and content';
     return input.confirm === true ? `Starting generation: ${String(input.title ?? '')}` : `Preparing a preview: ${String(input.title ?? '')}`;
   }
 
@@ -161,6 +183,7 @@ export class ContentGenerator {
     if (name === 'list_content_options') return JSON.stringify(await this.listOptions());
     if (name === 'find_content_references') return JSON.stringify(await this.findReferences(input));
     if (name === 'generate_content') return JSON.stringify(await this.generate(input));
+    if (name === 'sync_from_live_page') return JSON.stringify(await this.syncFromLivePage(input));
     throw new Error(`Unknown content tool: ${name}`);
   }
 
@@ -383,6 +406,38 @@ export class ContentGenerator {
       ...plan,
       link: `${APP_URL}/compass/${this.contractId}/content-ops/assets?asset=${assetId}`,
       note: `Generating now in the background (${sequence.steps?.length ?? 0} steps, usually a few minutes). The draft fills in when it's done.`,
+    };
+  }
+
+  private async syncFromLivePage(input: Record<string, unknown>) {
+    const assetId = String(input.asset_id ?? '').trim();
+    const rows = await select<Array<{ asset_id: string; title: string; status: string; external_url: string | null; content_body: string | null }>>(
+      'content_assets',
+      { select: 'asset_id, title, status, external_url, content_body', filters: { asset_id: assetId, contract_id: this.contractId }, limit: 1 }
+    );
+    const asset = rows?.[0];
+    if (!asset) return { error: 'Asset not found for this client. Use an asset id from find_content_references.' };
+
+    const url = (input.url ? String(input.url).trim() : '') || asset.external_url || '';
+    if (!url || !urlHost(url)) return { error: 'Need the live page URL (a full https:// address).' };
+
+    const plan = {
+      asset: asset.title,
+      current_status: asset.status,
+      url,
+      replaces: `the asset's current content (${(asset.content_body ?? '').length} characters) with the text of the live page`,
+      then: 'status set to published, URL saved, knowledge base re-embedded from the live page',
+    };
+    if (input.confirm !== true) {
+      return { preview: true, would_sync: plan, next: 'Show this to the user. Call again with confirm=true only after they agree.' };
+    }
+
+    await requestLiveSync(asset.asset_id, this.contractId, url, this.userId);
+    return {
+      success: true,
+      ...plan,
+      link: `${APP_URL}/compass/${this.contractId}/content-ops/assets?asset=${asset.asset_id}`,
+      note: "Scraping now (usually about a minute). The asset updates when it's done; if the page can't be read, the asset is left unchanged and shows why.",
     };
   }
 

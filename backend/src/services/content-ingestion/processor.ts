@@ -206,7 +206,7 @@ export async function processScrapeResult(
 
   // Fetch current item for idempotency check
   const items = await select<IngestionItem[]>('content_ingestion_items', {
-    select: 'item_id, status, url, batch_id',
+    select: 'item_id, status, url, batch_id, asset_id',
     filters: { item_id },
     limit: 1,
   });
@@ -236,6 +236,7 @@ export async function processScrapeResult(
     );
     await incrementBatchCounter(batch_id, 'failed');
     await checkBatchCompletion(batch_id);
+    await failLiveSync(item.asset_id, item.url, error || 'Scrape failed (unknown error)');
     return;
   }
 
@@ -250,6 +251,7 @@ export async function processScrapeResult(
       },
       { item_id }
     );
+    await failLiveSync(item.asset_id, item.url, 'The scrape returned no content');
     await incrementBatchCounter(batch_id, 'failed');
     await checkBatchCompletion(batch_id);
     return;
@@ -276,6 +278,13 @@ export async function processScrapeResult(
       batchOptions = (batches?.[0]?.options as Record<string, unknown>) || {};
     } catch {
       // Non-blocking — created_by is optional
+    }
+
+    // Live sync: update the target asset instead of creating one.
+    const targetAssetId = batchOptions.target_asset_id as string | undefined;
+    if (targetAssetId) {
+      await applyLiveSyncResult(targetAssetId, item_id, batch_id, item.url, output);
+      return;
     }
 
     // Create content asset (respect user-provided content_type_id / category_id from batch options)
@@ -725,4 +734,185 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
   } catch (err) {
     console.error(`[Ingestion] Failed to check batch completion for ${batchId}:`, err);
   }
+}
+
+// ============================================================================
+// Live sync: refresh an existing asset from its published page
+// ============================================================================
+//
+// Once a generated (or manual) asset is live on the client's site, the live
+// page is the canonical version. A live sync scrapes the URL through the same
+// Master Marketer job as bulk ingestion, but the callback updates the existing
+// asset (content, URL, status, re-embedding) instead of creating a new one.
+// The batch carries options.target_asset_id; the item has asset_id preset.
+
+// A scrape shorter than this is treated as a failed read (login wall, empty
+// page) rather than overwriting the asset's content with it.
+const MIN_LIVE_CONTENT_CHARS = 200;
+
+interface LiveSyncAssetRow {
+  asset_id: string;
+  contract_id: string;
+  title: string;
+  description: string | null;
+  published_date: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+async function setLiveSyncState(assetId: string, state: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<void> {
+  const rows = await select<Array<{ metadata: Record<string, unknown> | null }>>('content_assets', {
+    select: 'metadata',
+    filters: { asset_id: assetId },
+    limit: 1,
+  });
+  const metadata = { ...(rows?.[0]?.metadata ?? {}), live_sync: state };
+  await update('content_assets', { metadata, ...extra, updated_at: new Date().toISOString() }, { asset_id: assetId });
+}
+
+/** Host of a URL without "www.", or null if it isn't an http(s) URL. */
+export function urlHost(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return u.hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+/** True when the URL is on the client's own site (its primary domain or a subdomain of it). */
+export function isOnDomain(url: string, primaryDomain: string | null): boolean {
+  const host = urlHost(url);
+  const domain = primaryDomain ? (urlHost(primaryDomain.includes('://') ? primaryDomain : `https://${primaryDomain}`) ?? null) : null;
+  return !!host && !!domain && (host === domain || host.endsWith(`.${domain}`));
+}
+
+/**
+ * Start a live sync: scrape `url` and, when the result comes back, replace the
+ * asset's content with the live page. Returns immediately; the asset shows
+ * metadata.live_sync.status = 'pending' until the callback lands.
+ */
+export async function requestLiveSync(
+  assetId: string,
+  contractId: string,
+  url: string,
+  userId?: string
+): Promise<{ batch_id: string }> {
+  if (!urlHost(url)) throw new Error('A full http(s) URL is required');
+  const requestedAt = new Date().toISOString();
+
+  const batchRows = await insert<IngestionBatch[]>(
+    'content_ingestion_batches',
+    {
+      contract_id: contractId,
+      total: 1,
+      options: { mode: 'live_sync', target_asset_id: assetId },
+      created_by: userId || null,
+    },
+    { select: 'batch_id' }
+  );
+  const batchId = batchRows[0].batch_id;
+  const items = await insert<IngestionItem[]>(
+    'content_ingestion_items',
+    { batch_id: batchId, contract_id: contractId, url, asset_id: assetId },
+    { select: 'item_id' }
+  );
+  const itemId = items[0].item_id;
+
+  await setLiveSyncState(assetId, { status: 'pending', url, requested_at: requestedAt }, { external_url: url });
+
+  try {
+    const result = await submitBlogScrape({ url, metadata: { batch_id: batchId, item_id: itemId, contract_id: contractId } });
+    await update('content_ingestion_items', { job_id: result.jobId, trigger_run_id: result.triggerRunId || null }, { item_id: itemId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await update('content_ingestion_items', { status: 'failed', error: `Submission failed: ${message}`, updated_at: new Date().toISOString() }, { item_id: itemId }).catch(() => {});
+    await incrementBatchCounter(batchId, 'failed');
+    await checkBatchCompletion(batchId);
+    await setLiveSyncState(assetId, { status: 'failed', url, requested_at: requestedAt, error: `Couldn't start the scrape: ${message}`.slice(0, 500) }).catch(() => {});
+    throw new Error(`Couldn't start the scrape: ${message}`);
+  }
+
+  console.log(`[LiveSync] Requested: asset=${assetId} url=${url}`);
+  return { batch_id: batchId };
+}
+
+/** Marks a live sync failed on its asset (no-op for ordinary ingestion items). */
+async function failLiveSync(assetId: string | null, url: string, error: string): Promise<void> {
+  if (!assetId) return;
+  await setLiveSyncState(assetId, { status: 'failed', url, failed_at: new Date().toISOString(), error: error.slice(0, 500) }).catch((err) =>
+    console.error(`[LiveSync] Could not record failure on asset ${assetId}:`, err)
+  );
+}
+
+/** Callback half of a live sync: write the scraped page onto the existing asset. */
+async function applyLiveSyncResult(
+  assetId: string,
+  itemId: string,
+  batchId: string,
+  url: string,
+  output: NonNullable<BlogScrapeCallbackPayload['output']>
+): Promise<void> {
+  const markdown = output.content_markdown?.trim() ?? '';
+  if (markdown.length < MIN_LIVE_CONTENT_CHARS) {
+    const error = `The page returned too little text (${markdown.length} characters), so the asset was left unchanged. Check the URL is public.`;
+    await update('content_ingestion_items', { status: 'failed', error, updated_at: new Date().toISOString() }, { item_id: itemId });
+    await incrementBatchCounter(batchId, 'failed');
+    await checkBatchCompletion(batchId);
+    await failLiveSync(assetId, url, error);
+    return;
+  }
+
+  const rows = await select<LiveSyncAssetRow[]>('content_assets', {
+    select: 'asset_id, contract_id, title, description, published_date, metadata',
+    filters: { asset_id: assetId },
+    limit: 1,
+  });
+  const asset = rows?.[0];
+  if (!asset) {
+    await update('content_ingestion_items', { status: 'failed', error: 'Asset no longer exists', updated_at: new Date().toISOString() }, { item_id: itemId });
+    await incrementBatchCounter(batchId, 'failed');
+    await checkBatchCompletion(batchId);
+    return;
+  }
+
+  const syncedAt = new Date().toISOString();
+  const liveUrl = output.url || url;
+  await update(
+    'content_assets',
+    {
+      content_body: markdown,
+      external_url: liveUrl,
+      status: 'published',
+      published_date: asset.published_date || output.published_date || syncedAt.slice(0, 10),
+      ...(!asset.description && output.meta_description && { description: output.meta_description }),
+      metadata: {
+        ...(asset.metadata ?? {}),
+        live_sync: {
+          status: 'synced',
+          url: liveUrl,
+          synced_at: syncedAt,
+          ...(output.title && { page_title: output.title }),
+          ...(output.word_count && { word_count: output.word_count }),
+          ...(output.author && { author: output.author }),
+        },
+      },
+      updated_at: syncedAt,
+    },
+    { asset_id: assetId }
+  );
+
+  // Re-embed: replaces the asset's previous chunks with the live version.
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      await ingestContent({ contract_id: asset.contract_id, source_type: 'content', source_id: assetId, title: asset.title, content: markdown });
+    } catch (err) {
+      console.error(`[LiveSync] Embedding failed for asset ${assetId} (non-blocking):`, err);
+    }
+  }
+
+  await update('content_ingestion_items', { status: 'categorized', updated_at: new Date().toISOString() }, { item_id: itemId });
+  await incrementBatchCounter(batchId, 'completed');
+  await checkBatchCompletion(batchId);
+  console.log(`[LiveSync] Synced asset ${assetId} from ${liveUrl} (${markdown.length} chars)`);
 }

@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { select, insert, del } from '../../utils/edge-functions.js';
 import { ingestContent } from '../../services/rag/ingestion.js';
-import { submitBulkScrape, getBatchStatus, applyCategorizationViaEdgeFn } from '../../services/content-ingestion/processor.js';
+import { submitBulkScrape, getBatchStatus, applyCategorizationViaEdgeFn, requestLiveSync, isOnDomain, urlHost } from '../../services/content-ingestion/processor.js';
+import { getContractPrimaryDomain } from '../../services/contracts/primary-domain.js';
 import { submitFileExtract } from '../../services/master-marketer/client.js';
 import { insert as edgeFnInsert, select as edgeFnSelect, update as edgeFnUpdate } from '../../utils/edge-functions.js';
 import {
@@ -1450,7 +1451,7 @@ router.put(
     // Fetch existing asset (need previous status to detect publish transition)
     const { data: existing, error: fetchError } = await req.supabase
       .from('content_assets')
-      .select('asset_id, status')
+      .select('asset_id, status, external_url')
       .eq('asset_id', id)
       .single();
 
@@ -1501,9 +1502,24 @@ router.put(
       return;
     }
 
-    // Auto-ingest when status transitions to "published"
+    // Published with a URL on the client's own site (newly published, or the URL changed):
+    // the live page is canonical, so pull it in instead of embedding the draft.
     const justPublished = updates.status === 'published' && existing.status !== 'published';
-    if (justPublished && process.env.OPENAI_API_KEY) {
+    const urlChanged = !!asset.external_url && asset.external_url !== existing.external_url;
+    let liveSyncStarted = false;
+    if (asset.status === 'published' && asset.external_url && (justPublished || urlChanged)) {
+      try {
+        if (isOnDomain(asset.external_url, await getContractPrimaryDomain(asset.contract_id))) {
+          await requestLiveSync(asset.asset_id, asset.contract_id, asset.external_url, req.user.user_id);
+          liveSyncStarted = true;
+        }
+      } catch (syncErr) {
+        console.error('[Content] Live sync on publish failed to start (non-blocking):', syncErr);
+      }
+    }
+
+    // Auto-ingest when status transitions to "published"
+    if (justPublished && !liveSyncStarted && process.env.OPENAI_API_KEY) {
       const contentToEmbed = asset.content_body ||
         (asset.content_structured ? JSON.stringify(asset.content_structured) : null);
       if (contentToEmbed) {
@@ -1522,7 +1538,51 @@ router.put(
       }
     }
 
-    res.json({ asset });
+    res.json({ asset, live_sync_started: liveSyncStarted });
+  }
+);
+
+/**
+ * POST /api/compass/content/assets/:id/live-sync
+ * Replace an asset's content with its live page (scraped via Master Marketer),
+ * mark it published and re-embed it. Body: { url? } — defaults to external_url.
+ * Returns 202; the asset's metadata.live_sync tracks progress.
+ */
+router.post(
+  '/assets/:id/live-sync',
+  requireRole('admin', 'team_member'),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.supabase || !req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { data: asset, error } = await req.supabase
+      .from('content_assets')
+      .select('asset_id, contract_id, external_url')
+      .eq('asset_id', req.params.id)
+      .maybeSingle();
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+    if (!asset) {
+      res.status(404).json({ error: 'Asset not found' });
+      return;
+    }
+
+    const url = (typeof req.body?.url === 'string' && req.body.url.trim()) || asset.external_url;
+    if (!url || !urlHost(url)) {
+      res.status(400).json({ error: 'A full http(s) URL is required (set the External URL or pass url)' });
+      return;
+    }
+
+    try {
+      const { batch_id } = await requestLiveSync(asset.asset_id, asset.contract_id, url, req.user.user_id);
+      res.status(202).json({ status: 'pending', url, batch_id });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : 'Could not start the live sync' });
+    }
   }
 );
 

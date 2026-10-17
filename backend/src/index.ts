@@ -28,6 +28,7 @@ import brandVoiceRouter from './routes/compass/brand-voice.js';
 import searchVisibilityRouter from './routes/compass/search-visibility.js';
 import taskAnalysisReportRouter from './routes/admin/task-analysis-report.js';
 import programSizingCheckRouter from './routes/admin/program-sizing-check.js';
+import mcpRouter from './routes/mcp.js';
 
 // Validate required environment variables
 validateSupabaseConfig();
@@ -54,6 +55,10 @@ if (process.env.FRONTEND_URL) {
   });
   allowedOrigins.push(...urls);
 }
+
+// MCP v2 (/mcp + OAuth discovery). Mounted before the app CORS allowlist:
+// MCP clients aren't the web app, and auth is the user's own OAuth token.
+app.use(mcpRouter);
 
 // Middleware
 app.use(cors({

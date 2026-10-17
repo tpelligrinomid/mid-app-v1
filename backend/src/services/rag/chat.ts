@@ -487,6 +487,84 @@ async function fetchStructuredData(
 // System Prompts
 // ============================================================================
 
+// Semantic search doesn't know about dates, so a question like "what did we
+// discuss in the last two meetings?" can miss the newest meetings entirely.
+// For recency questions, add the contract's latest meetings and notes directly.
+const RECENT_MEETINGS = 3;
+const RECENT_NOTES = 3;
+const TRANSCRIPT_CHUNKS_WITHOUT_NOTE = 8;
+const RECENCY_WORDS = /\b(last|latest|recent|recently|newest|lately|yesterday|today|this (week|month)|past (week|month|few|couple))\b/i;
+
+function wantsRecentContext(message: string, structuredQueries: string[]): boolean {
+  return (
+    structuredQueries.includes('meetings_list') ||
+    structuredQueries.includes('notes_list') ||
+    RECENCY_WORDS.test(message)
+  );
+}
+
+const KNOWLEDGE_COLUMNS = 'chunk_id, contract_id, source_type, source_id, title, content, chunk_index, metadata';
+
+/**
+ * Chunks from the contract's most recent meetings and notes, newest first.
+ * A meeting's generated note is the compact summary, so it's used in full;
+ * a recent meeting without a note contributes the start of its transcript.
+ */
+async function fetchRecentKnowledge(contractId: string, sourceTypes?: SourceType[]): Promise<SimilarityResult[]> {
+  const allow = (type: SourceType) => !sourceTypes?.length || sourceTypes.includes(type);
+
+  const meetings = allow('meeting')
+    ? (await select<{ meeting_id: string }[]>('compass_meetings', {
+        select: 'meeting_id',
+        filters: { contract_id: contractId, meeting_date: { gte: '2000-01-01' } },
+        order: [{ column: 'meeting_date', ascending: false }],
+        limit: RECENT_MEETINGS,
+      })) || []
+    : [];
+  const meetingIds = meetings.map((m) => m.meeting_id);
+
+  type NoteRef = { note_id: string; meeting_id: string | null };
+  const [latestNotes, linkedNotes] = allow('note')
+    ? await Promise.all([
+        select<NoteRef[]>('compass_notes', {
+          select: 'note_id, meeting_id',
+          filters: { contract_id: contractId, note_date: { gte: '2000-01-01' } },
+          order: [{ column: 'note_date', ascending: false }],
+          limit: RECENT_NOTES,
+        }),
+        meetingIds.length
+          ? select<NoteRef[]>('compass_notes', { select: 'note_id, meeting_id', filters: { meeting_id: { in: meetingIds } } })
+          : Promise.resolve([] as NoteRef[]),
+      ])
+    : [[], []];
+
+  const notes = [...(linkedNotes || []), ...(latestNotes || [])];
+  const noteIds = Array.from(new Set(notes.map((n) => n.note_id)));
+  const meetingsWithNotes = new Set(notes.map((n) => n.meeting_id).filter(Boolean));
+  const transcriptMeetingIds = meetingIds.filter((id) => !meetingsWithNotes.has(id));
+
+  const [noteChunks, transcriptChunks] = await Promise.all([
+    noteIds.length
+      ? select<SimilarityResult[]>('compass_knowledge', {
+          select: KNOWLEDGE_COLUMNS,
+          filters: { source_id: { in: noteIds } },
+          order: [{ column: 'chunk_index', ascending: true }],
+          limit: 60,
+        })
+      : Promise.resolve([] as SimilarityResult[]),
+    transcriptMeetingIds.length
+      ? select<SimilarityResult[]>('compass_knowledge', {
+          select: KNOWLEDGE_COLUMNS,
+          filters: { source_id: { in: transcriptMeetingIds }, chunk_index: { lt: TRANSCRIPT_CHUNKS_WITHOUT_NOTE } },
+          order: [{ column: 'chunk_index', ascending: true }],
+          limit: TRANSCRIPT_CHUNKS_WITHOUT_NOTE * transcriptMeetingIds.length,
+        })
+      : Promise.resolve([] as SimilarityResult[]),
+  ]);
+
+  return [...(noteChunks || []), ...(transcriptChunks || [])].map((c) => ({ ...c, similarity: 1 }));
+}
+
 // Dates aren't stored on knowledge chunks, so look them up from each source
 // record (one query per source type) and show them in the retrieved content.
 type SourceDates = Map<string, string>;
@@ -536,7 +614,7 @@ function formatRetrieved(results: SimilarityResult[], dates: SourceDates): strin
     .join('\n\n');
 }
 
-const DATE_GUIDANCE = `Each retrieved item shows its date when one is known (meeting date, note date, delivery date or publish date). Use these dates to order events and to answer questions about what is recent, latest or within a time period, and give dates when you describe meetings or decisions. Several items can come from the same meeting or document.`;
+const DATE_GUIDANCE = `Each retrieved item shows its date when one is known (meeting date, note date, delivery date or publish date). Use these dates to order events and to answer questions about what is recent, latest or within a time period, and give dates when you describe meetings or decisions. Several items can come from the same meeting or document. For questions about recent or latest meetings, the most recent meetings and notes are listed first, newest first.`;
 
 function buildRagPrompt(results: SimilarityResult[], dates: SourceDates): string {
   const contextBlocks = formatRetrieved(results, dates);
@@ -652,6 +730,19 @@ export async function streamChatResponse(
       });
     } catch {
       // Continue with empty results
+    }
+  }
+
+  // Recency questions: put the latest meetings/notes first (semantic search can miss them).
+  if (wantsRecentContext(message, structured_queries)) {
+    try {
+      const recent = await fetchRecentKnowledge(contract_id, source_types);
+      if (recent.length > 0) {
+        const seen = new Set(recent.map((r) => r.chunk_id));
+        ragResults = [...recent, ...ragResults.filter((r) => !seen.has(r.chunk_id))];
+      }
+    } catch (err) {
+      console.warn('[RAG Chat] Recent context lookup failed:', err instanceof Error ? err.message : err);
     }
   }
 

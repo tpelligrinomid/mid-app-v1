@@ -232,7 +232,14 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
 
 ## 6. Phase 3 — Cutover
 
-**T-1 day:** announce the window in Slack; tell the team the app will be unavailable and everyone will need to log in again afterwards (new signing keys invalidate sessions; passwords still work).
+**T-1 day:** announce the window in Slack; tell the team the app will be unavailable and everyone will need to log in again afterwards (new signing keys invalidate sessions; passwords still work). Also:
+- Lower the DNS TTL on `app.marketersindemand.com` to 60 s.
+- Intuit app: add redirect URI `https://<new-ref>.supabase.co/functions/v1/quickbooks-auth/callback` (keep the old one).
+- Vercel: production branch = `self-hosted`, latest build green, env `VITE_SUPABASE_*` set to the new project (legacy `anon` JWT). **Don't merge `self-hosted` → `main` yet**: Lovable still syncs `main` and would deploy the new functions and the Vault trigger migration to the **old** project, which is the rollback target.
+- Collect the secrets left out of the rehearsal: `SLACK_BOT_TOKEN`, `SLACK_INVOICE_AUDIT_CHANNEL`, `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `N8N_EMAIL_WEBHOOK_URL`.
+- List anything else that talks to the old project directly (n8n workflows, scripts, other apps using `cpjfuttlywafjxefczqc` or its anon key); each needs the new URL/key after cutover.
+
+0. **Set the remaining function secrets** on the new project (no effect until the data and crons are in): `supabase secrets set --env-file <tmp file>` with the five secrets above; delete the file afterwards.
 
 1. **Freeze writes**
    - Render → suspend **all** cron jobs (clickup-sync, quickbooks-sync, recover-deliverables, process-status-reports, generate-strategy-notes, clickup-service-category, sync-process-library, process-library-service-category, clickup-archived-sync, search-visibility, clickup-full-sync, quickbooks-full-sync, backfill-embeddings, generate-management-report).
@@ -243,8 +250,8 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
      ```
      This must happen **before** the export so the QuickBooks token in the export is the last one issued.
    - Post: "Platform offline for migration."
-2. **Export** from Lovable Cloud; download.
-3. **Wipe rehearsal data** in the new project:
+2. **Export** from Lovable Cloud; download; unzip (`.backup.zip` → `.backup`) into its own folder under `backend/backups/`.
+3. **Wipe rehearsal data** in the new project (schema, functions, buckets, policies and Vault stay):
    ```sql
    do $$ declare r record; begin
      for r in select tablename from pg_tables where schemaname='public' loop
@@ -252,7 +259,7 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
      end loop; end $$;
    truncate auth.identities, auth.users cascade;
    ```
-4. **Restore** (same commands as Phase 2 step 2), refresh views, copy storage delta, **row-count check must match**.
+4. **Restore:** `bash scripts/migration/restore-data.sh <export.backup>` (auth + all public data + view refresh; ~6 min), `copy-storage.mjs` for the storage delta (~1 min), then `row-counts.mjs` — **every table must match** before going further. A mismatch is a no-go: roll back (§7).
 5. **Recreate pg_cron jobs** in the new project:
    ```sql
    select vault.create_secret('<new anon key>', 'anon_key');   -- project_url created in Phase 1
@@ -274,18 +281,19 @@ Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTION
        body := jsonb_build_object('time', now()));
    $$);
    ```
-6. **Switch Render** (production backend) env: `SUPABASE_URL`, `SUPABASE_ANON_KEY` → new project; `QUICKBOOKS_REDIRECT_URI` → new `quickbooks-auth/callback` URL; `FRONTEND_URL` unchanged if the domain stays. `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET` unchanged if the same value was reused. Redeploy.
-7. **Merge `self-hosted` → `main`** in pulse-compass; Vercel production deploy.
-8. **DNS:** point `app.marketersindemand.com` at Vercel; remove the custom domain from Lovable publishing.
+6. **Switch Render** (production backend) env: `SUPABASE_URL`, `SUPABASE_ANON_KEY` (legacy `anon` JWT) → new project; `QUICKBOOKS_REDIRECT_URI` → new `quickbooks-auth/callback` URL; `FRONTEND_URL` unchanged if the domain stays. `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET` unchanged (the same value was reused). Redeploy and wait for `/health`.
+7. **Vercel:** set `VITE_API_URL=https://mid-app-v1.onrender.com` (production + preview), redeploy production from `self-hosted`. Add the domain `app.marketersindemand.com` to the Vercel project (it shows the DNS record to create).
+8. **DNS:** remove the custom domain from Lovable publishing, then point `app.marketersindemand.com` at Vercel (record from step 7). Wait for Vercel to show the domain valid with a certificate.
 9. **MCP clients:** remove and re-add the "MiD Pulse and Compass" connector in claude.ai (new URL `https://<new-ref>.supabase.co/functions/v1/mcp`); tell other users to do the same.
-10. **Unfreeze:** resume Render cron jobs. Watch the first two ClickUp/QuickBooks sync cycles in `pulse_sync_logs`.
+10. **Verify** (§8, the items possible on a Sunday), then **unfreeze:** resume Render cron jobs. Watch the first two ClickUp/QuickBooks sync cycles in `pulse_sync_logs`.
+11. **Within a few days (Phase 5 item 2):** disconnect Lovable from the GitHub repo, *then* merge `self-hosted` → `main` and switch Vercel's production branch back to `main`.
 
 ---
 
 ## 7. Rollback
 
 - **Before step 6 (Render switch):** nothing has changed for users. Re-activate the old cron jobs (`update cron.job set active = true ...`), resume Render crons, done.
-- **After step 6:** revert Render env vars and DNS, re-activate old cron jobs. Data written to the new project after cutover must be copied back by hand, so make the go/no-go call within the first few hours. If the QuickBooks token was refreshed on the new side, reconnect QuickBooks via the app's OAuth flow (one admin, ~1 minute).
+- **After step 6:** revert Render env vars and DNS (re-add the custom domain in Lovable), re-activate old cron jobs. Data written to the new project after cutover must be copied back by hand, so make the go/no-go call within the first few hours. If the QuickBooks token was refreshed on the new side, reconnect QuickBooks via the app's OAuth flow (one admin, ~1 minute).
 
 ---
 

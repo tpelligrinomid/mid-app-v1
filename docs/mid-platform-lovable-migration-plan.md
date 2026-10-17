@@ -75,9 +75,10 @@ Vercel cannot replace Supabase: its database add-ons are plain Postgres without 
 - [x] **Vercel** account is a company team, not a personal login, with at least one admin besides the founder.
 - [x] **Domain:** migrate on `app.marketersindemand.com` first, then move to New North as a separate step (§10). Phase 0 removes the hard-coded domain so that move is configuration only.
 
+- [x] **Region:** `us-east-2` (Ohio), matching the Render region of `mid-app-v1`. The backend makes ~1,000 calls/hour to the database, so they must sit close together.
+
 ### Still open
 
-- [ ] **Region** for the Supabase project — match the Render region of `mid-app-v1` (Render dashboard → service → region). Render Ohio → `us-east-2`, Virginia → `us-east-1`, Oregon → `us-west-2`, Frankfurt → `eu-central-1`. The backend makes ~1,000 calls/hour to the database, so they must sit close together.
 - [ ] **Cutover window** — a weekday evening or Saturday; Pulse syncs are weekday-only and the audit runs Monday 12:00 UTC.
 - [ ] **New domain name** — e.g. `app.newnorth.com`.
 
@@ -109,6 +110,16 @@ Do these in `pulse-compass` on a branch `self-hosted`; merge it at cutover. Lova
 | 0.8 | Lock down `weekly-invoice-audit` (and `quickbooks-auth/refresh`): require a shared secret header, since both run with `verify_jwt=false` and no caller check | edge functions + cron SQL in §6 |
 | 0.9 | Remove the hard-coded `app.marketersindemand.com` (MCP tools, Slack links and the favicon in `notify-release-note` and `weekly-invoice-audit`); read it from `SITE_URL` / `VITE_SITE_URL`. Same in the backend's report logo (`backend/src/services/reports/client-status-report.ts:537`). This makes the domain move (§10) configuration only | edge functions, `src/lib/mcp/*`, backend report |
 
+**Status (2026-10-16): 0.1–0.9 done on `self-hosted`** (commit "Prepare for self-hosting on our own Supabase + Vercel"). Differences from the table above:
+- **0.2:** both functions call `claude-opus-5-5` through the Anthropic SDK, with server-side refusal fallback. `seed-brand-voice` uses structured output (`output_config.format`), because Opus 5.5 rejects forced tool use. Both request shapes were tested against the real API.
+- **0.3:** the Lovable Vite plugin generates a broken bundle on Windows, so it was removed. `supabase/functions/mcp/index.ts` is now edited by hand and is the source of truth; `src/lib/mcp/` is no longer built (delete in Phase 5). The issuer comes from `SUPABASE_URL` and the app links from `SITE_URL`, so the file needs no edit per project.
+- **0.4:** `project_id` in `config.toml` is still the old ref. `supabase link --project-ref <new-ref>` is what matters for deploys. Added `verify_jwt = false` for `notify-release-note` (the trigger sends no auth header) and `mcp` (OAuth discovery is signed-out). Lovable set these outside `config.toml`; a plain deploy would otherwise switch them on.
+- **0.5:** `vercel.json` installs and builds with **bun** (`bun.lock` is the real lockfile; `package-lock.json` is stale, so delete it in Phase 5).
+- **0.6:** `.env` was untracked, and `.gitignore` did not list it before.
+- **0.7:** `supabase/migrations/20261016120000_release_note_trigger_url_from_vault.sql`.
+- **0.8:** `weekly-invoice-audit` and `quickbooks-auth/refresh` require the header `x-cron-secret` whenever the `CRON_SECRET` secret is set (see §6 step 5).
+- **0.9:** the backend report logo (`client-status-report.ts:537`) is hosted on the marketing site, not the app domain, so it was left for the rebrand.
+
 No code changes are needed in `mid-app-v1` or `master-marketer` for the cutover (env vars only).
 
 ### Secrets to collect (Lovable cannot export them)
@@ -120,7 +131,8 @@ No code changes are needed in `mid-app-v1` or `master-marketer` for the cutover 
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | `quickbooks-auth` | Intuit developer portal / Render env |
 | `N8N_EMAIL_WEBHOOK_URL` | `send-email` | n8n |
 | `ANTHROPIC_API_KEY` *(new)* | `account-brief`, `seed-brand-voice` | Anthropic console |
-| `SITE_URL` *(new)* | `send-email` | `https://app.marketersindemand.com` |
+| `SITE_URL` *(new)* | `send-email`, `mcp`, `notify-release-note`, `weekly-invoice-audit` | `https://app.marketersindemand.com` |
+| `CRON_SECRET` *(new)* | `weekly-invoice-audit`, `quickbooks-auth/refresh` | Generate (`openssl rand -hex 32`); also stored in Vault as `cron_secret` (§6) |
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` are provided automatically to edge functions.
 
@@ -162,7 +174,7 @@ export DUMP=growth-pulse-grid_<date>.backup
    supabase functions deploy   # all 12; verify_jwt settings come from config.toml
    ```
 7. **Auth settings:** Site URL `https://app.marketersindemand.com`; redirect URLs for prod + `*.vercel.app` previews; email/password + Google enabled; **signups disabled** (invite-only); **OAuth 2.1 server enabled** with dynamic client registration, authorization URL `https://app.marketersindemand.com/.lovable/oauth/consent` (needed by the MCP server).
-8. **Vercel:** import `pulse-compass` (branch `self-hosted`), framework Vite, output `dist`. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID`, `VITE_API_URL`. Until cutover, previews point at the new project and `VITE_API_URL=http://localhost:3001` (the local backend, below); after cutover, at the production Render backend.
+8. **Vercel:** import `pulse-compass` (branch `self-hosted`); `vercel.json` sets Vite, bun and `dist`. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID`, `VITE_API_URL`. Until cutover, previews point at the new project and `VITE_API_URL=http://localhost:3001` (the local backend, below); after cutover, at the production Render backend.
 9. **Local backend for the rehearsal:** run `mid-app-v1/backend` with `npm run dev` and a `.env` pointing at the new project (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, same `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET`). **Leave the QuickBooks variables blank, don't call any `/api/cron/*` route, and avoid Databox features in Compass chat** (see below).
 
 > ⚠️ **QuickBooks: why the rehearsal copy must not touch it**
@@ -239,22 +251,24 @@ export DUMP=growth-pulse-grid_<date>.backup
 5. **Recreate pg_cron jobs** in the new project:
    ```sql
    select vault.create_secret('<new anon key>', 'anon_key');   -- project_url created in Phase 1
+   select vault.create_secret('<CRON_SECRET value>', 'cron_secret');
    select cron.schedule('quickbooks-token-refresh', '*/30 * * * *', $$
      select net.http_post(
        url := (select decrypted_secret from vault.decrypted_secrets where name='project_url') || '/functions/v1/quickbooks-auth/refresh',
        headers := jsonb_build_object('Content-Type','application/json',
-         'Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name='anon_key')),
+         'Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name='anon_key'),
+         'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='cron_secret')),
        body := '{}'::jsonb);
    $$);
    select cron.schedule('weekly-invoice-audit', '0 12 * * 1', $$
      select net.http_post(
        url := (select decrypted_secret from vault.decrypted_secrets where name='project_url') || '/functions/v1/weekly-invoice-audit',
        headers := jsonb_build_object('Content-Type','application/json',
-         'apikey',(select decrypted_secret from vault.decrypted_secrets where name='anon_key')),
+         'apikey',(select decrypted_secret from vault.decrypted_secrets where name='anon_key'),
+         'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='cron_secret')),
        body := jsonb_build_object('time', now()));
    $$);
    ```
-   (If 0.8 added a shared-secret header, include it here.)
 6. **Switch Render** (production backend) env: `SUPABASE_URL`, `SUPABASE_ANON_KEY` → new project; `QUICKBOOKS_REDIRECT_URI` → new `quickbooks-auth/callback` URL; `FRONTEND_URL` unchanged if the domain stays. `BACKEND_API_KEY`/`EDGE_FUNCTION_SECRET` unchanged if the same value was reused. Redeploy.
 7. **Merge `self-hosted` → `main`** in pulse-compass; Vercel production deploy.
 8. **DNS:** point `app.marketersindemand.com` at Vercel; remove the custom domain from Lovable publishing.

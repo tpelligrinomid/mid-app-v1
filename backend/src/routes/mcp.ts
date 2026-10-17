@@ -15,6 +15,16 @@ import type { ToolContext } from '../services/mcp/define-tool.js';
 
 const router = Router();
 
+// Requests on an mcp.* hostname (mcp.marketersindemand.com, later mcp.newnorth.com)
+// may only reach the MCP paths — the rest of the app API isn't served there.
+router.use((req, res, next) => {
+  if (!req.hostname.startsWith('mcp.')) return next();
+  if (req.path === '/mcp' || req.path.startsWith('/.well-known/oauth-protected-resource') || req.path === '/health') {
+    return next();
+  }
+  res.status(404).json({ error: 'Not found' });
+});
+
 // MCP clients (claude.ai's servers, Claude Desktop/Code, MCP Inspector) are not
 // the web app, so the MCP paths get their own permissive CORS and body parser.
 // Applied per path (not router.use): this router is mounted at the app root,

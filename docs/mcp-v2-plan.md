@@ -57,6 +57,16 @@ Ported from `pulse-compass/supabase/functions/mcp/index.ts` (the v1 bundle; sour
 - **v2.2 — ClickUp task creation with per-user OAuth:** each user connects their own ClickUp account (OAuth app, per-user token table); tasks are created *as that person*. No shared token.
 - **Later — acting-for identity** for agents (Ocean): service identities that act on behalf of a named user, recorded in the audit log.
 
+## Backlog (running list, not prioritized)
+
+Ideas and gaps found from real questions. Add to the bottom; move into a release when picked up.
+
+| # | Item | Why / example question | Notes |
+|---|---|---|---|
+| B1 | **Participants in `get_sentiment_pulse` results**, split into MiD attendees (`@marketersindemand.com`) and client attendees | "In the last 30 days, which meetings had negative sentiment and who ran them?" — today the tool returns title/date/contract only, so Claude needs a lookup per meeting | Small. "Ran" = MiD attendees + the contract's account manager. A true host/organizer isn't stored; Fireflies has it (backfill `raw_metadata`) only if "who organized it" matters |
+| B2 | **New tool `get_talk_time`** (person by name or email, date window, optional contract) | "How much has Nathalie Mintjens talked in the meetings she attended?" — no tool does this; pulling full transcripts one by one would be slow and overflow context | Data is there: 1,314 of 1,316 meetings have transcripts with speaker + start/end per sentence. Return per meeting and in total: talk minutes, share of conversation %, turns, longest monologue, other speakers. Speaker names in transcripts are names; participants are emails — match via `users`/people |
+| B3 | **Dates in Compass RAG snippets** (`buildRagPrompt` in `services/rag/chat.ts`) | `compass_ask` and Compass chat answer "the notes don't have dates" | Prompt change; test against the real API first. Improves Compass chat too |
+
 ## Build plan — v2.0
 
 1. **Backend scaffolding:** add `@modelcontextprotocol/sdk` (pin an exact, ≥2-week-old version); `routes/mcp.ts` with discovery + `/mcp`; staff gate; host routing; audit table migration.

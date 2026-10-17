@@ -67,3 +67,27 @@ The paused in-house rank tracker (`docs/spec-search-visibility-tracking.md`, mig
 - "Position" = best across result types (local pack, AI Overview, snippets); "organic position" can be far lower (e.g. 3 vs 33). Tools always show both.
 - **Not available via API or MCP:** AI prompt (LLM) tracking setup and results — `add_keywords` only supports google/youtube/places/bing/yahoo/duckduckgo. Prompts are set up in the Nightwatch app (Settings → AI Tracking); `suggest_ai_prompts` helps choose them. Ask Nightwatch support for an endpoint.
 - Not exposed (deliberately): `delete_url`, group management, `list_urls`/`list_groups` (cross-client). Site creation (`create_url`) is a candidate next step for no-login client setup.
+
+## Roadmap — next items
+
+### Content plan as the SEO/GEO plan (decided 2026-10-17; spec later)
+
+When SEO services are in scope, the **content plan** (Master Marketer) is the SEO/GEO plan — no separate deliverable. It already covers keyword strategy, topic clusters, AEO strategy, entity optimization, FAQ/PAA, site architecture, technical SEO, link building, schema, local SEO and SEO/AEO KPIs. What's missing is the loop between the plan and tracking:
+
+1. **Keyword strategy outputs a structured tracking set**: keywords with tags (pillar, funnel, type), target page and winnability (volume, difficulty vs the client's authority), plus the AI prompts to track. Candidates from four sources: current rankings 8–30 (GSC via Databox, DataForSEO), competitor gaps (DataForSEO), language from meetings/transcripts (Compass), topic expansion (Nightwatch ideas + DataForSEO).
+2. **"Apply to Nightwatch" on approval**: push the tracking set through the preview → confirm flow (keywords and tags automated; prompts manual until Nightwatch exposes them).
+3. **Quarterly updates driven by results**: the content plan's quarterly iteration takes Nightwatch history as input — movers, stuck keywords, what to retire, new GSC queries to promote.
+
+Possible label when SEO is in scope: "Content & SEO/GEO Plan" (cosmetic).
+
+**Before speccing:** run the New North keyword exercise by hand in Ask Compass (topic map → candidates from the four sources → cleanup against what's tracked) to learn what the tracking set needs to contain.
+
+Touches Master Marketer (content plan prompts and output schema), backend (apply step, quarterly inputs) and frontend (apply action on the deliverable).
+
+### Then: paid platforms
+
+Google Ads (MiD MCC), Meta (Business Manager system user), LinkedIn (Campaign Manager) — agency-level connections, per-contract account pick in `contract_integrations`, read-only first.
+
+### Open
+
+- AI prompt (GEO) results via API/MCP: re-check once Nightwatch finishes collecting data for New North's 15 prompts (2026-10-17); otherwise ask Nightwatch support.

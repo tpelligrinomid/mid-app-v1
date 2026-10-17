@@ -154,12 +154,14 @@ export NEW_DB="postgresql://postgres.<new-ref>:<password>@aws-0-<region>.pooler.
 export DUMP=growth-pulse-grid_<date>.backup
 ```
 
-1. **Project:** Pro plan, chosen region, enable PITR. Enable extensions `vector`, `pg_net`, `pg_cron` (Dashboard → Database → Extensions).
-2. **Schema (public only), from the export — not from migration files:**
+1. **Project:** Pro plan, chosen region, enable PITR. Enable extensions `vector`, `pg_net`, `pg_cron` (Dashboard → Database → Extensions). Leave **"Enable automatic RLS" unchecked** at creation (it would switch RLS on for every restored table).
+   - **Disk, at least 4 hours before any data load:** turn the org's **spend cap off** (with it on, the disk is capped at 8 GB and never autoscales), then Project Settings → Infrastructure → Disk → **30 GB**. Any disk change starts a **4-hour cooldown** on further changes. The data is ~8.7 GB; on 8 GB the rehearsal load filled the disk and crashed Postgres.
+2. **Schema (public only), from the export — not from migration files.** First move `vector` into `public`: Lovable has it there, Supabase installs it in `extensions`, and `compass_knowledge.embedding` is typed `public.vector`.
    ```bash
+   psql "$NEW_DB" -c "alter extension vector set schema public;"
    $PGBIN/pg_restore -s -n public --no-owner -d "$NEW_DB" $DUMP 2> schema_restore.log
    ```
-   Review `schema_restore.log`; "already exists" errors for extension-owned objects are fine, anything else is not.
+   Expected errors in `schema_restore.log` (all safe): ~121 × `role "sandbox_exec_<old-ref>" does not exist` (Lovable's sandbox role) and 3 × `permission denied to change default privileges`. Anything else is not. Expected result: 76 tables, 2 materialized views, 9 views, 32 functions, 179 policies in `public`, RLS on for every table.
 3. **Storage policies** (6 policies on `storage.objects`):
    ```bash
    $PGBIN/pg_restore -l $DUMP | grep "POLICY storage objects" > storage_policies.list
@@ -199,29 +201,30 @@ export DUMP=growth-pulse-grid_<date>.backup
 ## 5. Phase 2 — Timed rehearsal (live app untouched)
 
 1. Take a **fresh export** from Lovable Cloud (Cloud → Advanced → Export). **Time the export** — it's part of the cutover window.
-2. **Start a timer.** Restore data:
-   ```bash
-   export PGOPTIONS="-c session_replication_role=replica -c statement_timeout=0"
-   # auth first (users + identities only; sessions/tokens are useless after the move)
-   $PGBIN/pg_restore -a -n auth -t users -t identities --no-owner -d "$NEW_DB" $DUMP
-   # public data, 4 parallel jobs
-   $PGBIN/pg_restore -a -n public --no-owner -j 4 -d "$NEW_DB" $DUMP 2> data_restore.log
-   ```
-   `session_replication_role=replica` skips FK checks and user triggers (audit logs etc.) during the load. Sequence values are restored by `pg_restore` automatically. The upload is ~8.7 GB uncompressed: on a slow home uplink, run the restore from a cloud machine in the same region instead (record which you used).
-3. **Refresh materialized views:** `select public.refresh_contract_views();`
-4. **Storage files** — 263 objects. Script: read object names from `storage.objects` in the export → download each from the old public URL → upload to the new bucket with the service-role key, preserving paths. (Buckets are public, so no old key is needed.)
-5. **Row-count check** — counts per public table from the export vs. the new DB:
-   ```bash
-   # from the export
-   $PGBIN/pg_restore -a -n public -f - $DUMP | awk '/^COPY /{t=$2;n=0;f=1;next} /^\\\.$/{if(f)print t"\t"n;f=0;next} f{n++}' | sort > export_counts.tsv
-   ```
-   ```sql
-   -- in the new DB
-   select format('public.%s', relname), n_live_tup from pg_stat_user_tables where schemaname='public' order by 1;  -- run ANALYZE first, or use exact count(*) for the big ones
-   ```
+2. **Start a timer.** Restore data with `scripts/migration/restore-data.sh <export.backup>` (reads `SPOOLER_CONNECT:` from `migration_from_lovable.env`). It loads auth users + identities, then public data in three parallel streams (`pulse_tasks`, `compass_knowledge`, everything else), then refreshes the materialized views and runs `ANALYZE`.
+   - **Why not `pg_restore -d` with `PGOPTIONS`:** the session pooler drops startup options, so `session_replication_role=replica` never applies and FK checks fail (`identities_user_id_fkey`). A role-level default doesn't work either (the pooler reuses server connections). The script pipes `pg_restore -f -` into `psql` after a `SET session_replication_role = replica`, which works through the pooler.
+   - The export arrives as `<name>.backup.zip`, a stored (uncompressed) zip around the custom-format dump. Extract it first.
+   - The upload is ~8.7 GB: on a slow home uplink, run the restore from a cloud machine in the same region instead (record which you used).
+3. **Storage files** — `scripts/migration/copy-storage.mjs <export.backup>` (env: `OLD_URL`, `NEW_URL`, `NEW_SERVICE_KEY`, `PG_RESTORE`). Reads object names from `storage.objects` in the export, downloads from the old public URLs, uploads with the service-role key (upsert, so re-runs copy the delta), creates missing buckets. Rehearsal: 266 objects in 69 s.
+4. **Row-count check** — `scripts/migration/row-counts.mjs <export.backup>` (env: `NEW_DB`, `PGBIN`): exact `count(*)` per public table plus `auth.users`/`auth.identities`, against the rows in the export.
+5. *(was: refresh views — now part of step 2)*
 6. **Stop the timer.** Record: export time + download + restore + storage + checks.
 7. **Smoke-test** on a Vercel preview + the local backend using §8 (skip QuickBooks, Databox, Slack and email-sending items, or test them only against yourself).
 8. **Plan the window** = export + restore + storage delta + ~45 min for switching and verification.
+
+### Rehearsal log — 2026-10-16/17 (export `growth-pulse-grid_261017`, created 02:34 UTC)
+
+| Step | Result |
+|---|---|
+| Schema restore | 27 s; only expected errors after moving `vector` to `public` |
+| Edge functions | All 12 deployed (`--use-api`, CLI 2.121); `verify_jwt` matches the old project; MCP discovery advertises the new issuer; cron endpoints return 401 without `x-cron-secret` |
+| Auth users + identities | 1 s |
+| 74 smaller public tables | 81 s |
+| `pulse_tasks`, `compass_knowledge` | **Failed** at ~108 s: 8 GB disk full (spend cap on), Postgres crashed and recovered. Retry after the disk cooldown |
+| Storage | 266/266 files, 69 s |
+| Smoke test (local backend + local frontend on the new project) | Google login works (after adding the new callback URI to the Google OAuth client); dashboard MRR and active contracts **match production**; points/delivery figures wait on `pulse_tasks` |
+
+Found and fixed during the rehearsal: `vector` schema, pooler ignoring `PGOPTIONS`, disk/spend cap, Google redirect URI. Frontend and backend anon keys must be the **legacy `anon` JWT** (`shared-content-asset` has `verify_jwt = true`, which rejects `sb_publishable_…` keys).
 
 ---
 

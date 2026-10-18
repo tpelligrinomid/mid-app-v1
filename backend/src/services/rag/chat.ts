@@ -19,6 +19,7 @@ import { nightwatchConfigured } from '../nightwatch/client.js';
 import { NIGHTWATCH_MANAGE_TOOLS, NightwatchManager, isNightwatchManageTool, nightwatchManageGuidance } from '../nightwatch/manage.js';
 import { getContractIntegration } from '../integrations.js';
 import { CONTENT_TOOLS, ContentGenerator, contentGuidance, isContentTool } from '../content-generation/chat-tools.js';
+import { DELIVERABLE_TOOLS, DeliverableEditor, isDeliverableTool, openDeliverablePrompt } from '../deliverables/chat-tools.js';
 import type { SimilarityResult, SourceType } from '../../types/rag.js';
 
 // Claude API config
@@ -79,6 +80,8 @@ export interface ChatParams {
   source_types?: SourceType[];
   /** Who is asking. Tools that change things (Nightwatch, content generation) are only offered to staff. */
   user?: { user_id: string; role: string };
+  /** The deliverable open in the app, if any: loaded in full so the chat can review and edit it. */
+  deliverable_id?: string;
 }
 
 const STAFF_ROLES = new Set(['owner', 'admin', 'team_member']);
@@ -687,7 +690,7 @@ export async function streamChatResponse(
   params: ChatParams,
   onChunk: (chunk: SSEChunk) => void
 ): Promise<void> {
-  const { message, contract_id, conversation_history = [], source_types, user } = params;
+  const { message, contract_id, conversation_history = [], source_types, user, deliverable_id } = params;
   const staffUserId = user && STAFF_ROLES.has(user.role) ? user.user_id : null;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -804,6 +807,15 @@ export async function streamChatResponse(
   if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}`;
   if (nightwatchUrlId && staffUserId) systemPrompt += `\n\n${nightwatchManageGuidance()}`;
   if (staffUserId) systemPrompt += `\n\n${contentGuidance()}`;
+  const deliverables = staffUserId ? new DeliverableEditor(contract_id, staffUserId) : null;
+  if (deliverables && deliverable_id) {
+    try {
+      const open = await deliverables.get(deliverable_id);
+      if (open) systemPrompt += `\n\n${openDeliverablePrompt(open, true)}`;
+    } catch (err) {
+      console.warn('[RAG Chat] Could not load the open deliverable:', err instanceof Error ? err.message : err);
+    }
+  }
   const seo = seoToolsAvailable() ? new SeoToolRunner() : null;
   if (seo) systemPrompt += `\n\n${seoGuidance(primaryDomain)}`;
   else if (primaryDomain) systemPrompt += `\n\nThe client's website is ${primaryDomain}.`;
@@ -822,6 +834,7 @@ export async function streamChatResponse(
       nightwatch: nightwatchUrlId ? new NightwatchToolRunner(nightwatchUrlId) : null,
       nightwatchManager: nightwatchUrlId && staffUserId ? new NightwatchManager(nightwatchUrlId) : null,
       content: staffUserId ? new ContentGenerator(contract_id, staffUserId) : null,
+      deliverables,
     },
     onChunk
   );
@@ -869,6 +882,7 @@ export interface AnswerParams {
   nightwatch?: NightwatchToolRunner | null;
   nightwatchManager?: NightwatchManager | null;
   content?: ContentGenerator | null;
+  deliverables?: DeliverableEditor | null;
 }
 
 /**
@@ -891,6 +905,7 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       ...(params.nightwatch ? NIGHTWATCH_TOOLS : []),
       ...(params.nightwatchManager ? NIGHTWATCH_MANAGE_TOOLS : []),
       ...(params.content ? CONTENT_TOOLS : []),
+      ...(params.deliverables ? DELIVERABLE_TOOLS : []),
     ];
 
     let message: Anthropic.Message;
@@ -937,6 +952,10 @@ export async function runAnswer(params: AnswerParams, onChunk: (chunk: SSEChunk)
       toolUses.map(async (toolUse): Promise<Anthropic.ToolResultBlockParam> => {
         const input = (toolUse.input ?? {}) as Record<string, unknown>;
         try {
+          if (params.deliverables && isDeliverableTool(toolUse.name)) {
+            onChunk({ type: 'status', message: params.deliverables.describe(toolUse.name, input) });
+            return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.deliverables.run(toolUse.name, input) };
+          }
           if (params.content && isContentTool(toolUse.name)) {
             onChunk({ type: 'status', message: params.content.describe(toolUse.name, input) });
             return { type: 'tool_result', tool_use_id: toolUse.id, content: await params.content.run(toolUse.name, input) };

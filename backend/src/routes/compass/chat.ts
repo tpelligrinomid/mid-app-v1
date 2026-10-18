@@ -44,7 +44,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 
   // ── Validate input ──────────────────────────────────────────────────
-  const { message, contract_id, conversation_history, source_types, deliverable_id } = req.body;
+  const { message, contract_id, conversation_history, source_types, deliverable_id, deliverable_editing } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     res.status(400).json({ error: 'message is required and must be a non-empty string' });
@@ -131,7 +131,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         conversation_history: history,
         source_types: validatedSourceTypes,
         user: { user_id: req.user.user_id, role: req.user.role },
-        ...(typeof deliverable_id === 'string' && UUID_RE.test(deliverable_id) && { deliverable_id }),
+        ...(typeof deliverable_id === 'string' && UUID_RE.test(deliverable_id) && { deliverable_id, deliverable_editing: deliverable_editing === true }),
       },
       (chunk) => {
         if (!clientDisconnected) {

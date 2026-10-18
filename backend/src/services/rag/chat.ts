@@ -82,6 +82,8 @@ export interface ChatParams {
   user?: { user_id: string; role: string };
   /** The deliverable open in the app, if any: loaded in full so the chat can review and edit it. */
   deliverable_id?: string;
+  /** The user has that deliverable open in the app's editor: don't change it from chat meanwhile. */
+  deliverable_editing?: boolean;
 }
 
 const STAFF_ROLES = new Set(['owner', 'admin', 'team_member']);
@@ -690,7 +692,7 @@ export async function streamChatResponse(
   params: ChatParams,
   onChunk: (chunk: SSEChunk) => void
 ): Promise<void> {
-  const { message, contract_id, conversation_history = [], source_types, user, deliverable_id } = params;
+  const { message, contract_id, conversation_history = [], source_types, user, deliverable_id, deliverable_editing } = params;
   const staffUserId = user && STAFF_ROLES.has(user.role) ? user.user_id : null;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -807,11 +809,13 @@ export async function streamChatResponse(
   if (nightwatchUrlId) systemPrompt += `\n\n${nightwatchGuidance()}`;
   if (nightwatchUrlId && staffUserId) systemPrompt += `\n\n${nightwatchManageGuidance()}`;
   if (staffUserId) systemPrompt += `\n\n${contentGuidance()}`;
-  const deliverables = staffUserId ? new DeliverableEditor(contract_id, staffUserId) : null;
+  const deliverables = staffUserId
+    ? new DeliverableEditor(contract_id, staffUserId, deliverable_editing && deliverable_id ? [deliverable_id] : [])
+    : null;
   if (deliverables && deliverable_id) {
     try {
       const open = await deliverables.get(deliverable_id);
-      if (open) systemPrompt += `\n\n${openDeliverablePrompt(open, true)}`;
+      if (open) systemPrompt += `\n\n${openDeliverablePrompt(open, true, !!deliverable_editing)}`;
     } catch (err) {
       console.warn('[RAG Chat] Could not load the open deliverable:', err instanceof Error ? err.message : err);
     }

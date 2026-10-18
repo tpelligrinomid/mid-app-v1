@@ -893,6 +893,8 @@ router.post(
         deliverable_id: deliverableId,
         version_number: nextVersion,
         drive_url: deliverable.drive_url || null,
+        content_raw: deliverable.content_raw ?? null,
+        content_structured: deliverable.content_structured ?? null,
         change_summary: change_summary || null,
         created_by: req.user.user_id,
       };

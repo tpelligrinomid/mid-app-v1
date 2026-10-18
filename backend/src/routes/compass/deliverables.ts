@@ -284,6 +284,18 @@ router.put(
       return;
     }
 
+    // Delivered deliverables are locked: change the status back (e.g. to working)
+    // to edit in place, or create a revised deliverable to pivot.
+    const changesContent = updates.content_raw !== undefined || updates.content_structured !== undefined;
+    const unlocking = updates.status !== undefined && updates.status !== 'delivered';
+    if (existing.status === 'delivered' && changesContent && !unlocking) {
+      res.status(409).json({
+        error: 'This deliverable is Delivered, so its content is locked. Change its status to Working to edit it, or create a revised version.',
+        error_code: 'DELIVERABLE_LOCKED',
+      });
+      return;
+    }
+
     try {
       const updateFields: Record<string, unknown> = {};
       if (updates.title !== undefined) updateFields.title = updates.title;

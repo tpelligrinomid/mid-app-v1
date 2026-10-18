@@ -31,6 +31,8 @@ export interface GenerateOptions {
   primaryMeetingIds?: string[];
   researchInputs?: ResearchInputs;
   previousRoadmapId?: string;
+  /** Content plan revision: the plan to build on (default: the most recent other content plan). */
+  previousContentPlanId?: string;
   pointsBudget?: number;
   /** Program roadmap: the generation form's envelope, normalised in the branch below. */
   roadmapRequest?: unknown;
@@ -152,6 +154,48 @@ async function clientFromContract(contractId: string): Promise<{ company_name: s
   }
 }
 
+/** Markdown split into its "## " sections (the shape Master Marketer reads a previous plan in). */
+function markdownSections(markdown: string): Array<{ section_title: string; markdown: string }> {
+  const level = /^## /m.test(markdown) ? '## ' : '# ';
+  const sections: Array<{ section_title: string; markdown: string }> = [];
+  let current: { section_title: string; lines: string[] } | null = null;
+  for (const line of markdown.split('\n')) {
+    if (line.startsWith(level)) {
+      if (current) sections.push({ section_title: current.section_title, markdown: current.lines.join('\n').trim() });
+      current = { section_title: line.slice(level.length).trim(), lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    } else if (line.trim()) {
+      current = { section_title: 'Introduction', lines: [line] };
+    }
+  }
+  if (current) sections.push({ section_title: current.section_title, markdown: current.lines.join('\n').trim() });
+  return sections;
+}
+
+/**
+ * The plan a revision builds on. Its structured output when the text hasn't
+ * changed since generation (version 1.0); once edited (Ask Compass bumps the
+ * version), the edited text, split into sections.
+ */
+async function loadPreviousContentPlan(deliverableId: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const rows = await select<Array<{ content_raw: string | null; content_structured: Record<string, unknown> | null; version: string | null }>>(
+      'compass_deliverables',
+      { select: 'content_raw, content_structured, version', filters: { deliverable_id: deliverableId }, limit: 1 }
+    );
+    const prev = rows?.[0];
+    if (!prev) return undefined;
+    const edited = !!prev.version && prev.version !== '1.0';
+    if (prev.content_structured && !edited) return prev.content_structured;
+    if (prev.content_raw) return { sections: markdownSections(prev.content_raw) };
+    return prev.content_structured ?? undefined;
+  } catch (err) {
+    console.warn(`[Deliverable Generation] Failed to load previous content plan ${deliverableId} (non-blocking):`, err);
+    return undefined;
+  }
+}
+
 async function resolvePriorDeliverable(
   contractId: string,
   type: string,
@@ -250,6 +294,7 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
     primaryMeetingIds,
     researchInputs,
     previousRoadmapId,
+    previousContentPlanId,
     pointsBudget: pointsBudgetOverride,
     roadmapRequest,
     seedTopics,
@@ -319,7 +364,9 @@ export async function generateDeliverableInBackground(opts: GenerateOptions): Pr
         resolvePriorDeliverable(contractId, 'roadmap', deliverableId),
         resolvePriorDeliverable(contractId, 'seo_audit', deliverableId),
         resolvePriorResearch(contractId, deliverableId),
-        resolvePriorDeliverable(contractId, 'content_plan', deliverableId),
+        previousContentPlanId
+          ? loadPreviousContentPlan(previousContentPlanId)
+          : resolvePriorDeliverable(contractId, 'content_plan', deliverableId),
         assembleContext(contractId, title, primaryMeetingIds),
       ]);
 

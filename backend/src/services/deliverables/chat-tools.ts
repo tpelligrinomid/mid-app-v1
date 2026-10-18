@@ -13,12 +13,19 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { insert, select, update } from '../../utils/edge-functions.js';
 import { ingestContent } from '../rag/ingestion.js';
+import { generateDeliverableInBackground } from '../deliverable-generation/processor.js';
 
 const APP_URL = (process.env.APP_URL ?? 'https://app.marketersindemand.com').replace(/\/+$/, '');
 
 // Enough for the largest plans (the biggest research deliverables are ~415k).
 export const MAX_DELIVERABLE_CHARS = 450_000;
 const MAX_EDITS = 50;
+
+// Types that can be regenerated as a revision of an earlier one (Master Marketer
+// builds on the previous plan instead of starting over).
+const REVISABLE_TYPES = new Set(['content_plan']);
+const LOCKED_MESSAGE =
+  'This deliverable is Delivered, so it is locked. To change it in place, a strategist sets its status back to Working; to pivot, create a revised version with revise_deliverable (the delivered one is kept as is).';
 
 interface DeliverableRow {
   deliverable_id: string;
@@ -93,6 +100,28 @@ export const DELIVERABLE_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'revise_deliverable',
+    description:
+      "Create a NEW deliverable that revises an existing one (content plans for now), keeping the original untouched. Use it to pivot a Delivered plan, or whenever the changes are too big to edit in place. Master Marketer generates the new plan from the original plus a revision brief, along with the usual roadmap, SEO audit, research and meeting inputs. Write the brief from the conversation: what changed and why (with the evidence: what was delivered vs planned, results), the new constraints (budget, cadence, capacity), what to keep, what to drop, and new priorities. Two-step: call without confirm to preview the title and brief, show it, and confirm=true only after the user agrees.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        source_deliverable_id: { type: 'string', description: 'The deliverable being revised.' },
+        brief: { type: 'string', description: 'Revision brief for the generator (markdown, specific and evidence-based).' },
+        title: { type: 'string', description: 'Title for the new deliverable. Default: the original title with "(Revised <Month YYYY>)".' },
+        meeting_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: 10,
+          description: 'Meetings to use as primary input (e.g. the planning call), ids from find_content_references.',
+        },
+        confirm: confirmProp,
+      },
+      required: ['source_deliverable_id', 'brief'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'restore_deliverable_version',
     description:
       'Restore a deliverable to an earlier saved version (from read_deliverable\'s version list). Saves the restore as a new version, so it can be undone too. Two-step: preview first, confirm=true after the user agrees.',
@@ -155,15 +184,21 @@ export function openDeliverablePrompt(d: DeliverableRow, canEdit: boolean): stri
     .join(', ');
   const editNote = !canEdit
     ? ''
-    : d.content_raw
+    : d.status === 'delivered'
+      ? `\n\nThis deliverable is **Delivered**, so it is locked: don't propose in-place edits. If the user wants changes, offer a revised version with revise_deliverable (a new deliverable built from this one plus a revision brief; this one stays as delivered)${REVISABLE_TYPES.has(d.deliverable_type ?? '') ? '' : ' (only content plans can be revised this way so far; for this type, suggest the changes)'}, or say a strategist can set it back to Working to edit it in place.`
+      : d.content_raw
       ? `\n\nTo change it, use edit_deliverable (deliverable_id ${d.deliverable_id}) with passages copied exactly from the text below. Keep edits surgical and keep the document's structure, headings and formatting. Preview first; confirm only after the user agrees. Say which version the change creates.`
       : '\n\nThis deliverable is stored as structured data, so it can only be edited in the app\'s editor; you can still review it and suggest changes.';
+  const reviseNote =
+    canEdit && d.status !== 'delivered' && REVISABLE_TYPES.has(d.deliverable_type ?? '')
+      ? ' If the changes amount to a pivot rather than adjustments, offer revise_deliverable instead of editing in place, so the current plan is preserved.'
+      : '';
 
   return `## Open deliverable
 
 The user has this deliverable open in the app and is asking about it: "${d.title}" (${meta}), deliverable_id ${d.deliverable_id}. Its full text is below. Answer questions about it from this text, and say when something isn't in it.
 
-To review progress against it, compare what it commits to (topics and clusters, cadence, keywords, channels, KPIs, dates, owners) with what has actually happened since ${d.created_at?.slice(0, 10) ?? 'it was created'}: content published (find_content_references with kinds ["asset"]), rankings for its keywords (SEO tools), performance (marketing data tools) and recent meetings and notes. Be concrete: list planned vs done with dates, call out gaps and what's ahead of plan, then suggest adjustments.${editNote}
+To review progress against it, compare what it commits to (topics and clusters, cadence, keywords, channels, KPIs, dates, owners) with what has actually happened since ${d.created_at?.slice(0, 10) ?? 'it was created'}: content published (find_content_references with kinds ["asset"]), rankings for its keywords (SEO tools), performance (marketing data tools) and recent meetings and notes. Be concrete: list planned vs done with dates, call out gaps and what's ahead of plan, then suggest adjustments.${editNote}${reviseNote}
 
 <deliverable title="${d.title.replace(/"/g, "'")}">
 ${truncated ? `${text.slice(0, MAX_DELIVERABLE_CHARS)}\n[... truncated: the deliverable continues beyond this point]` : text}
@@ -179,6 +214,7 @@ export class DeliverableEditor {
   describe(name: string, input: Record<string, unknown>): string {
     if (name === 'read_deliverable') return 'Reading the deliverable';
     if (name === 'edit_deliverable') return input.confirm === true ? 'Saving the changes to the deliverable' : 'Preparing the changes';
+    if (name === 'revise_deliverable') return input.confirm === true ? 'Creating the revised deliverable' : 'Preparing the revision';
     return input.confirm === true ? `Restoring version ${String(input.version_number ?? '')}` : 'Preparing the restore';
   }
 
@@ -186,6 +222,7 @@ export class DeliverableEditor {
     if (name === 'read_deliverable') return JSON.stringify(await this.read(input));
     if (name === 'edit_deliverable') return JSON.stringify(await this.edit(input));
     if (name === 'restore_deliverable_version') return JSON.stringify(await this.restore(input));
+    if (name === 'revise_deliverable') return JSON.stringify(await this.revise(input));
     throw new Error(`Unknown deliverable tool: ${name}`);
   }
 
@@ -226,7 +263,9 @@ export class DeliverableEditor {
       version: d.version || '1.0',
       created: d.created_at?.slice(0, 10),
       updated: d.updated_at?.slice(0, 10),
-      editable_here: !!d.content_raw,
+      locked: d.status === 'delivered',
+      editable_here: !!d.content_raw && d.status !== 'delivered',
+      revisable: REVISABLE_TYPES.has(d.deliverable_type ?? ''),
       link: this.link(d),
       versions: versions.map((v) => ({
         version: v.version_number,
@@ -241,6 +280,7 @@ export class DeliverableEditor {
   private async edit(input: Record<string, unknown>) {
     const d = await this.get(String(input.deliverable_id ?? ''));
     if (!d) return { error: 'Deliverable not found for this client.' };
+    if (d.status === 'delivered') return { error: LOCKED_MESSAGE };
     if (!d.content_raw) {
       return { error: 'This deliverable is stored as structured data; it can only be edited in the app editor. Suggest the changes instead.' };
     }
@@ -307,6 +347,7 @@ export class DeliverableEditor {
   private async restore(input: Record<string, unknown>) {
     const d = await this.get(String(input.deliverable_id ?? ''));
     if (!d) return { error: 'Deliverable not found for this client.' };
+    if (d.status === 'delivered') return { error: LOCKED_MESSAGE };
     const wanted = String(input.version_number ?? '').trim();
     const version = (await this.versions(d.deliverable_id)).find((v) => v.version_number === wanted && v.content_raw);
     if (!version?.content_raw) return { error: `No saved text for version ${wanted}. Check read_deliverable's version list.` };
@@ -327,6 +368,103 @@ export class DeliverableEditor {
 
     await this.save(d, version.content_raw, nextVersion, summary);
     return { success: true, deliverable: d.title, version: nextVersion, change_summary: summary, link: this.link(d) };
+  }
+
+  private async revise(input: Record<string, unknown>) {
+    const source = await this.get(String(input.source_deliverable_id ?? ''));
+    if (!source) return { error: 'Deliverable not found for this client.' };
+    const type = source.deliverable_type ?? '';
+    if (!REVISABLE_TYPES.has(type)) {
+      return { error: `Only content plans can be revised this way so far (this is a ${type || 'deliverable'}). Suggest the changes instead.` };
+    }
+    const brief = String(input.brief ?? '').trim();
+    if (brief.length < 40) return { error: 'Write a fuller revision brief: what changed, constraints, what to keep, drop and prioritize.' };
+
+    // Master Marketer needs a roadmap for content plans (same check as the Generate button).
+    const roadmaps = await select<Array<{ deliverable_id: string; content_structured: unknown }>>('compass_deliverables', {
+      select: 'deliverable_id, content_structured',
+      filters: { contract_id: this.contractId, deliverable_type: 'roadmap' },
+      order: [{ column: 'created_at', ascending: false }],
+      limit: 5,
+    }).catch(() => [] as Array<{ deliverable_id: string; content_structured: unknown }>);
+    if (!roadmaps?.some((r) => r.content_structured)) return { error: 'This client has no generated roadmap, which content plan generation requires. Generate the roadmap first.' };
+
+    const month = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    const title =
+      String(input.title ?? '').trim() || `${source.title.replace(/\s*\(Revised [^)]*\)\s*$/, '')} (Revised ${month})`;
+    const meetingIds = Array.isArray(input.meeting_ids) ? (input.meeting_ids as unknown[]).map(String).slice(0, 10) : [];
+    const meetings = meetingIds.length
+      ? await select<Array<{ meeting_id: string; title: string | null; meeting_date: string | null }>>('compass_meetings', {
+          select: 'meeting_id, title, meeting_date',
+          filters: { contract_id: this.contractId, meeting_id: { in: meetingIds } },
+        })
+      : [];
+    if (meetings.length !== meetingIds.length) return { error: 'Some meeting ids were not found for this client. Use ids from find_content_references.' };
+
+    const plan = {
+      new_deliverable: title,
+      type,
+      revises: `${source.title} (version ${source.version || '1.0'}, ${source.status ?? 'no status'}), which stays unchanged`,
+      also_uses: 'the client roadmap, SEO audit and research, as the Generate button does',
+      ...(meetings.length > 0 && { primary_meetings: meetings.map((m) => `${m.title ?? 'Meeting'} (${m.meeting_date?.slice(0, 10) ?? '?'})`) }),
+      brief,
+    };
+    if (input.confirm !== true) {
+      return { preview: true, would_create: plan, next: 'Show the title and brief to the user. Call again with confirm=true only after they agree.' };
+    }
+
+    const now = new Date().toISOString();
+    const created = await insert<Array<{ deliverable_id: string }>>(
+      'compass_deliverables',
+      {
+        contract_id: this.contractId,
+        title,
+        deliverable_type: type,
+        status: 'working',
+        version: '1.0',
+        created_by: this.userId,
+        metadata: {
+          revises: { deliverable_id: source.deliverable_id, title: source.title, version: source.version || '1.0' },
+          generation_request: { instructions: brief, primary_meeting_ids: meetingIds, source: 'ask_compass_revision', saved_at: now },
+        },
+      },
+      { select: 'deliverable_id' }
+    );
+    const newId = created?.[0]?.deliverable_id;
+    if (!newId) throw new Error('Could not create the revised deliverable');
+
+    // Link the original forward (kept as is otherwise).
+    const srcRows = await select<Array<{ metadata: Record<string, unknown> | null }>>('compass_deliverables', {
+      select: 'metadata',
+      filters: { deliverable_id: source.deliverable_id },
+      limit: 1,
+    });
+    await update(
+      'compass_deliverables',
+      { metadata: { ...(srcRows?.[0]?.metadata ?? {}), revised_by: { deliverable_id: newId, title, at: now } } },
+      { deliverable_id: source.deliverable_id }
+    );
+
+    console.log(`[Deliverables] Ask Compass revision: ${source.deliverable_id} -> ${newId} "${title}" by ${this.userId}`);
+    generateDeliverableInBackground({
+      deliverableId: newId,
+      contractId: this.contractId,
+      title,
+      deliverableType: type,
+      instructions: brief,
+      primaryMeetingIds: meetingIds.length > 0 ? meetingIds : undefined,
+      previousContentPlanId: source.deliverable_id,
+    }).catch(() => {
+      // Failures are recorded on the deliverable's generation state.
+    });
+
+    return {
+      success: true,
+      deliverable_id: newId,
+      ...plan,
+      link: `${APP_URL}/compass/${this.contractId}/deliverables/${newId}`,
+      note: 'Generating now in Master Marketer. It takes a while; the page shows progress, and the original plan is unchanged.',
+    };
   }
 
   /** Snapshot the current text (once per version), write the new text, record the new version, re-embed. */

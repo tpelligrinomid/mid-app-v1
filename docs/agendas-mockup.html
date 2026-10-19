@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenda mockup — New North weekly check-in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1b1530; --muted: #6b6680; --line: #ebe8f2; --bg: #f6f4fa; --card: #fff;
+    --brand: #6d28d9; --brand-soft: #efe8ff; --pink: #db2777;
+    --ok: #15803d; --ok-soft: #e7f6ec; --warn: #b45309; --warn-soft: #fdf2e2; --bad: #b91c1c; --bad-soft: #fde8e8;
+    --blue: #1d4ed8; --blue-soft: #e6eeff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Poppins, system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  header.bar { position: sticky; top: 0; z-index: 5; display: flex; gap: 12px; align-items: center; padding: 12px 24px;
+    background: rgba(246,244,250,.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header.bar h1 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; min-width: 200px; }
+  .pill { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+  .pill.draft { background: var(--warn-soft); color: var(--warn); }
+  .btn { font: inherit; font-size: 13px; font-weight: 500; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .note { max-width: 1040px; margin: 16px auto 0; padding: 0 24px; color: var(--muted); font-size: 13px; }
+  main { max-width: 1040px; margin: 0 auto; padding: 16px 24px 64px; display: grid; gap: 28px; }
+
+  .slide { position: relative; aspect-ratio: 16/9; background: var(--card); border-radius: 18px; box-shadow: 0 10px 30px rgba(27,21,48,.08);
+    padding: 4.2% 5%; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); }
+  .slide .kicker { font-size: clamp(9px, 1.1vw, 12px); letter-spacing: .12em; text-transform: uppercase; color: var(--brand); font-weight: 600; }
+  .slide h2 { font-size: clamp(16px, 2.6vw, 30px); margin: .35em 0 .7em; line-height: 1.15; }
+  .slide .foot { position: absolute; left: 5%; right: 5%; bottom: 3.2%; display: flex; justify-content: space-between; font-size: clamp(8px, .9vw, 11px); color: var(--muted); }
+  .grow { flex: 1; min-height: 0; }
+
+  /* cover */
+  .cover { background: radial-gradient(120% 140% at 100% 0%, #8b5cf6 0%, #6d28d9 38%, #2e1065 100%); color: #fff; border: 0; justify-content: flex-end; }
+  .cover .kicker { color: #e9d5ff; }
+  .cover h2 { font-size: clamp(22px, 4.4vw, 52px); margin: .2em 0 .3em; }
+  .cover .meta { font-size: clamp(10px, 1.4vw, 16px); opacity: .85; }
+  .cover .logo { position: absolute; top: 7%; left: 5%; font-weight: 700; font-size: clamp(14px, 2vw, 22px); letter-spacing: -.02em; }
+  .cover .logo span { color: #f9a8d4; }
+  .cover .foot { color: #ddd6fe; }
+
+  /* lists */
+  .rows { display: grid; gap: clamp(4px, .8vw, 10px); }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: clamp(6px, 1vw, 12px) clamp(8px, 1.3vw, 16px);
+    border: 1px solid var(--line); border-radius: 12px; font-size: clamp(10px, 1.3vw, 15px); }
+  .row .sub { display: block; color: var(--muted); font-size: .82em; }
+  .chip { font-size: .78em; font-weight: 600; padding: .25em .7em; border-radius: 999px; white-space: nowrap; }
+  .chip.done { background: var(--ok-soft); color: var(--ok); }
+  .chip.work { background: var(--blue-soft); color: var(--blue); }
+  .chip.wait { background: var(--warn-soft); color: var(--warn); }
+  .chip.late { background: var(--bad-soft); color: var(--bad); }
+  .who { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .85em; white-space: nowrap; }
+  .av { width: 1.7em; height: 1.7em; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: .75em; font-weight: 600; }
+
+  /* asks */
+  .asks { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(8px, 1.4vw, 18px); }
+  .ask { border-radius: 14px; padding: clamp(10px, 1.6vw, 20px); background: var(--warn-soft); border: 1px solid #f7dfb8; display: flex; flex-direction: column; gap: .5em; }
+  .ask b { font-size: clamp(11px, 1.45vw, 17px); line-height: 1.25; }
+  .ask p { margin: 0; font-size: clamp(9px, 1.1vw, 13px); color: #7c5a1f; }
+  .ask .due { margin-top: auto; font-size: clamp(9px, 1vw, 12px); font-weight: 600; color: var(--warn); }
+
+  /* metrics */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: clamp(8px, 1.4vw, 18px); }
+  .metric { border: 1px solid var(--line); border-radius: 14px; padding: clamp(10px, 1.6vw, 20px); }
+  .metric .label { font-size: clamp(9px, 1vw, 12px); color: var(--muted); }
+  .metric .val { font-size: clamp(18px, 3vw, 36px); font-weight: 700; margin: .15em 0; }
+  .metric .chg { font-size: clamp(9px, 1.05vw, 13px); font-weight: 600; }
+  .up { color: var(--ok); } .down { color: var(--bad); }
+  .callout { margin-top: clamp(8px, 1.4vw, 18px); background: var(--brand-soft); border-radius: 12px; padding: clamp(8px, 1.3vw, 16px); font-size: clamp(10px, 1.25vw, 14px); }
+
+  /* timeline */
+  .timeline { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding-top: clamp(18px, 2.4vw, 30px); }
+  .timeline::before { content: ""; position: absolute; top: clamp(6px, .9vw, 11px); left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--brand), var(--pink)); border-radius: 3px; }
+  .tl { position: relative; font-size: clamp(10px, 1.2vw, 14px); }
+  .tl::before { content: ""; position: absolute; top: calc(-1 * clamp(18px, 2.4vw, 30px) + clamp(1px, .3vw, 4px)); left: 0; width: clamp(10px, 1.3vw, 16px); height: clamp(10px, 1.3vw, 16px); border-radius: 50%; background: #fff; border: 3px solid var(--brand); }
+  .tl .d { font-weight: 600; color: var(--brand); font-size: .85em; }
+  .tl b { display: block; margin: .2em 0; }
+  .tl span { color: var(--muted); font-size: .85em; }
+
+  .two { display: grid; grid-template-columns: 1.2fr 1fr; gap: clamp(10px, 2vw, 28px); }
+  ul.clean { margin: 0; padding-left: 1.1em; display: grid; gap: .55em; font-size: clamp(10px, 1.3vw, 15px); }
+  ul.clean li::marker { color: var(--brand); }
+
+  /* present mode */
+  body.present header.bar, body.present .note { display: none; }
+  body.present main { max-width: none; padding: 0; gap: 0; }
+  body.present .slide { display: none; width: 100vw; height: 100vh; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
+  body.present .slide.active { display: flex; }
+  .hint { position: fixed; bottom: 12px; right: 16px; font-size: 12px; color: var(--muted); display: none; }
+  body.present .hint { display: block; }
+
+  @media (max-width: 640px) {
+    .asks, .metrics { grid-template-columns: 1fr 1fr; }
+    .two { grid-template-columns: 1fr; }
+    .timeline { grid-template-columns: 1fr 1fr; row-gap: 28px; }
+    .slide { aspect-ratio: auto; min-height: 56vw; padding-bottom: 9%; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>New North — Weekly check-in · Thu Oct 23</h1>
+  <span class="pill draft">Draft · v1.2</span>
+  <button class="btn" onclick="alert('Mockup: opens Ask Compass with this agenda attached')">Ask Compass</button>
+  <button class="btn primary" onclick="present()">Present ▸</button>
+</header>
+<p class="note">Static mockup with sample data, for discussing the presentation direction. In the app, each slide is generated from ClickUp, Compass, Databox and Nightwatch, and edited by chatting with Ask Compass.</p>
+
+<main id="deck">
+  <!-- 1. Cover -->
+  <section class="slide cover">
+    <div class="logo">MiD<span>.</span></div>
+    <div class="kicker">Weekly check-in</div>
+    <h2>New North</h2>
+    <div class="meta">Thursday, October 23, 2026 · Justin Brown, Nina Belina, Tristan, Colin Costigan</div>
+    <div class="foot"><span>Since we last met: Oct 15</span><span>1 / 7</span></div>
+  </section>
+
+  <!-- 2. Since we last met -->
+  <section class="slide">
+    <div class="kicker">Since we last met · Oct 15 – Oct 22</div>
+    <h2>4 things delivered</h2>
+    <div class="rows grow">
+      <div class="row"><span>Blog: Marketing Agency vs. In-House — The Real Cost<span class="sub">Published Oct 17 · newnorth.com/insights</span></span><span class="who"><span class="av" style="background:#7c3aed">CC</span>Colin</span><span class="chip done">Delivered</span></div>
+      <div class="row"><span>Tech Qualified — Praveen Das episode edit<span class="sub">Ready for distribution</span></span><span class="who"><span class="av" style="background:#db2777">NB</span>Nina</span><span class="chip done">Delivered</span></div>
+      <div class="row"><span>Nightwatch rank tracking set up<span class="sub">47 keywords, AI-search prompts tracked</span></span><span class="who"><span class="av" style="background:#0f766e">TP</span>Tristan</span><span class="chip done">Delivered</span></div>
+      <div class="row"><span>Case study interview guide (DOC Live)<span class="sub">Before/after format, Riverside setup</span></span><span class="who"><span class="av" style="background:#7c3aed">CC</span>Colin</span><span class="chip done">Delivered</span></div>
+    </div>
+    <div class="foot"><span>Source: ClickUp · tasks completed since the last recorded meeting</span><span>2 / 7</span></div>
+  </section>
+
+  <!-- 3. Needs your input -->
+  <section class="slide">
+    <div class="kicker">Needs your input</div>
+    <h2>3 things we need from you</h2>
+    <div class="asks grow">
+      <div class="ask"><b>Approve the revised Q4 content plan</b><p>Built around Tech Qualified at 100 points/month. Review the cadence and the case-study rotation.</p><span class="due">Needed by Oct 28</span></div>
+      <div class="ask"><b>Confirm DOC Live interview date</b><p>We'll pull their numbers ahead of time; 45 minutes on Riverside.</p><span class="due">Needed by Oct 24</span></div>
+      <div class="ask"><b>GA4 admin access</b><p>Key events haven't recorded since the site migration (~Aug 22). We need access to fix tracking.</p><span class="due">Blocking reporting</span></div>
+    </div>
+    <div class="foot"><span>Source: ClickUp “waiting on client” + deliverables awaiting review</span><span>3 / 7</span></div>
+  </section>
+
+  <!-- 4. In progress -->
+  <section class="slide">
+    <div class="kicker">In progress</div>
+    <h2>What the team is working on</h2>
+    <div class="rows grow">
+      <div class="row"><span>Tech Qualified — Praveen Das distribution<span class="sub">Clips, LinkedIn posts, newsletter segment</span></span><span class="who"><span class="av" style="background:#db2777">NB</span>Due Oct 27</span><span class="chip work">Working</span></div>
+      <div class="row"><span>SEO blog: Jonathan Bland episode recap<span class="sub">Finished draft — publishing this week</span></span><span class="who"><span class="av" style="background:#7c3aed">CC</span>Due Oct 24</span><span class="chip work">Working</span></div>
+      <div class="row"><span>LinkedIn paid boost for episode clips<span class="sub">$3–4K/month budget</span></span><span class="who"><span class="av" style="background:#0f766e">TP</span>Due Oct 30</span><span class="chip work">Working</span></div>
+      <div class="row"><span>March newsletter<span class="sub">Overdue — propose to close and fold into November</span></span><span class="who"><span class="av" style="background:#64748b">JB</span>Was due Mar 18</span><span class="chip late">Overdue</span></div>
+    </div>
+    <div class="foot"><span>Source: ClickUp · status “working” and overdue to-dos</span><span>4 / 7</span></div>
+  </section>
+
+  <!-- 5. Results -->
+  <section class="slide">
+    <div class="kicker">Results · last 30 days</div>
+    <h2>How it's performing</h2>
+    <div class="metrics">
+      <div class="metric"><div class="label">Organic sessions</div><div class="val">192</div><div class="chg down">▼ 28% vs prior 30 days</div></div>
+      <div class="metric"><div class="label">From AI assistants</div><div class="val">13</div><div class="chg down">▼ 46%</div></div>
+      <div class="metric"><div class="label">Top-10 keywords</div><div class="val">4 / 47</div><div class="chg">Tracking since Oct 17</div></div>
+      <div class="metric"><div class="label">Best ranking</div><div class="val">#2</div><div class="chg up">“business to business marketing agency”</div></div>
+    </div>
+    <div class="callout"><b>Read:</b> traffic is down while publishing paused; the new post and two episode blogs this month target keywords where New North doesn't rank yet (“demand generation agency”, 2,900/mo).</div>
+    <div class="foot"><span>Sources: Google Analytics via Databox · Nightwatch</span><span>5 / 7</span></div>
+  </section>
+
+  <!-- 6. Coming up -->
+  <section class="slide">
+    <div class="kicker">Coming up · next 2 weeks</div>
+    <h2>On the calendar</h2>
+    <div class="timeline grow">
+      <div class="tl"><div class="d">Oct 24</div><b>Bland recap blog live</b><span>SEO · Colin</span></div>
+      <div class="tl"><div class="d">Oct 27</div><b>Das episode distribution</b><span>Social + newsletter · Nina</span></div>
+      <div class="tl"><div class="d">Oct 30</div><b>LinkedIn boost launches</b><span>Paid · Tristan</span></div>
+      <div class="tl"><div class="d">Nov 5</div><b>November newsletter</b><span>Email · Justin</span></div>
+    </div>
+    <div class="foot"><span>Source: ClickUp · due in the next 14 days</span><span>6 / 7</span></div>
+  </section>
+
+  <!-- 7. Discussion + next steps -->
+  <section class="slide">
+    <div class="kicker">Let's discuss</div>
+    <h2>Topics and next steps</h2>
+    <div class="two grow">
+      <div>
+        <ul class="clean">
+          <li>Points reset for November: what fits in 100/month?</li>
+          <li>Which visitor-ID tool to trial first: Snitcher, Leadfeeder or Fibler?</li>
+          <li>Case study #2 candidate after DOC Live</li>
+          <li>Retire the overdue ABM tasks formally?</li>
+        </ul>
+      </div>
+      <div class="callout" style="margin:0">
+        <b>Next steps from last call (Oct 15)</b>
+        <ul class="clean" style="margin-top:.6em">
+          <li>✓ Interview guide shared</li>
+          <li>✓ Rank tracking live</li>
+          <li>◻ Client to confirm DOC Live date</li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot"><span>Topics suggested by Compass from the content plan, meetings and results</span><span>7 / 7</span></div>
+  </section>
+</main>
+<div class="hint">← → to move · Esc to exit</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  let i = 0;
+  function show(n) { i = Math.max(0, Math.min(slides.length - 1, n)); slides.forEach((s, k) => s.classList.toggle('active', k === i)); }
+  function present() { document.body.classList.add('present'); show(0); document.documentElement.requestFullscreen?.().catch(() => {}); }
+  function exit() { document.body.classList.remove('present'); if (document.fullscreenElement) document.exitFullscreen(); }
+  document.addEventListener('keydown', (e) => {
+    if (!document.body.classList.contains('present')) return;
+    if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    if (['ArrowLeft', 'PageUp'].includes(e.key)) show(i - 1);
+    if (e.key === 'Escape') exit();
+  });
+  document.addEventListener('click', (e) => { if (document.body.classList.contains('present') && e.target.closest('.slide')) show(i + 1); });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) document.body.classList.remove('present'); });
+</script>
+</body>
+</html>

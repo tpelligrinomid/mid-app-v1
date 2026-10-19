@@ -54,3 +54,6 @@ backend/backups/
 
 # Local migration secrets
 migration_from_lovable.env
+
+# Supabase CLI local cache
+**/supabase/.temp/

@@ -1,0 +1,105 @@
+;;
+;; Domain:     marketersindemand.com.
+;; Exported:   2026-10-17 13:32:16
+;;
+;; This file is intended for use for informational and archival
+;; purposes ONLY and MUST be edited before use on a production
+;; DNS server.  In particular, you must:
+;;   -- update the SOA record with the correct authoritative name server
+;;   -- update the SOA record with the contact e-mail address information
+;;   -- update the NS record(s) with the authoritative name servers for this domain.
+;;
+;; For further information, please consult the BIND documentation
+;; located on the following website:
+;;
+;; http://www.isc.org/
+;;
+;; And RFC 1035:
+;;
+;; http://www.ietf.org/rfc/rfc1035.txt
+;;
+;; Please note that we do NOT offer technical support for any use
+;; of this zone data, the BIND name server, or any other third-party
+;; DNS software.
+;;
+;; Use at your own risk.
+;; SOA Record
+marketersindemand.com	3600	IN	SOA	candy.ns.cloudflare.com. dns.cloudflare.com. 2054391053 10000 2400 604800 3600
+
+;; NS Records
+marketersindemand.com.	86400	IN	NS	candy.ns.cloudflare.com.
+marketersindemand.com.	86400	IN	NS	dan.ns.cloudflare.com.
+
+;; A Records
+app.marketersindemand.com.	3600	IN	A	185.158.133.1 ; cf_tags=cf-proxied:false
+hrhub.marketersindemand.com.	1	IN	A	34.111.179.208 ; cf_tags=cf-proxied:true
+intake.marketersindemand.com.	300	IN	A	185.158.133.1 ; cf_tags=cf-proxied:false
+outbound.marketersindemand.com.	1	IN	A	37.27.134.175 ; cf_tags=cf-proxied:false
+pinpoint.marketersindemand.com.	1	IN	A	185.158.133.1 ; cf_tags=cf-proxied:false
+pto.marketersindemand.com.	3600	IN	A	185.158.133.1 ; cf_tags=cf-proxied:false
+study.marketersindemand.com.	3600	IN	A	185.158.133.1 ; cf_tags=cf-proxied:false
+
+;; CNAME Records
+53424861.marketersindemand.com.	1	IN	CNAME	sendgrid.net. ; cf_tags=cf-proxied:false
+_acme-challenge.marketersindemand.com.	1	IN	CNAME	marketersindemand.com.kinstavalidation.app. ; cf_tags=cf-proxied:false
+ae62._domainkey.mail.marketersindemand.com.	1	IN	CNAME	ae62.domainkey.u36104188.wl189.sendgrid.net. ; cf_tags=cf-proxied:true
+ae6._domainkey.mail.marketersindemand.com.	1	IN	CNAME	ae6.domainkey.u36104188.wl189.sendgrid.net. ; cf_tags=cf-proxied:true
+cashflow.marketersindemand.com.	1	IN	CNAME	369c7e94ef68c39f.vercel-dns-016.com. ; cf_tags=cf-proxied:false
+clients.marketersindemand.com.	1	IN	CNAME	pulse-frontend-11db.onrender.com. ; cf_tags=cf-proxied:false
+deals.marketersindemand.com.	1	IN	CNAME	52e9d79addc79769.vercel-dns-016.com. ; cf_tags=cf-proxied:false
+_domainconnect.marketersindemand.com.	1	IN	CNAME	_domainconnect.gd.domaincontrol.com. ; cf_tags=cf-proxied:true
+em1872.mail.marketersindemand.com.	1	IN	CNAME	u36104188.wl189.sendgrid.net. ; cf_tags=cf-proxied:true
+em2604.marketersindemand.com.	1	IN	CNAME	u53424861.wl112.sendgrid.net. ; cf_tags=cf-proxied:false
+em5200.marketersindemand.com.	1	IN	CNAME	u53424861.wl112.sendgrid.net. ; cf_tags=cf-proxied:false
+forms.marketersindemand.com.	1	IN	CNAME	cname.tally.so. ; cf_tags=cf-proxied:true
+hs1-46815402._domainkey.marketersindemand.com.	1	IN	CNAME	marketersindemand-com.hs12a.dkim.hubspotemail.net. ; cf_tags=cf-proxied:false
+hs2-46815402._domainkey.marketersindemand.com.	1	IN	CNAME	marketersindemand-com.hs12b.dkim.hubspotemail.net. ; cf_tags=cf-proxied:false
+marketersindemand.com.	1	IN	CNAME	de913296057cbfea.vercel-dns-016.com. ; cf_tags=cf-proxied:false
+newsletter.marketersindemand.com.	1	IN	CNAME	cname.beehiiv.com. ; cf_tags=cf-proxied:true
+pulse.marketersindemand.com.	1	IN	CNAME	pulsev1.onrender.com. ; cf_tags=cf-proxied:false
+s1._domainkey.marketersindemand.com.	1	IN	CNAME	s1.domainkey.u53424861.wl112.sendgrid.net. ; cf_tags=cf-proxied:false
+s2._domainkey.marketersindemand.com.	1	IN	CNAME	s2.domainkey.u53424861.wl112.sendgrid.net. ; cf_tags=cf-proxied:false
+url7418.marketersindemand.com.	1	IN	CNAME	sendgrid.net. ; cf_tags=cf-proxied:true
+www.marketersindemand.com.	1	IN	CNAME	de913296057cbfea.vercel-dns-016.com. ; cf_tags=cf-proxied:false
+
+;; MX Records
+marketersindemand.com.	3600	IN	MX	1 aspmx.l.google.com.
+marketersindemand.com.	3600	IN	MX	5 alt1.aspmx.l.google.com.
+marketersindemand.com.	3600	IN	MX	10 alt4.aspmx.l.google.com.
+marketersindemand.com.	3600	IN	MX	10 alt3.aspmx.l.google.com.
+marketersindemand.com.	3600	IN	MX	5 alt2.aspmx.l.google.com.
+
+;; NS Records
+marketersindemand.com.	3600	IN	NS	ns41.domaincontrol.com.
+marketersindemand.com.	3600	IN	NS	ns42.domaincontrol.com.
+notify.pinpoint.marketersindemand.com.	1	IN	NS	ns6.lovable.cloud.
+notify.pinpoint.marketersindemand.com.	3600	IN	NS	ns5.lovable.cloud.
+notify.pto.marketersindemand.com.	1	IN	NS	ns6.lovable.cloud.
+notify.pto.marketersindemand.com.	1	IN	NS	ns5.lovable.cloud.
+notify.study.marketersindemand.com.	3600	IN	NS	ns5.lovable.cloud.
+notify.study.marketersindemand.com.	1	IN	NS	ns6.lovable.cloud.
+
+;; TXT Records
+_beehiiv-authentication.marketersindemand.com.	3600	IN	TXT	"oQrjG4GTxVpLDBmbPAbQ1rQ4"
+_cf-custom-hostname.marketersindemand.com.	3600	IN	TXT	"be1b6587-11ec-40cb-84e4-0ba62d5fd4ac"
+dc-aa8e722993._spfm.marketersindemand.com.	3600	IN	TXT	"v=spf1 include:_spf.google.com ~all"
+_dmarc.marketersindemand.com.	3600	IN	TXT	"v=DMARC1; p=quarantine; rua=mailto:info@marketersindemand.com; ruf=mailto:info@marketersindemand.com; pct=100"
+_dmarc.pinpoint.marketersindemand.com.	3600	IN	TXT	"v=DMARC1; p=none; pct=100; rua=mailto:dmarcreports@lovable.dev"
+_dmarc.study.marketersindemand.com.	3600	IN	TXT	"v=DMARC1; p=none"
+google._domainkey.marketersindemand.com.	1	IN	TXT	"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzalcErEpZYxSHP3d3MBksfAl+jRwAaNltwQkOIS9NKJCdWjPNoEHs0cEyq0hjbE2NaYWHEpWRS5MlOwx4+2Rt5uhGl2nasYFohBj1Qy/mEKAeI0DuNJ94KLTlxpyTNG0fK+zzfgrlHxngwkny+kZk8pt4oDV9usV0PfwrGV87SMijSPh5TcGreWZJJb0kJ/Yn" "B8RPTgJNeKxgETNw17JKT4O2sxGYVjlm4XNq2zIogIvhIix4Pj9wdSQ4bN/jFJNHLEFg9Wuc8Kn/w/+k/wVjfqLhXalwJxeqFzKrzWV7YI38sZsOZyfUAGDqXzF5r2UFpIGdNHIUbv+Q2I22peBdQIDAQAB"
+hrhub.marketersindemand.com.	1	IN	TXT	"replit-verify=172c07ae-1adb-4f12-b977-8a080dc47e14"
+_lovable.app.marketersindemand.com.	3600	IN	TXT	"lovable_verify=88f343c3ba33e721cf57ecb68b9fc9b2d0d6ad7a0d506b839938199b3246e795"
+_lovable-email.pinpoint.marketersindemand.com.	3600	IN	TXT	"lovable_email_verify=1b79a26febb5939c021fbd32083aad827de22c0ba531e7bd3b9e9ecd882b55a0"
+_lovable-email.pto.marketersindemand.com.	1	IN	TXT	"lovable_email_verify=ba9977c4b3645e0c18537b9156e9188ffe34422bab54e16c440932807885683e"
+_lovable-email.study.marketersindemand.com.	3600	IN	TXT	"lovable_email_verify=c18a5c6f02c03100f6efc1701f213e97dd2e5c4597ab40fef7dde8abbb15ba5b"
+_lovable.intake.marketersindemand.com.	300	IN	TXT	"lovable_verify=bd04a758148863439eebd559ce7f8757636330b03620fe3283ffb7c8b6458e44"
+_lovable.pinpoint.marketersindemand.com.	3600	IN	TXT	"lovable_verify=88a340c846e750fc220ba4a4c38106f6ff75ef4b5312b9ccb58d10ebb80e4fd5"
+_lovable.pto.marketersindemand.com.	3600	IN	TXT	"lovable_verify=2ebfe5a5c86b84906d5c9ae37b0491b5bd3f6b344ea5645522db950ecdccd026"
+_lovable.study.marketersindemand.com.	3600	IN	TXT	"lovable_verify=abb7bd5834c2fdaf8352a066a96e0d221a220be20934e4f7ce5841f5ab4355a8"
+marketersindemand.com.	1	IN	TXT	"anthropic-domain-verification-3dw68a=wsW6hwgujESD8gmXF7OEb1lEU"
+marketersindemand.com.	1	IN	TXT	"airtable-verification=af0c645e68b5087606a82360d1025342"
+marketersindemand.com.	3600	IN	TXT	"v=spf1 include:_spf.google.com include:46815402.spf06.hubspotemail.net ~all"
+marketersindemand.com.	1	IN	TXT	"canva-site-verification=Y-lDDN_F9RNfm-XsU9oNrw"
+marketersindemand.com.	3600	IN	TXT	"MS=ms41969831"
+marketersindemand.com.	3600	IN	TXT	"v=DMARC1; p=none; rua=mailto:info+dmarc@marketersindemand.com; ruf=mailto:info+dmarc@marketersindemand.com"
+marketersindemand.com.	3600	IN	TXT	"google-site-verification=9fw30sYxjdLGW7TZJMZv0tpRUfbZDA1LSni_y6yDg08"

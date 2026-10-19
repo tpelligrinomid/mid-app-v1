@@ -1,5 +1,5 @@
 -- Migration 016: Podcast Show Notes + Social Posts prompt sequence
--- Adds global content type and default 2-step prompt sequence
+-- Adds global content type and default 4-step prompt sequence
 -- Run in Supabase SQL Editor
 
 -- ============================================================================
@@ -14,12 +14,16 @@ ON CONFLICT DO NOTHING;
 -- Seed global default prompt sequence for podcast_show_notes
 -- ============================================================================
 
+-- Delete existing sequence if re-running this migration
+DELETE FROM content_prompt_sequences
+WHERE contract_id IS NULL AND content_type_slug = 'podcast_show_notes' AND name = 'Podcast Show Notes + Social Posts';
+
 INSERT INTO content_prompt_sequences (contract_id, content_type_slug, name, description, is_default, sort_order, steps, variables)
 VALUES (
     NULL,
     'podcast_show_notes',
     'Podcast Show Notes + Social Posts',
-    'Two-step pipeline: generate comprehensive show notes from episode transcript, then create social media posts for each video clip asset.',
+    'Four-step pipeline: generate show notes from transcript, create social posts for video clips, combine into one document, then review and polish.',
     true,
     1,
     $steps$[
@@ -36,6 +40,20 @@ VALUES (
             "system_prompt": "You are a social media strategist specializing in B2B content promotion. You create scroll-stopping LinkedIn posts that drive engagement and views for podcast video clips.\n\nAbout this podcast:\n{{creative_brief}}\n\nGuidelines:\n- Each post should be tailored to the specific video clip's content and quote\n- Write for LinkedIn as the primary platform — professional but human, no hashtag spam\n- Open with a hook that stops the scroll — a bold statement, a contrarian take, or a relatable observation\n- Keep posts to 150-250 words (LinkedIn sweet spot for engagement)\n- End each post with a soft CTA that drives to the episode or invites conversation\n- Reference the guest by name and tag-friendly handle/title where relevant\n- Don't use generic podcast promotion language (\"Check out our latest episode!\") — lead with the idea, not the format\n- Include 2-3 relevant hashtags at the end, max",
             "user_prompt": "Using the show notes below for context, generate one LinkedIn social media post for each video asset in the manifest.\n\n## SHOW NOTES (for context)\n\n{{step:show_notes}}\n\n---\n\n## ASSET MANIFEST\n\nEach entry below is a short video clip from the episode with its filename and the corresponding quote or transcript excerpt.\n\n{{asset_manifest}}\n\n---\n\nFor each asset in the manifest, produce:\n\n### [Asset Filename]\n**Clip Context:** 1 sentence describing what this clip captures\n**LinkedIn Post:** The full post copy (150-250 words)\n\nMake each post unique — vary the hooks, angles, and CTAs. Don't be repetitive across posts. The posts should work as a series but each should stand completely on its own.",
             "output_key": "social_posts"
+        },
+        {
+            "step_order": 3,
+            "name": "combine",
+            "system_prompt": "You are a content assembler. Your job is to combine two separate content sections into a single, well-formatted document. Do not rewrite, summarize, or alter the content — preserve it exactly as written. Only add section headers to clearly delineate the two parts.",
+            "user_prompt": "Combine the following two sections into one complete document. Preserve all content exactly as written — do not edit, summarize, or rewrite anything. Simply place them together with clear section headers.\n\n# SHOW NOTES\n\n{{step:show_notes}}\n\n---\n\n# SOCIAL MEDIA POSTS\n\n{{step:social_posts}}",
+            "output_key": "combined"
+        },
+        {
+            "step_order": 4,
+            "name": "review",
+            "system_prompt": "You are a senior content editor reviewing podcast show notes and accompanying social media posts. Focus on consistency, accuracy, and polish. Do not change the structure or remove any sections.",
+            "user_prompt": "Review and polish the following combined podcast show notes and social media posts document:\n\n{{step:combined}}\n\nEdit for:\n1. Consistency — ensure guest names, titles, and company names are consistent throughout\n2. Accuracy — verify timestamps are formatted consistently and quotes are properly attributed\n3. Flow — ensure smooth transitions between sections and clean markdown formatting\n4. Social posts — verify each post has a unique hook and angle, no repetitive phrasing across posts\n5. Polish — fix any awkward phrasing, typos, or formatting issues\n\nReturn the complete document with all sections intact. Do not remove or restructure any sections.",
+            "output_key": "final"
         }
     ]$steps$::jsonb,
     $vars$[
